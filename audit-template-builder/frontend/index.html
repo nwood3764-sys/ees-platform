@@ -3306,27 +3306,34 @@ function pjLoadAndPrefill(){
    The electrification scope + proposal, SEPARATE from the HOMES proposal. Low-income
    (<=80% AMI) only: the program pays 100% of project cost, up to the federal per-measure
    caps and $14,000 per dwelling unit. Same schedule in NC and WI (confirmed 2026-08-28). */
+// Each measure declares its own MODEL-NUMBER fields and EFFICIENCY metrics — never
+// one combined box. A split heat pump has two model numbers (outdoor condenser +
+// indoor air handler/coil); its ratings (HSPF2 / SEER2 / EER2) each get their own input.
+const M1=[{key:'model',label:'Make / Model #',short:''}];   // single-unit default
 const HEAR_MEASURES=[
-  {key:'heat_pump',label:'Heat Pump — Space Heating & Cooling',cap:8000,eff:'HSPF2 / SEER2',
+  {key:'heat_pump',label:'Heat Pump — Space Heating & Cooling',cap:8000,
+   models:[{key:'outdoor',label:'Outdoor Unit (Heat Pump) Model #',short:'Outdoor'},
+           {key:'indoor', label:'Indoor Unit (Air Handler / Coil) Model #',short:'Indoor'}],
+   metrics:['HSPF2','SEER2','EER2'],
    types:['Ducted Central Heat Pump','Ductless Mini-Split','Multi-Zone Mini-Split','Packaged Terminal (PTHP)','Ground-Source (Geothermal)','Air-to-Water Heat Pump']},
-  {key:'hpwh',label:'Heat Pump Water Heater',cap:1750,eff:'UEF',
+  {key:'hpwh',label:'Heat Pump Water Heater',cap:1750,models:M1,metrics:['UEF'],
    types:['50 gallon','65 gallon','80 gallon','Split-System']},
-  {key:'panel',label:'Electric Panel / Load Service Center',cap:4000,eff:'Amps',
+  {key:'panel',label:'Electric Panel / Load Service Center',cap:4000,models:M1,metrics:['Amps'],
    types:['200A Service','150A Service','100A Service','Subpanel']},
-  {key:'wiring',label:'Electric Wiring',cap:2500,eff:'',
+  {key:'wiring',label:'Electric Wiring',cap:2500,models:[],metrics:[],
    types:['Branch Circuit','Service Upgrade','Whole-Unit Rewire']},
-  {key:'dryer',label:'Heat Pump Clothes Dryer',cap:840,eff:'CEF',
+  {key:'dryer',label:'Heat Pump Clothes Dryer',cap:840,models:M1,metrics:['CEF'],
    types:['Ventless Heat Pump Dryer']},
-  {key:'cooking',label:'Electric / Induction Cooking',cap:840,eff:'',
+  {key:'cooking',label:'Electric / Induction Cooking',cap:840,models:M1,metrics:[],
    types:['Induction Range','Induction Cooktop','Electric Range']},
-  {key:'weatherization',label:'Insulation / Air Sealing / Ventilation',cap:1600,eff:'',
+  {key:'weatherization',label:'Insulation / Air Sealing / Ventilation',cap:1600,models:[],metrics:[],
    types:['Attic Insulation','Wall Insulation','Air Sealing','Mechanical Ventilation']},
 ];
 const HEAR_BY_KEY=Object.fromEntries(HEAR_MEASURES.map(m=>[m.key,m]));
 var hearState=null, _hearLastKey=null;   // var (not let): pjLoadAndPrefill can run before this line at init — avoid a temporal-dead-zone ReferenceError
 function hearKey(){const k=pjStorageKey();return k?k+'_hear':null;}
-function hearBlankRow(){return {measure:'heat_pump',systemType:'',model:'',eff:'',qty:'1',cost:''};}
-function hearHasRows(){return Array.isArray(hearState)&&hearState.some(r=>r&&(r.model||r.cost||r.systemType));}
+function hearBlankRow(){return {measure:'heat_pump',systemType:'',models:{},effs:{},qty:'1',cost:''};}
+function hearHasRows(){return Array.isArray(hearState)&&hearState.some(r=>r&&(r.cost||r.systemType||(r.models&&Object.values(r.models).some(v=>v))));}
 function hearSave(){const k=hearKey();if(!k)return;try{localStorage.setItem(k,JSON.stringify(hearState||[]));}catch(e){}}
 function hearLoad(){
   const k=hearKey();
@@ -3355,14 +3362,14 @@ function renderHear(){
         <select data-hf="measure" style="${inp};flex:2;font-weight:600">${opts}</select>
         <button type="button" data-delhear="${i}" title="Remove this item" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">✕</button>
       </div>
-      <div style="display:grid;grid-template-columns:1.4fr 1.4fr 1fr .6fr 1fr;gap:8px">
-        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">System type<select data-hf="systemType" style="${inp}">${typeOpts}</select></label>
-        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Make / Model #<input data-hf="model" value="${esc(r.model)}" placeholder="e.g. Mitsubishi MXZ-…" style="${inp}"></label>
-        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Efficiency${meas.eff?(' ('+esc(meas.eff)+')'):''}<input data-hf="eff" value="${esc(r.eff)}" placeholder="${esc(meas.eff||'—')}" style="${inp}"></label>
-        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Qty<input data-hf="qty" inputmode="numeric" value="${esc(r.qty)}" style="${inp}"></label>
-        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Cost $<input data-hf="cost" inputmode="numeric" value="${esc(r.cost)}" placeholder="project cost" style="${inp}"></label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 10px">
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:1 1 160px;min-width:150px">System type<select data-hf="systemType" style="${inp}">${typeOpts}</select></label>
+        ${(meas.models||[]).map(md=>`<label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:1 1 190px;min-width:170px">${esc(md.label)}<input data-hf="model" data-mkey="${esc(md.key)}" value="${esc((r.models||{})[md.key]||'')}" placeholder="e.g. Mitsubishi MXZ-…" style="${inp}"></label>`).join('')}
+        ${(meas.metrics||[]).map(mtr=>`<label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 92px">${esc(mtr)}<input data-hf="eff" data-emetric="${esc(mtr)}" value="${esc((r.effs||{})[mtr]||'')}" placeholder="${esc(mtr)}" style="${inp}"></label>`).join('')}
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 62px">Qty<input data-hf="qty" inputmode="numeric" value="${esc(r.qty)}" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 110px">Cost $<input data-hf="cost" inputmode="numeric" value="${esc(r.cost)}" placeholder="project cost" style="${inp}"></label>
       </div>
-      <div style="font-size:11px;color:var(--mut);margin-top:6px">Program cap $${meas.cap.toLocaleString('en-US')} per unit · low-income pays 100% up to the cap</div>
+      <div style="font-size:11px;color:var(--mut);margin-top:8px">Program cap $${meas.cap.toLocaleString('en-US')} per unit · low-income pays 100% up to the cap</div>
     </div>`;
   });
   body.innerHTML=h;
@@ -3373,8 +3380,11 @@ document.addEventListener('input',e=>{
   const row=t.closest('[data-hrow]');if(!row)return;
   const i=+row.dataset.hrow,f=t.dataset.hf;
   if(!hearState||!hearState[i])return;
-  hearState[i][f]=t.value;
-  if(f==='measure'){hearState[i].systemType='';renderHear();}   // measure changed -> refresh type options
+  const rw=hearState[i];
+  if(f==='model'){if(!rw.models)rw.models={}; rw.models[t.dataset.mkey]=t.value;}
+  else if(f==='eff'){if(!rw.effs)rw.effs={}; rw.effs[t.dataset.emetric]=t.value;}
+  else rw[f]=t.value;
+  if(f==='measure'){rw.systemType='';renderHear();}   // measure changed -> refresh model/eff/type fields
   hearSave();hearUpdateGate();
 });
 document.addEventListener('click',e=>{
@@ -4022,14 +4032,19 @@ function hearModel(){
   const state=buildingState();
   const _num=v=>{const n=parseFloat(String(v==null?'':v).replace(/[^0-9.]/g,''));return Number.isFinite(n)?n:0;};
   const rows=(typeof hearState!=='undefined'&&Array.isArray(hearState)?hearState:[])
-    .filter(r=>r&&(r.model||r.systemType||r.cost||r.eff))
+    .filter(r=>r&&(r.systemType||r.cost||(r.models&&Object.values(r.models).some(v=>v))||(r.effs&&Object.values(r.effs).some(v=>v))))
     .map(r=>{
       const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
       const qty=Math.max(1,parseInt(r.qty,10)||1);
       const cost=Math.max(0,_num(r.cost));
       const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x qty
+      const models=r.models||{}, effs=r.effs||{};
+      const modelStr=(meas.models||[]).map(md=>{const v=(models[md.key]||'').trim();
+        return v?((md.short?md.short+' ':'')+v):'';}).filter(Boolean).join('  ·  ');
+      const effStr=(meas.metrics||[]).map(mtr=>{const v=(effs[mtr]||'').trim();
+        return v?(v+' '+mtr):'';}).filter(Boolean).join('  ·  ');
       return {key:meas.key,label:meas.label,cap:meas.cap,systemType:r.systemType||'',
-        model:r.model||'',eff:r.eff||'',effMetric:meas.eff||'',qty,cost,
+        modelStr,effStr,qty,cost,
         rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
     });
   const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
@@ -4101,7 +4116,7 @@ function buildHearPdfBlob(){
   tableHeader();
   if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+2,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
   m.rows.forEach((r,i)=>{
-    const sub=[r.systemType,r.model,(r.eff?(r.eff+(r.effMetric&&!/[a-z]/i.test(r.eff)?(' '+r.effMetric):'')):'')].filter(Boolean).join('  ·  ');
+    const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
     font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-6);
     font(8.5); const dl=sub?wrap(sub,descW-6):[];
     const capNote='Program cap '+_money(r.cap)+'/unit'+(r.qty>1?(' × '+r.qty+' units'):'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
