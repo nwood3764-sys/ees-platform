@@ -26,7 +26,7 @@ import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
-  fetchActiveUsers, fetchAccountContactsForWorkOrder,
+  fetchActiveUsers, fetchAccountContactsForWorkOrder, fetchVehiclesForInspection,
 } from './fieldMobileService'
 import { uploadPhoto, setPhotoReportInclusion } from '../data/storageService'
 import {
@@ -1021,6 +1021,15 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
                 onSaved={onPhotoUploaded}
                 onError={onPhotoError}
               />
+            ) : f.type === 'vehicle' ? (
+              <StepVehicleField
+                key={f.field_id}
+                field={f}
+                stepId={step.work_step_id}
+                disabled={busy || uploading}
+                onSaved={onPhotoUploaded}
+                onError={onPhotoError}
+              />
             ) : (
               <StepFieldInput
                 key={f.field_id}
@@ -1298,6 +1307,108 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedd
           {saving ? 'Saving…' : 'Save'}
         </button>
       )}
+    </div>
+  )
+}
+
+// ─── StepVehicleField ────────────────────────────────────────────────────────
+// The 'vehicle' field type ("Vehicle Inspected" on the Vehicle Inspection work
+// order). Built like key_source: a picker over REAL records that stores
+// readable text, so the saved value still reads as a vehicle in the read-only
+// view, in reports, and in the PDF — a stored uuid would print as a uuid.
+// The record number leads the value so the row can always be traced back to
+// the vehicle record it names.
+function vehicleValueText(v) {
+  const plate = v.vehicle_license_plate ? ` (${v.vehicle_license_plate})` : ''
+  return `${v.vehicle_record_number} · ${v.vehicle_name}${plate}`
+}
+
+function StepVehicleField({ field, stepId, disabled, onSaved, onError, embedded = false, onValue }) {
+  const savedVal = field.text_value ?? ''
+  const [value, setValue] = useState(String(savedVal))
+  const [vehicles, setVehicles] = useState(null)   // null = loading
+  const [saving, setSaving] = useState(false)
+  const dirty = value !== String(savedVal)
+  const hasSaved = savedVal !== '' && savedVal != null
+
+  useEffect(() => { if (embedded && onValue) onValue(value) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false
+    fetchVehiclesForInspection()
+      .then((rows) => { if (!cancelled) setVehicles(rows) })
+      .catch(() => {
+        if (cancelled) return
+        setVehicles([])
+        onError(`Could not load the vehicle list for "${field.label}".`)
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // A value saved before a vehicle was retired (or renamed) still has to show,
+  // so the saved text is offered as its own option rather than silently
+  // resetting the field to blank.
+  const options = vehicles || []
+  const savedMissing = hasSaved && !options.some((v) => vehicleValueText(v) === savedVal)
+
+  const save = async () => {
+    if (!value) { onError(`Pick the vehicle for "${field.label}".`); return }
+    setSaving(true)
+    try {
+      const res = await saveWorkStepFieldValue(stepId, field.field_id, value)
+      onSaved(res.message || `${field.label} saved`)
+    } catch (e) {
+      onError(e.message || 'Could not save the vehicle.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: embedded ? 0 : 10 }}>
+      {!embedded && (
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+          {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+          {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={disabled || saving || vehicles === null}
+          style={{
+            flex: 1, minWidth: 0, boxSizing: 'border-box', minHeight: 48,
+            fontFamily: FONT, fontSize: 16,
+            border: `1px solid ${hasSaved && !dirty ? C.emerald : C.borderDark}`,
+            borderRadius: 8, padding: '10px 12px',
+            color: value ? C.textPrimary : C.textMuted, background: C.card,
+          }}
+        >
+          <option value="">
+            {vehicles === null ? 'Loading vehicles…'
+              : options.length === 0 ? 'No vehicles available'
+              : 'Select the vehicle…'}
+          </option>
+          {savedMissing && <option value={savedVal}>{savedVal}</option>}
+          {options.map((v) => {
+            const text = vehicleValueText(v)
+            return <option key={v.id} value={text}>{text}</option>
+          })}
+        </select>
+        {!embedded && (
+          <button
+            onClick={save}
+            disabled={disabled || saving || !dirty || !value}
+            style={(disabled || saving || !dirty || !value)
+              ? { ...btnDisabled, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }
+              : { ...btnPrimary, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -1992,7 +2103,8 @@ function fieldPrompt(field) {
     const subject = label.replace(/\s*photo$/i, '')
     return `Take a picture of the ${subject.toLowerCase()}.`
   }
-  const pick = field.type === 'select' || field.type === 'user_multiselect' || field.type === 'key_source'
+  const pick = field.type === 'select' || field.type === 'user_multiselect'
+    || field.type === 'key_source' || field.type === 'vehicle'
   // Keep the label as-authored so acronyms read right ("Enter the BTUs.").
   return `${pick ? 'Select' : 'Enter'} the ${label}.`
 }
@@ -2609,6 +2721,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               if (screen.field.type === 'user_multiselect') return <StepUserMultiselect {...common} />
               if (screen.field.type === 'key_source') return <StepKeySource {...common} woId={woId} />
               if (screen.field.type === 'select') return <StepSelectField {...common} />
+              if (screen.field.type === 'vehicle') return <StepVehicleField {...common} />
               return <StepFieldInput {...common} />
             })()}
           </div>
