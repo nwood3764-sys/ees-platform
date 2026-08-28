@@ -3811,7 +3811,6 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   metaCells.push([(isAudit||isInv)?'INVOICE DATE':'DATE',pv(F.pjInvDate)]);
   if(isAudit) metaCells.push(['DUE','N/A']);
   else if(isInv) metaCells.push(['TERMS','Net 30']);
-  else metaCells.push(['VALID FOR','30 days']);
   if(!isAudit&&m.units) metaCells.push(['UNITS',String(m.units)]);
   metaCells.push(['IQ NUMBER',pv(F.pjIQ)]);
   {const barH=42,n=metaCells.length,cw=CW/n;
@@ -4075,7 +4074,7 @@ function buildHearPdfBlob(){
   tc(EMlt);  font(7.5,'normal'); t(W-M,50,'Inflation Reduction Act  ·  HEAR Program',{align:'right'});
   st.y=74+3.5+20;
   /* meta bar */
-  const metaCells=[['DATE',pv(F.pjInvDate)],['VALID FOR','30 days']];
+  const metaCells=[['DATE',pv(F.pjInvDate)]];
   if(m.units) metaCells.push(['DWELLING UNITS',String(m.units)]);
   metaCells.push(['IQ NUMBER',pv(F.pjIQ)]);
   {const barH=42,n=metaCells.length,cw=CW/n;
@@ -4190,7 +4189,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   bh(isInv?'Invoice Details:':'Project Details:',RX,st.y);
   const det=isInv
     ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :['Date: '+(F.pjInvDate||''),'Valid for: 30 days','IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
+    :['Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
   let yB=lines9(det,RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
   bh('Bill To:',M,st.y);
