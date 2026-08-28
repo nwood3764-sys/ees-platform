@@ -27,6 +27,7 @@ import {
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
   fetchActiveUsers, fetchAccountContactsForWorkOrder, fetchVehiclesForInspection,
+  saveWorkStepVehicle,
 } from './fieldMobileService'
 import { uploadPhoto, setPhotoReportInclusion } from '../data/storageService'
 import {
@@ -1312,31 +1313,47 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedd
 }
 
 // ─── StepVehicleField ────────────────────────────────────────────────────────
-// The 'vehicle' field type ("Vehicle Inspected" on the Vehicle Inspection work
-// order). Built like key_source: a picker over REAL records that stores
-// readable text, so the saved value still reads as a vehicle in the read-only
-// view, in reports, and in the PDF — a stored uuid would print as a uuid.
-// The record number leads the value so the row can always be traced back to
-// the vehicle record it names.
-function vehicleValueText(v) {
+// The 'vehicle' field type ("Vehicle Inspected" on the monthly vehicle
+// equipment and documents check). Built like key_source: a picker over REAL
+// records. It sends the vehicle's ID; the SERVER composes the readable value it
+// stores and stamps work_orders.vehicle_id from that same row, so the text a
+// person reads and the foreign key a report joins on cannot disagree.
+//
+// The option label mirrors what the server stores, but it is presentation only
+// — never the value that gets saved.
+function vehicleOptionLabel(v) {
   const plate = v.vehicle_license_plate ? ` (${v.vehicle_license_plate})` : ''
   return `${v.vehicle_record_number} · ${v.vehicle_name}${plate}`
 }
 
+// The saved value leads with the vehicle's record number, which is how a stored
+// answer is matched back to a row without re-deriving the server's formatting.
+function vehicleIdForSavedText(vehicles, savedText) {
+  const rec = String(savedText || '').split(' · ')[0].trim()
+  if (!rec) return ''
+  const hit = (vehicles || []).find((v) => v.vehicle_record_number === rec)
+  return hit ? hit.id : ''
+}
+
 function StepVehicleField({ field, stepId, disabled, onSaved, onError, embedded = false, onValue }) {
-  const savedVal = field.text_value ?? ''
-  const [value, setValue] = useState(String(savedVal))
+  const savedText = field.text_value ?? ''
   const [vehicles, setVehicles] = useState(null)   // null = loading
+  const [value, setValue] = useState('')           // the selected vehicle's id
+  const [touched, setTouched] = useState(false)
   const [saving, setSaving] = useState(false)
-  const dirty = value !== String(savedVal)
-  const hasSaved = savedVal !== '' && savedVal != null
+  const hasSaved = savedText !== '' && savedText != null
 
   useEffect(() => { if (embedded && onValue) onValue(value) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false
     fetchVehiclesForInspection()
-      .then((rows) => { if (!cancelled) setVehicles(rows) })
+      .then((rows) => {
+        if (cancelled) return
+        setVehicles(rows)
+        // Show what was already answered, resolved back to its row.
+        if (!touched) setValue(vehicleIdForSavedText(rows, savedText))
+      })
       .catch(() => {
         if (cancelled) return
         setVehicles([])
@@ -1346,17 +1363,17 @@ function StepVehicleField({ field, stepId, disabled, onSaved, onError, embedded 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // A value saved before a vehicle was retired (or renamed) still has to show,
-  // so the saved text is offered as its own option rather than silently
-  // resetting the field to blank.
   const options = vehicles || []
-  const savedMissing = hasSaved && !options.some((v) => vehicleValueText(v) === savedVal)
+  // A vehicle retired since the answer was given is no longer offered, but the
+  // answer still has to be readable rather than resetting the field to blank.
+  const savedGone = hasSaved && vehicles !== null && !vehicleIdForSavedText(options, savedText)
+  const dirty = !!value && value !== vehicleIdForSavedText(options, savedText)
 
   const save = async () => {
     if (!value) { onError(`Pick the vehicle for "${field.label}".`); return }
     setSaving(true)
     try {
-      const res = await saveWorkStepFieldValue(stepId, field.field_id, value)
+      const res = await saveWorkStepVehicle(stepId, field.field_id, value)
       onSaved(res.message || `${field.label} saved`)
     } catch (e) {
       onError(e.message || 'Could not save the vehicle.')
@@ -1373,10 +1390,15 @@ function StepVehicleField({ field, stepId, disabled, onSaved, onError, embedded 
           {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
         </div>
       )}
+      {savedGone && (
+        <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 6 }}>
+          Recorded as <strong>{savedText}</strong>, which is no longer in service. Pick a vehicle to change it.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8 }}>
         <select
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setTouched(true); setValue(e.target.value) }}
           disabled={disabled || saving || vehicles === null}
           style={{
             flex: 1, minWidth: 0, boxSizing: 'border-box', minHeight: 48,
@@ -1391,11 +1413,9 @@ function StepVehicleField({ field, stepId, disabled, onSaved, onError, embedded 
               : options.length === 0 ? 'No vehicles available'
               : 'Select the vehicle…'}
           </option>
-          {savedMissing && <option value={savedVal}>{savedVal}</option>}
-          {options.map((v) => {
-            const text = vehicleValueText(v)
-            return <option key={v.id} value={text}>{text}</option>
-          })}
+          {options.map((v) => (
+            <option key={v.id} value={v.id}>{vehicleOptionLabel(v)}</option>
+          ))}
         </select>
         {!embedded && (
           <button
@@ -2544,10 +2564,17 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
     const f = screen.field
     const cur = String(curPending ?? '').trim()
     if (!cur) { next(); return }
-    if (cur === String(fieldSavedString(f) ?? '').trim()) { next(); return }
+    // A vehicle field carries the vehicle's ID while the SAVED value is the
+    // readable text the server composed, so the two are never equal — skip the
+    // unchanged short-circuit and let the save be idempotent instead.
+    if (f.type !== 'vehicle' && cur === String(fieldSavedString(f) ?? '').trim()) { next(); return }
     setBusy(true)
     try {
-      await saveWorkStepFieldValue(live.work_step_id, f.field_id, cur)
+      if (f.type === 'vehicle') {
+        await saveWorkStepVehicle(live.work_step_id, f.field_id, cur)
+      } else {
+        await saveWorkStepFieldValue(live.work_step_id, f.field_id, cur)
+      }
       await refresh()
       next()
     } catch (e) {

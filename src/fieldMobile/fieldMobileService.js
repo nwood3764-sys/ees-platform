@@ -473,6 +473,18 @@ export async function fetchVehiclesForInspection() {
   return (data || []).filter((v) => !retiredIds.has(v.vehicle_status))
 }
 
+// Save a `vehicle` field. Takes the vehicle's ID, not display text: the server
+// composes the readable value AND stamps work_orders.vehicle_id from the same
+// row, so the text a person reads and the foreign key a report joins on can
+// never disagree.
+export async function saveWorkStepVehicle(stepId, templateFieldId, vehicleId) {
+  const { data, error } = await supabase.rpc('save_work_step_vehicle', {
+    p_step_id: stepId, p_template_field_id: templateFieldId, p_vehicle_id: vehicleId,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not save the vehicle.')
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Session / identity
 // ───────────────────────────────────────────────────────────────────────────
