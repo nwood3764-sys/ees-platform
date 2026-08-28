@@ -275,6 +275,16 @@
     </div>
   </div>
 
+  <div id="hearRow" style="margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
+    <strong style="font-size:13.5px">HEAR — Home Electrification &amp; Appliance Rebates (mechanical)</strong>
+    <span class="copyhint">— the electrification scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
+    <div style="font-size:12px;color:var(--mut);margin-top:6px">Low-income (&le;80% AMI): the program pays <b>100% of the project cost</b>, up to the federal per-measure caps (heat pump $8,000 · heat-pump water heater $1,750 · panel $4,000 · wiring $2,500 · heat-pump dryer $840 · induction cooking $840 · insulation/air&nbsp;sealing/ventilation $1,600) and <b>$14,000 total per dwelling unit</b>. Same in North Carolina and Wisconsin.</div>
+    <div id="hearBody" style="margin-top:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button type="button" id="hearAdd" style="padding:7px 13px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;font-weight:600">+ Add equipment</button>
+    </div>
+  </div>
+
   <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Uploaded documents</div>
   <div style="font-size:12px;color:var(--mut);margin-top:3px">The Asset Score reports drive the paperwork math; the Audit Template reports and XMLs are the exact files that went to DOE — nothing is ever regenerated on this tab. The <b>Audit Invoice</b> unlocks with the baseline Audit Template report + XML; <b>Project Reservation</b> and <b>Project Payment</b> paperwork need all of them.</div>
   <div class="slots" style="margin-top:10px">
@@ -346,6 +356,14 @@
   <div class="bar" style="margin-left:12px">
     <button class="btn ghost" data-act="sealedInv" disabled>Sealed Invoice (PDF)</button>
   </div>
+  </div>
+
+  <div class="expSect sectHear">
+  <div class="expHdr">HEAR — Home Electrification Deliverables</div>
+  <div class="bar">
+    <button class="btn ghost" data-act="hearProp" disabled>HEAR Proposal (PDF)</button>
+  </div>
+  <div style="font-size:11.5px;color:var(--mut);margin-left:2px;margin-top:4px">Enabled once a building is loaded and at least one item is added in the HEAR section above.</div>
   </div>
 
 
@@ -1064,6 +1082,7 @@ function refresh(){
     else if(a==='reportImp') e.disabled=!(files.asImp||atDocs.impPdf);
     else if(a==='dlvXmlBase') e.disabled=!atDocs.baseXml;
     else if(a==='dlvXmlImp') e.disabled=!atDocs.impXml;
+    else if(a==='hearProp') e.disabled=!(typeof hearHasRows==='function'&&hearHasRows()&&(data.asBase||data.asImp));
     else e.disabled=!canExport;
   }
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
@@ -3281,7 +3300,89 @@ function pjLoadAndPrefill(){
   // is left untouched.
   {const rr=STATE_UTILITY_RATES[buildingState()]||STATE_UTILITY_RATES.US;
    set('rateElec',String(rr.elec)); set('rateGas',String(rr.gas));}
+  if(typeof hearLoadAndRender==='function')hearLoadAndRender();
 }
+/* ================= HEAR — Home Electrification & Appliance Rebates =================
+   The electrification scope + proposal, SEPARATE from the HOMES proposal. Low-income
+   (<=80% AMI) only: the program pays 100% of project cost, up to the federal per-measure
+   caps and $14,000 per dwelling unit. Same schedule in NC and WI (confirmed 2026-08-28). */
+const HEAR_MEASURES=[
+  {key:'heat_pump',label:'Heat Pump — Space Heating & Cooling',cap:8000,eff:'HSPF2 / SEER2',
+   types:['Ducted Central Heat Pump','Ductless Mini-Split','Multi-Zone Mini-Split','Packaged Terminal (PTHP)','Ground-Source (Geothermal)','Air-to-Water Heat Pump']},
+  {key:'hpwh',label:'Heat Pump Water Heater',cap:1750,eff:'UEF',
+   types:['50 gallon','65 gallon','80 gallon','Split-System']},
+  {key:'panel',label:'Electric Panel / Load Service Center',cap:4000,eff:'Amps',
+   types:['200A Service','150A Service','100A Service','Subpanel']},
+  {key:'wiring',label:'Electric Wiring',cap:2500,eff:'',
+   types:['Branch Circuit','Service Upgrade','Whole-Unit Rewire']},
+  {key:'dryer',label:'Heat Pump Clothes Dryer',cap:840,eff:'CEF',
+   types:['Ventless Heat Pump Dryer']},
+  {key:'cooking',label:'Electric / Induction Cooking',cap:840,eff:'',
+   types:['Induction Range','Induction Cooktop','Electric Range']},
+  {key:'weatherization',label:'Insulation / Air Sealing / Ventilation',cap:1600,eff:'',
+   types:['Attic Insulation','Wall Insulation','Air Sealing','Mechanical Ventilation']},
+];
+const HEAR_BY_KEY=Object.fromEntries(HEAR_MEASURES.map(m=>[m.key,m]));
+var hearState=null, _hearLastKey=null;   // var (not let): pjLoadAndPrefill can run before this line at init — avoid a temporal-dead-zone ReferenceError
+function hearKey(){const k=pjStorageKey();return k?k+'_hear':null;}
+function hearBlankRow(){return {measure:'heat_pump',systemType:'',model:'',eff:'',qty:'1',cost:''};}
+function hearHasRows(){return Array.isArray(hearState)&&hearState.some(r=>r&&(r.model||r.cost||r.systemType));}
+function hearSave(){const k=hearKey();if(!k)return;try{localStorage.setItem(k,JSON.stringify(hearState||[]));}catch(e){}}
+function hearLoad(){
+  const k=hearKey();
+  if(_hearLastKey&&k!==_hearLastKey)hearState=null;      // switched buildings -> drop prior scope
+  _hearLastKey=k;
+  if(hearState==null){let s=[];try{s=JSON.parse(localStorage.getItem(k)||'[]');}catch(e){}
+    hearState=Array.isArray(s)?s:[];}
+}
+function hearLoadAndRender(){hearLoad();renderHear();hearUpdateGate();}
+function hearUpdateGate(){const b=document.querySelector('button[data-act="hearProp"]');
+  if(b)b.disabled=!(hearHasRows()&&(data.asBase||data.asImp));}
+function renderHear(){
+  const body=document.getElementById('hearBody');if(!body)return;
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const inp='padding:7px 8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;width:100%;font:inherit';
+  if(!hearState||!hearState.length){
+    body.innerHTML='<div style="font-size:12px;color:var(--mut);padding:6px 0">No equipment yet — click <b>+ Add equipment</b> to add a heat pump, water heater, panel, etc.</div>';
+    return;}
+  let h='';
+  hearState.forEach((r,i)=>{
+    const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
+    const opts=HEAR_MEASURES.map(m=>`<option value="${m.key}"${m.key===r.measure?' selected':''}>${esc(m.label)}</option>`).join('');
+    const typeOpts=['<option value="">— system type —</option>'].concat(meas.types.map(tp=>`<option value="${esc(tp)}"${tp===r.systemType?' selected':''}>${esc(tp)}</option>`)).join('');
+    h+=`<div data-hrow="${i}" style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px;background:#f7f9fc">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <select data-hf="measure" style="${inp};flex:2;font-weight:600">${opts}</select>
+        <button type="button" data-delhear="${i}" title="Remove this item" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1.4fr 1.4fr 1fr .6fr 1fr;gap:8px">
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">System type<select data-hf="systemType" style="${inp}">${typeOpts}</select></label>
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Make / Model #<input data-hf="model" value="${esc(r.model)}" placeholder="e.g. Mitsubishi MXZ-…" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Efficiency${meas.eff?(' ('+esc(meas.eff)+')'):''}<input data-hf="eff" value="${esc(r.eff)}" placeholder="${esc(meas.eff||'—')}" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Qty<input data-hf="qty" inputmode="numeric" value="${esc(r.qty)}" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px">Cost $<input data-hf="cost" inputmode="numeric" value="${esc(r.cost)}" placeholder="project cost" style="${inp}"></label>
+      </div>
+      <div style="font-size:11px;color:var(--mut);margin-top:6px">Program cap $${meas.cap.toLocaleString('en-US')} per unit · low-income pays 100% up to the cap</div>
+    </div>`;
+  });
+  body.innerHTML=h;
+}
+// HEAR row edit / add / remove — delegated so it survives re-render
+document.addEventListener('input',e=>{
+  const t=e.target;if(!t||!t.matches||!t.matches('[data-hf]'))return;
+  const row=t.closest('[data-hrow]');if(!row)return;
+  const i=+row.dataset.hrow,f=t.dataset.hf;
+  if(!hearState||!hearState[i])return;
+  hearState[i][f]=t.value;
+  if(f==='measure'){hearState[i].systemType='';renderHear();}   // measure changed -> refresh type options
+  hearSave();hearUpdateGate();
+});
+document.addEventListener('click',e=>{
+  const b=e.target&&e.target.closest?e.target.closest('button'):null;if(!b)return;
+  if(b.id==='hearAdd'){if(!hearState)hearState=[];hearState.push(hearBlankRow());renderHear();hearSave();hearUpdateGate();return;}
+  if(b.dataset&&b.dataset.delhear!=null){const i=+b.dataset.delhear;if(hearState){hearState.splice(i,1);renderHear();hearSave();hearUpdateGate();}return;}
+});
+try{renderHear();}catch(e){}      // paint the empty-state immediately, before any report loads
 // Compose the invoice/quote number from what the reports already tell us:
 //   <STATE>-<doc code>-<building number>-<first letter of the street name>
 //   assessment (audit) -> A ; project -> P     e.g. NC-A-15008-S / NC-P-15008-S
@@ -3913,6 +4014,154 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   return d.output('blob');
 }
 
+/* ===== HEAR model + proposal ================================================
+   Low-income (<=80% AMI): 100% of project cost, up to the federal per-measure
+   caps and $14,000 per dwelling unit (same schedule NC & WI). */
+function hearModel(){
+  const units=parseInt((document.getElementById('occUnits')||{}).value,10)||1;
+  const state=buildingState();
+  const _num=v=>{const n=parseFloat(String(v==null?'':v).replace(/[^0-9.]/g,''));return Number.isFinite(n)?n:0;};
+  const rows=(typeof hearState!=='undefined'&&Array.isArray(hearState)?hearState:[])
+    .filter(r=>r&&(r.model||r.systemType||r.cost||r.eff))
+    .map(r=>{
+      const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
+      const qty=Math.max(1,parseInt(r.qty,10)||1);
+      const cost=Math.max(0,_num(r.cost));
+      const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x qty
+      return {key:meas.key,label:meas.label,cap:meas.cap,systemType:r.systemType||'',
+        model:r.model||'',eff:r.eff||'',effMetric:meas.eff||'',qty,cost,
+        rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
+    });
+  const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
+  const rawRebate=Math.round(rows.reduce((a,r)=>a+r.rebate,0)*100)/100;
+  const programMax=14000*units;
+  const totalRebate=Math.min(rawRebate,programMax);
+  const capped=rawRebate>programMax+0.005;
+  const totalDue=Math.round((totalCost-totalRebate)*100)/100;
+  return {units,state,rows,totalCost,rawRebate,programMax,totalRebate,capped,totalDue,
+    fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
+}
+function buildHearPdfBlob(){
+  const m=hearModel(), F=m.fields;
+  const P=_pdfNew(34); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
+  const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _state=stateFullName(m.state);
+  const NAVY=[20,44,71], EM=[42,157,109], EMd=[28,120,84], EMlt=[150,214,186],
+        PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
+  /* header band */
+  fill(NAVY); d.rect(0,0,W,74,'F'); fill(EM); d.rect(0,74,W,3.5,'F');
+  fill(WHITE); d.roundedRect(M,18,38,38,7,7,'F');
+  fill(EM); const _bx=M+10,_bb=47; [[0,13],[8,20],[16,27]].forEach(([dx,hh])=>d.roundedRect(_bx+dx,_bb-hh,6,hh,1.4,1.4,'F'));
+  const _wx=M+66;
+  tc(WHITE); font(12.5,'bold'); t(_wx,35,'ENERGY EFFICIENCY SERVICES');
+  tc(EMlt);  font(9,'normal');  t(_wx,49,'of '+_state);
+  tc(WHITE); font(20,'bold'); t(W-M,37,'PROPOSAL',{align:'right'});
+  tc(EMlt);  font(7.5,'normal'); t(W-M,50,'Inflation Reduction Act  ·  HEAR Program',{align:'right'});
+  st.y=74+3.5+20;
+  /* meta bar */
+  const metaCells=[['DATE',pv(F.pjInvDate)],['VALID FOR','30 days']];
+  if(m.units) metaCells.push(['DWELLING UNITS',String(m.units)]);
+  metaCells.push(['IQ NUMBER',pv(F.pjIQ)]);
+  {const barH=42,n=metaCells.length,cw=CW/n;
+   fill(PANEL); d.roundedRect(M,st.y,CW,barH,5,5,'F');
+   stroke(HAIR); d.setLineWidth(.75); d.roundedRect(M,st.y,CW,barH,5,5,'S');
+   metaCells.forEach(([lb,v],i)=>{const cx=M+i*cw;
+     if(i>0){stroke(HAIR); d.setLineWidth(.75); d.line(cx,st.y+9,cx,st.y+barH-9);}
+     tc(INKM); font(6.8,'bold'); t(cx+12,st.y+16,lb);
+     tc(NAVY); font(10.5,'bold'); t(cx+12,st.y+31,(wrap(String(v),cw-20)[0]||''));});
+   st.y+=barH+22;}
+  /* party blocks */
+  const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
+  const _pn=String(F.pjPropName||'').trim();
+  const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
+  const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
+    F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
+  {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
+   tc(EMd); font(8,'bold'); t(M,pT+8,'PROPERTY / INSTALLATION'); t(rX,pT+8,'BILL TO');
+   stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
+   let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
+   for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
+   for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
+   st.y=Math.max(ly,ry)+6;}
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(HAIR); d.setLineWidth(1);
+    d.line(M,st.y,W-M,st.y); stroke(EM); d.setLineWidth(2); d.line(M,st.y,M+34,st.y); st.y+=5;};
+  /* scope table: measure/system/model/eff (left) + Qty / Cost / Rebate (right) */
+  head('Electrification Scope — HEAR Program',12);
+  const cols=[['QTY',r=>String(r.qty),48],['COST',r=>_money(r.cost),80],['REBATE',r=>_money(r.rebate),80]];
+  let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
+  const descW=CW-cols.reduce((a,c)=>a+c[2],0);
+  const tableHeader=()=>{need(26);
+    stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    tc(NAVY); font(8,'bold'); t(M+2,st.y+14,'MEASURE');
+    cols.forEach(([lbl,,w,rx])=>t(rx,st.y+14,lbl,{align:'right'}));
+    st.y+=19; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;};
+  tableHeader();
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+2,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
+  m.rows.forEach((r,i)=>{
+    const sub=[r.systemType,r.model,(r.eff?(r.eff+(r.effMetric&&!/[a-z]/i.test(r.eff)?(' '+r.effMetric):'')):'')].filter(Boolean).join('  ·  ');
+    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-6);
+    font(8.5); const dl=sub?wrap(sub,descW-6):[];
+    const capNote='Program cap '+_money(r.cap)+'/unit'+(r.qty>1?(' × '+r.qty+' units'):'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
+    const dl2=wrap(capNote,descW-6);
+    const nameH=nameLines.length*12.5, descH=dl.length?dl.length*10.5:0, capH=dl2.length*9.5;
+    const h=8+nameH+(descH?5+descH:0)+3+capH+8;
+    if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
+    const y0=st.y;
+    if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
+    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+2,y0+8+k*12.5+9,ln));
+    let dy=y0+8+nameH;
+    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln)); dy+=descH;}
+    dy+=3; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+2,dy+k*9.5+7,ln));
+    const midY=y0+h/2+3;
+    cols.forEach(([lbl,fn,w,rx],c)=>{
+      font(9.5,c===cols.length-1?'bold':'normal');
+      tc(c===cols.length-1?EMd:[64,78,96]);
+      t(rx,midY,fn(r),{align:'right'});});
+    st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;
+  });
+  /* totals: hero Total Due, right-aligned summary */
+  need(132); st.y+=18;
+  {const SUMW=252, x0=W-M-SUMW;
+   tc(INKM); font(8.5,'italic');
+   const note=wrap('Home Electrification & Appliance Rebates (HEAR) is an income-qualified program. For low-income households (at or below 80% of area median income) the program pays 100% of the project cost, up to the federal per-measure caps and $14,000 total per dwelling unit - applied here as an instant discount at the point of service.',x0-M-16);
+   note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
+   const srows=[['Total Project Cost',_money(m.totalCost)],
+     ['HEAR Incentive (100%)','('+_money(m.totalRebate)+')']];
+   if(m.capped) srows.push(['Program Maximum ($14,000 × '+m.units+')',_money(m.programMax)]);
+   let sy=st.y;
+   for(const [lb,v] of srows){
+     tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
+     tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+17,W-M,sy+17); sy+=19;}
+   sy+=6; const hh=44;
+   fill(NAVY); d.roundedRect(x0,sy,SUMW,hh,6,6,'F');
+   fill(EM);   d.roundedRect(x0,sy,4,hh,2,2,'F');
+   tc(EMlt);  font(8.5,'bold'); t(x0+18,sy+19,m.totalDue>0.005?'BALANCE DUE':'TOTAL DUE');
+   tc(WHITE); font(18,'bold');  t(x0+SUMW-16,sy+29,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
+   st.y=Math.max(st.y+note.length*11.5, sy+hh)+6;}
+  /* acknowledgment + signature */
+  head('Acknowledgment & Acceptance',12);
+  const _ees='EES-'+(m.state||'WI');
+  const ack='The property owner authorizes '+_ees+' to perform the electrification scope above and to submit for and receive the corresponding IRA HEAR incentive on their behalf. For income-qualified low-income projects the incentive covers 100% of the project cost up to the program caps.';
+  {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
+   al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
+  need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
+  d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
+  tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
+  /* footer */
+  const fy=H-44; if(st.y>fy-10) d.addPage();
+  stroke(EM); d.setLineWidth(1.4); d.line(M,fy,M+34,fy);
+  stroke(HAIR); d.setLineWidth(.75); d.line(M+40,fy,W-M,fy);
+  tc(C.mut); font(8.5);
+  t(W/2,fy+12,'Energy Efficiency Services of '+_state+'  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
+  const _eesContact=m.state==='NC'?'ncira@ees-nc.org  |  (704) 990-5614':'ira@ees-wi.org  |  608-460-7419';
+  font(8,'italic'); t(W/2,fy+23,_eesContact,{align:'center'});
+  return d.output('blob');
+}
+
 function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
   const isInv=kind==='invoice';
@@ -3994,6 +4243,7 @@ async function makeDocPdfBlob(which){
   if(typeof window.jspdf==='undefined')throw new Error('PDF engine not loaded');
   if(which==='sealedProposal')return buildSealedPdfBlob('proposal');
   if(which==='sealedInvoice')return buildSealedPdfBlob('invoice');
+  if(which==='hearProposal')return buildHearPdfBlob();
   return buildEesPdfBlob(which);
 }
 async function downloadDoc(which,pdfName){
@@ -4060,6 +4310,7 @@ document.addEventListener('click',e=>{
     invDoc:()=>downloadDoc('invoice',_docBase()+'_HOMES_Project_Invoice.pdf'),
     sealedProp:()=>downloadDoc('sealedProposal',_docBase()+'_Sealed_Proposal.pdf'),
     sealedInv:()=>downloadDoc('sealedInvoice',_docBase()+'_Sealed_Invoice.pdf'),
+    hearProp:()=>downloadDoc('hearProposal',_docBase()+'_HEAR_Proposal.pdf'),
     reportBase:()=>downloadSourceReport('asBase'), reportImp:()=>downloadSourceReport('asImp')};
   if(A[b.dataset.act])A[b.dataset.act]();
 });
