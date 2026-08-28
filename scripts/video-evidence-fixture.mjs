@@ -170,6 +170,49 @@ check('the report offers work-step documents, not only the work order’s',
 check('the report names the step a document came from',
   /step: row\._work_step_name \|\| null/.test(reportSvc))
 
+// ── 4. A video is never restricted by WHERE it is being filed ────────────────
+//
+// Nicholas, 2026-08-27: "the user can upload videos anywhere. You can't
+// restrict this." Each of these was a real refusal, and each is the kind that
+// creeps back the next time someone tightens a gate meant for photos.
+
+// LEAP Pad: the video inputs and the Add video control sit OUTSIDE the
+// isActionable gate, so a finished step and a step further down an ordered
+// plan can both take one.
+const padVideoBlock = pad.slice(
+  pad.indexOf('Attached videos — playable inline'),
+  pad.indexOf('Capture + complete actions'))
+check('LEAP Pad: the video file inputs are outside the actionable gate',
+  /ref=\{videoRef\}/.test(padVideoBlock) && /ref=\{folderVideoRef\}/.test(padVideoBlock))
+check('LEAP Pad: a NON-actionable step can still add a video',
+  /\{!isActionable && \(/.test(padVideoBlock) && /Add video/.test(padVideoBlock))
+check('LEAP Pad: the photo controls stay behind the ordering gate',
+  /\{isActionable && \(/.test(pad) &&
+  pad.indexOf('triggerCapture(\'before\')') > pad.indexOf('Capture + complete actions'))
+
+// The Photos-card lockout refuses PHOTOS, not the drop.
+check('the gallery lockout no longer refuses every file outright',
+  !/if \(photoLockoutMessage\) \{\s*\n\s*toast\.error\(photoLockoutMessage\)\s*\n\s*return/.test(gallery))
+check('the lockout filters only what would become a photo',
+  /if \(!photoLockoutMessage\) return true\s*\n\s*if \(isImageFile\(f\.name, f\.type\)\) return false/.test(gallery))
+check('a locked card still offers a picker, so a video need not be dragged',
+  /label=\{photoLockoutMessage \? 'Video' : 'Upload'\}/.test(gallery))
+check('the locked picker offers video only — an image there truly cannot be stored',
+  /accept=\{photoLockoutMessage \? 'video\/\*' : ACCEPT_BY_MODE\[target\]\}/.test(gallery))
+check('the drop zone is live on a locked card',
+  /\{dragActive && \(/.test(gallery))
+check('the misconfiguration notice says a video still works',
+  /A <strong>video<\/strong> can still be filed here/.test(gallery))
+
+// The one restriction that IS correct and must stay: a video does not satisfy
+// a photo requirement. The gate is the SERVER's (_work_step_evidence_gap,
+// surfaced as step.evidence_gap) — the client renders it and never computes
+// its own, so loosening where a video may be filed could not loosen it.
+check('the completion gate is the server\u2019s, read not recomputed',
+  /const gap = step\.evidence_gap/.test(pad))
+check('Complete Step is still disabled by that gate',
+  /disabled=\{!!gap \|\| busy \|\| uploading\}/.test(pad))
+
 console.log(failures === 0
   ? `video-evidence-fixture: ${checks} checks passed`
   : `video-evidence-fixture: ${failures} of ${checks} checks FAILED`)

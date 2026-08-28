@@ -915,6 +915,65 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
         <VideoStrip videos={step.videos} />
       )}
 
+      {/* A video can be added to ANY step, at any time — including a step that
+          is finished, and one further down an ordered plan that has not come
+          up yet (Nicholas, 2026-08-27: "the user can upload videos anywhere.
+          You can't restrict this").
+
+          The photo controls stay behind the work-plan's ordering gate, because
+          a photo is the evidence a step is JUDGED on and the plan says when it
+          is taken. A video is a record of the building — somebody walks past an
+          open riser and films it — and refusing that has no upside: the
+          alternative is not a tidier work order, it is footage that never gets
+          filed. The inputs live outside the gate for the same reason.
+
+          On the actionable step the prominent Record Video button below is the
+          one to use, so this compact control is only for the rest. */}
+      <input
+        ref={videoRef} type="file" accept="video/*" capture="environment"
+        onChange={onVideoFile} style={{ display: 'none' }}
+      />
+      <input
+        ref={folderVideoRef} type="file" accept="video/*"
+        onChange={onVideoFile} style={{ display: 'none' }}
+      />
+      {!isActionable && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <button
+            onClick={() => videoRef.current?.click()}
+            disabled={videoUploading}
+            style={{
+              appearance: 'none', cursor: videoUploading ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'transparent', color: C.textSecondary,
+              border: `1px dashed ${C.borderDark}`, borderRadius: 8,
+              padding: '7px 11px', minHeight: 36,
+              fontFamily: FONT, fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <VideoIcon /> Add video
+          </button>
+          <button
+            onClick={() => folderVideoRef.current?.click()}
+            disabled={videoUploading}
+            aria-label="Upload a saved video from a folder"
+            title="Upload a saved video — recorded offline or on another device"
+            style={{
+              appearance: 'none', cursor: videoUploading ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center',
+              background: 'transparent', color: C.textSecondary,
+              border: `1px dashed ${C.borderDark}`, borderRadius: 8,
+              padding: '7px 10px', minHeight: 36,
+            }}
+          >
+            <FolderIcon />
+          </button>
+          {videoUploading && (
+            <span style={{ fontSize: 12, color: C.textMuted }}>Uploading video…</span>
+          )}
+        </div>
+      )}
+
       {/* Measurement / field values. Editable on the actionable step; saved
           values shown read-only once the step is closed. */}
       {Array.isArray(step.fields) && step.fields.length > 0 && (
@@ -1021,14 +1080,6 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
           <input
             ref={folderRef} type="file" accept="image/*" multiple
             onChange={onFile} style={{ display: 'none' }}
-          />
-          <input
-            ref={videoRef} type="file" accept="video/*" capture="environment"
-            onChange={onVideoFile} style={{ display: 'none' }}
-          />
-          <input
-            ref={folderVideoRef} type="file" accept="video/*"
-            onChange={onVideoFile} style={{ display: 'none' }}
           />
           {step.reference_photo_url && (
             <button

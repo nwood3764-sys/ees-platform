@@ -571,11 +571,28 @@ export default function FileGalleryWidget({
   // ── Upload handlers ─────────────────────────────────────────────────
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList || fileList.length === 0) return
-    if (photoLockoutMessage) {
-      toast.error(photoLockoutMessage)
+
+    // The lockout is about the `photos` TABLE, so it refuses the files that
+    // would go there — and nothing else. A Photos card on an object that
+    // cannot hold photos is still a card on a record, and a video (or a
+    // document) filed against that record is perfectly storable: those rows go
+    // to `documents`, which has no such restriction. Refusing the whole drop
+    // turned a layout-configuration fact into a person being told they may not
+    // file footage (Nicholas, 2026-08-27: "the user can upload videos
+    // anywhere. You can't restrict this"). The notice still explains why there
+    // is no photo grid.
+    const files = Array.from(fileList).filter(f => {
+      if (!photoLockoutMessage) return true
+      if (isImageFile(f.name, f.type)) return false
+      return true
+    })
+    if (files.length === 0) {
+      toast.error(photoLockoutMessage || 'Nothing to upload.')
       return
     }
-    const files = Array.from(fileList)
+    if (photoLockoutMessage && files.length < fileList.length) {
+      toast.error(photoLockoutMessage)
+    }
     const misfiled = []   // non-images, non-videos filed as documents instead
     const videosFiled = [] // videos dropped on the Photos card — evidence, not a misfile
     const photoNames  = [] // for the single-photo confirmation, which names the file
@@ -808,7 +825,7 @@ export default function FileGalleryWidget({
         ref={fileInputRef}
         type="file"
         multiple
-        accept={ACCEPT_BY_MODE[target]}
+        accept={photoLockoutMessage ? 'video/*' : ACCEPT_BY_MODE[target]}
         style={{ display: 'none' }}
         onChange={onPickerChange}
       />
@@ -840,7 +857,7 @@ export default function FileGalleryWidget({
         }}
       >
         {/* Drag-over overlay */}
-        {dragActive && !photoLockoutMessage && (
+        {dragActive && (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 5,
             background: 'rgba(62,207,142,0.08)',
@@ -915,14 +932,12 @@ export default function FileGalleryWidget({
                 label="Take"
               />
             )}
-            {!photoLockoutMessage && (
-              <HeaderButton
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
-                primary={!isMobile || target !== 'photos'}
-                iconPath="M12 5v14M5 12h14"
-                label="Upload"
-              />
-            )}
+            <HeaderButton
+              onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
+              primary={!isMobile || target !== 'photos'}
+              iconPath="M12 5v14M5 12h14"
+              label={photoLockoutMessage ? 'Video' : 'Upload'}
+            />
             <Icon
               path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'}
               size={12} color={C.textMuted}
@@ -1196,6 +1211,10 @@ function LockoutNotice({ message }) {
     }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>This widget is misconfigured.</div>
       {message}
+      <div style={{ marginTop: 8 }}>
+        A <strong>video</strong> can still be filed here — it is saved to this
+        record under Documents, which has no such restriction.
+      </div>
     </div>
   )
 }
