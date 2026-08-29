@@ -64,7 +64,8 @@ export async function fetchSavedViewsForObject(objectName) {
         id, list_view_name, list_view_object, list_view_module,
         list_view_user_id, list_view_role_id, list_view_is_shared,
         list_view_sort_field, list_view_sort_direction,
-        list_view_visible_columns, list_view_filters, list_view_filter_logic, list_view_owner
+        list_view_visible_columns, list_view_filters, list_view_filter_logic,
+        list_view_column_widths, list_view_owner
       `)
       .eq('list_view_object', objectName)
       .eq('is_deleted', false)
@@ -109,6 +110,20 @@ function normalizeFilterLogic(logic) {
   return e
 }
 
+// Only real, positive pixel widths are stored, so a stray value can never make
+// a column unreadable when the view is reopened. An empty map stores as NULL —
+// "no widths saved" rather than "every width is nothing".
+function normalizeColumnWidths(widths) {
+  if (!widths || typeof widths !== 'object' || Array.isArray(widths)) return null
+  const out = {}
+  for (const [field, px] of Object.entries(widths)) {
+    const n = Number(px)
+    if (!field || !Number.isFinite(n) || n <= 0) continue
+    out[field] = Math.round(n)
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
 // Map a DB row to the shape the ListView selector expects. isDefault is
 // per-user: true only when the row is THIS user's pinned default.
 function toSelectorView(r, defaultViewId) {
@@ -137,6 +152,10 @@ function toSelectorView(r, defaultViewId) {
     sortField: r.list_view_sort_field || null,
     sortDir: r.list_view_sort_direction || 'asc',
     visibleColumns: Array.isArray(r.list_view_visible_columns) ? r.list_view_visible_columns : null,
+    // The view's own column widths. Null means none were saved, and the list
+    // falls back to whatever this browser remembers.
+    columnWidths: (r.list_view_column_widths && typeof r.list_view_column_widths === 'object'
+      && !Array.isArray(r.list_view_column_widths)) ? r.list_view_column_widths : null,
     isDefault: Boolean(defaultViewId) && r.id === defaultViewId,
     scope,
     roleId: r.list_view_role_id || null,
@@ -171,6 +190,7 @@ export async function createSavedView(opts) {
     list_view_visible_columns: opts.visibleColumns || null,
     list_view_filters: filtersPayload,
     list_view_filter_logic: normalizeFilterLogic(opts.filterLogic),
+    list_view_column_widths: normalizeColumnWidths(opts.columnWidths),
     list_view_owner: userId,
     list_view_created_by: userId,
   }
@@ -194,6 +214,7 @@ export async function updateSavedView(id, opts) {
   if (opts.sortDir     !== undefined) patch.list_view_sort_direction = opts.sortDir || 'asc'
   if (opts.visibleColumns !== undefined) patch.list_view_visible_columns = opts.visibleColumns || null
   if (opts.filterLogic !== undefined) patch.list_view_filter_logic = normalizeFilterLogic(opts.filterLogic)
+  if (opts.columnWidths !== undefined) patch.list_view_column_widths = normalizeColumnWidths(opts.columnWidths)
   if (opts.filters     !== undefined || opts.systemBase !== undefined) {
     patch.list_view_filters = opts.systemBase
       ? { filters: opts.filters || [], __system_base: opts.systemBase }

@@ -110,7 +110,7 @@ function defaultColWidth(col) {
 // wire onto each resize grip. Pointer events (not mouse) so it works with
 // trackpads and touch-capable laptops; capture-phase listeners on window so a
 // fast drag that leaves the <th> doesn't drop the gesture.
-function useColumnWidths({ enabled, storageKey, columns }) {
+function useColumnWidths({ enabled, storageKey, columns, onWidthsChanged }) {
   const [widths, setWidths] = useState(() => (enabled ? readStoredWidths(storageKey) : {}));
 
   // Reset/reload when the target list changes (key changes) so we don't carry
@@ -142,7 +142,10 @@ function useColumnWidths({ enabled, storageKey, columns }) {
       document.body.style.userSelect = '';
       // Persist on release using the freshest state.
       setWidths(prev => { writeStoredWidths(storageKey, prev); return prev; });
-      if (d) {}
+      // Tell the list a resize happened, so the active view goes dirty and the
+      // user is prompted to save the layout they just set rather than losing it
+      // the next time the view is opened somewhere else.
+      if (d && onWidthsChanged) onWidthsChanged();
     };
 
     window.addEventListener('pointermove', onMove, true);
@@ -162,7 +165,16 @@ function useColumnWidths({ enabled, storageKey, columns }) {
     });
   };
 
-  return { widths, onResizeStart, resetColumn };
+  // Seed the map from a saved view. The view's layout wins over whatever this
+  // browser happened to remember, and is mirrored into localStorage so an
+  // unsaved tweak afterwards still survives a reload.
+  const applyWidths = (next) => {
+    const map = (next && typeof next === 'object' && !Array.isArray(next)) ? next : {};
+    setWidths(map);
+    if (enabled) writeStoredWidths(storageKey, map);
+  };
+
+  return { widths, onResizeStart, resetColumn, applyWidths };
 }
 
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
@@ -197,28 +209,58 @@ const OPERATORS = {
     { op: 'is_blank', label: 'is blank' },
     { op: 'is_not_blank', label: 'is not blank' },
   ],
+  // A picklist or lookup field is still TEXT underneath, and the question
+  // "which of these values" is only one of the questions worth asking of it.
+  // Offering nothing but the pick-from-a-list pair meant a picklist could not be
+  // searched for a word it contains (Nicholas, 2026-08-29: "you need a lot more
+  // criteria here, like consists of, contains, just like Salesforce").
+  //
+  // The pair is labelled "equals" / "does not equal", NOT "is any of" / "is
+  // none of" — Salesforce's own list-view vocabulary, where choosing several
+  // values simply means any of them (Nicholas: "is 'none of' a dumb thing? I've
+  // never seen that in any database anywhere"). He is right: that phrasing is
+  // Airtable's, and this platform defaults to Salesforce parity. The stored op
+  // values are untouched, so saved views keep working.
   select: [
-    { op: 'equals', label: 'is any of', multi: true },
-    { op: 'not_equals', label: 'is none of', multi: true },
+    { op: 'equals', label: 'equals', multi: true },
+    { op: 'not_equals', label: 'does not equal', multi: true },
+    { op: 'contains', label: 'contains' },
+    { op: 'not_contains', label: 'does not contain' },
+    { op: 'starts_with', label: 'starts with' },
+    { op: 'ends_with', label: 'ends with' },
     { op: 'is_blank', label: 'is blank' },
     { op: 'is_not_blank', label: 'is not blank' },
   ],
+  // Words, not symbols. "≥" is not something a person reading a filter row says
+  // out loud, and a saved filter has to be legible to whoever opens it next
+  // (Nicholas, 2026-08-29: "you need to have equals, does not equal, like real
+  // words"). The stored `op` values are unchanged, so every existing saved view
+  // keeps working — only what the dropdown SAYS changed.
   number: [
-    { op: 'equals', label: '=' },
-    { op: 'not_equals', label: '≠' },
-    { op: 'gt', label: '>' },
-    { op: 'gte', label: '≥' },
-    { op: 'lt', label: '<' },
-    { op: 'lte', label: '≤' },
+    { op: 'equals', label: 'equals' },
+    { op: 'not_equals', label: 'does not equal' },
+    { op: 'gt', label: 'greater than' },
+    { op: 'gte', label: 'greater than or equal to' },
+    { op: 'lt', label: 'less than' },
+    { op: 'lte', label: 'less than or equal to' },
     { op: 'between', label: 'between' },
     { op: 'is_blank', label: 'is blank' },
     { op: 'is_not_blank', label: 'is not blank' },
   ],
   date: [
-    { op: 'equals', label: 'on' },
+    { op: 'equals', label: 'equals' },
+    { op: 'not_equals', label: 'does not equal' },
+    { op: 'gt', label: 'after' },
     { op: 'from', label: 'on or after' },
+    { op: 'lt', label: 'before' },
     { op: 'to', label: 'on or before' },
     { op: 'between', label: 'between' },
+    { op: 'is_blank', label: 'is blank' },
+    { op: 'is_not_blank', label: 'is not blank' },
+  ],
+  boolean: [
+    { op: 'equals', label: 'equals' },
+    { op: 'not_equals', label: 'does not equal' },
     { op: 'is_blank', label: 'is blank' },
     { op: 'is_not_blank', label: 'is not blank' },
   ],
@@ -1363,8 +1405,14 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
       return col?.type || 'text';
     };
     for (const f of (activeFilters || [])) {
-      const col = colByField.get(f.field) || { field: f.field, label: f.label || f.field, type: 'text' };
-      const extra = { valueSource: col.valueSource, options: col.options, hasBlanks: col.hasBlanks };
+      const known = colByField.get(f.field);
+      const col = known || { field: f.field, label: f.label || f.field, type: 'text' };
+      // A filter whose field this object no longer offers — a column dropped
+      // since the view was saved. It can never match, so the list comes back
+      // empty while the row looks perfectly ordinary doing it. Flag it HERE,
+      // where the filter is being read, not only in the empty table below.
+      const missing = Boolean(catalog && catalog.length > 0 && !known);
+      const extra = { valueSource: col.valueSource, options: col.options, hasBlanks: col.hasBlanks, missing };
       if (f.op === 'equals' && !Array.isArray(f.value)) {
         if (!equalsByField.has(f.field)) {
           const row = { id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: colType(col), op: 'equals', value: [f.value], ...extra };
@@ -1396,10 +1444,9 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
     return () => document.removeEventListener('keydown', esc);
   }, []);
 
-  // A field whose values come from a picklist or lookup behaves like a
-  // 'select' for operator purposes (is any of / is none of / blank), even
-  // though its column type is text. Free-text picklists ('maybe') still get
-  // the full text operator set so contains/starts-with remain available.
+  // A field whose values come from a picklist or lookup gets the 'select'
+  // operator set — which now carries the literal operators too, so a picklist
+  // can be searched for a word it contains, not only picked from a list.
   const effectiveType = (col) => {
     const vs = col?.valueSource;
     if (vs && (vs.kind === 'lookup' || (vs.kind === 'picklist' && !vs.maybe))) return 'select';
@@ -1520,7 +1567,10 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
           )}
 
           {rows.map((row, rowIndex) => (
-            <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary }}>
+            <div key={row.id} style={{
+              border: `1px solid ${row.missing ? C.sky : C.border}`, borderRadius: 8,
+              padding: 12, marginBottom: 10, background: C.cardSecondary,
+            }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   {/* The number the filter logic refers to. Always shown, so an
@@ -1532,7 +1582,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
                     fontSize: 10.5, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
                   }}>{rowIndex + 1}</span>
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.label}>{row.label}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: row.missing ? C.textMuted : C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.label}>{row.label}</span>
                 </span>
                 <svg onClick={() => removeRow(row.id)} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2} style={{ cursor: 'pointer', flexShrink: 0 }}><path d="M18 6L6 18M6 6l12 12" /></svg>
               </div>
@@ -1545,6 +1595,13 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
 
               {/* Value editor */}
               <FilterValueEditor row={row} onChange={(value) => updateRow(row.id, { value })} />
+
+              {row.missing && (
+                <div style={{ marginTop: 8, fontSize: 11.5, color: C.sky, lineHeight: 1.45 }}>
+                  This field no longer exists on this object, so this filter can
+                  never match. Remove it, then add the field you want.
+                </div>
+              )}
             </div>
           ))}
 
@@ -1679,43 +1736,68 @@ function FilterValueEditor({ row, onChange }) {
   const [loadingOpts, setLoadingOpts] = useState(false);
   const fellBackToText = opts === 'TEXT';
 
+  // One effect owns the option list, and every response carries the sequence
+  // number of the request that asked for it.
+  //
+  // There used to be TWO effects writing here: one loading the unfiltered first
+  // page on mount, another searching as you type. Neither cancelled the other's
+  // in-flight request, so whichever HTTP response landed LAST won — which is
+  // why typing "Lutheran Social Services" could leave "1st City, LLC" and
+  // "1602 South Staples Housing" on screen (Nicholas, 2026-08-29). Those are
+  // the matches for the single letter "l", the first keystroke: its response
+  // arrived after the full phrase's and overwrote it. A typeahead that can show
+  // the answer to a question you have finished asking is not a typeahead.
+  const reqSeq = useRef(0);
   useEffect(() => {
     if (!wantsTypeahead) return;
+    const seq = ++reqSeq.current;
+    const stale = () => seq !== reqSeq.current;
     let cancelled = false;
-    (async () => {
-      setLoadingOpts(true);
-      try {
-        if (vs.kind === 'picklist') {
+
+    // Picklists are a fixed, small list: load once and filter in the browser.
+    if (vs.kind === 'picklist') {
+      (async () => {
+        setLoadingOpts(true);
+        try {
           const list = await getPicklistOptions(vs.object, vs.field);
-          if (cancelled) return;
+          if (cancelled || stale()) return;
           if ((!list || list.length === 0) && vs.maybe) setOpts('TEXT');
           else setOpts((list || []).map(o => ({ label: o.label })));
-        } else if (vs.kind === 'lookup') {
-          const list = await searchLookupOptions(vs.table, '').catch(() => []);
-          if (cancelled) return;
-          setOpts((list || []).map(o => ({ label: o.label })));
+        } catch {
+          if (!cancelled && !stale()) setOpts(vs?.maybe ? 'TEXT' : []);
+        } finally {
+          if (!cancelled && !stale()) setLoadingOpts(false);
         }
-      } catch {
-        if (!cancelled) setOpts(vs?.maybe ? 'TEXT' : []);
-      } finally {
-        if (!cancelled) setLoadingOpts(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vs?.kind, vs?.object, vs?.field, vs?.table, wantsTypeahead]);
+      })();
+      return () => { cancelled = true; };
+    }
 
-  // Live lookup search as the user types (lookups can have many records).
-  useEffect(() => {
-    if (!wantsTypeahead || vs?.kind !== 'lookup') return;
-    let cancelled = false;
+    // Lookups are searched on the server, debounced, one request per query.
     const t = setTimeout(async () => {
-      const list = await searchLookupOptions(vs.table, query).catch(() => []);
-      if (!cancelled) setOpts((list || []).map(o => ({ label: o.label })));
-    }, 180);
+      setLoadingOpts(true);
+      try {
+        const list = await searchLookupOptions(vs.table, query).catch(() => []);
+        if (cancelled || stale()) return;
+        // Two records with the same name are one choice here: the filter
+        // matches on the NAME, so offering it twice asks the user to pick
+        // between two identical things.
+        const seen = new Set();
+        const deduped = [];
+        for (const o of (list || [])) {
+          const label = o?.label;
+          if (!label || seen.has(label)) continue;
+          seen.add(label);
+          deduped.push({ label });
+        }
+        setOpts(deduped);
+      } finally {
+        if (!cancelled && !stale()) setLoadingOpts(false);
+      }
+    }, query ? 180 : 0);
+
     return () => { cancelled = true; clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [vs?.kind, vs?.object, vs?.field, vs?.table, wantsTypeahead, query]);
 
   if (VALUELESS_OPS.has(row.op)) return null;
 
@@ -1958,10 +2040,11 @@ export function ListView({
     () => resolveStorageKey({ storageKey, tableName, defaultViewId, columns }),
     [storageKey, tableName, defaultViewId, columns]
   );
-  const { widths: colWidths, onResizeStart, resetColumn } = useColumnWidths({
+  const { widths: colWidths, onResizeStart, resetColumn, applyWidths } = useColumnWidths({
     enabled: !isMobile,
     storageKey: colWidthKey,
     columns,
+    onWidthsChanged: () => { userInteractedRef.current = true; setIsDirty(true); },
   });
   // Once the user has sized any column, the table switches to fixed layout so
   // those widths are authoritative and header/body cells stay locked together.
@@ -2182,6 +2265,7 @@ export function ListView({
         setSortField(def.sortField || null);
         setSortDir(def.sortDir || 'asc');
         setVisibleColumns(Array.isArray(def.visibleColumns) ? def.visibleColumns : null);
+        if (def.columnWidths) applyWidths(def.columnWidths);
         setIsDirty(false);
       }
       getCurrentRoleId().then(rid => { if (!cancelled) setHasRole(Boolean(rid)); }).catch(() => {});
@@ -2197,7 +2281,7 @@ export function ListView({
   // separately via localStorage.
   const handleSave = async ({ name, scope, isDefault }) => {
     if (!persistEnabled) {
-      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], filterLogic, sortField, sortDir, visibleColumns };
+      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], filterLogic, sortField, sortDir, visibleColumns, columnWidths: { ...colWidths } };
       setPersonalViews(prev => [...prev, v]);
       setActiveViewId(v.id);
       setIsDirty(false); setShowSave(false); setEditingView(null);
@@ -2207,6 +2291,7 @@ export function ListView({
       name, scope: scope || 'personal', isDefault: !!isDefault,
       object: persistObject, module: listModule || persistObject,
       filters: [...activeFilters], filterLogic, sortField, sortDir, visibleColumns,
+      columnWidths: { ...colWidths },
       // Preserve a system view's origin id when editing one, so the selector
       // can overlay the saved version on the in-code constant.
       systemBase: editingView?.systemBase || (editingView && !editingView._persisted ? editingView.id : null),
@@ -2257,6 +2342,7 @@ export function ListView({
     setSortField(v.sortField || null);
     setSortDir(v.sortDir || 'asc');
     setVisibleColumns(Array.isArray(v.visibleColumns) ? v.visibleColumns : null);
+    if (v.columnWidths) applyWidths(v.columnWidths);
     setEditingView(v);
     setShowSave(true);
     setShowViewSel(false);
@@ -2281,6 +2367,7 @@ export function ListView({
         name: v.name, scope: 'personal', isDefault: true,
         object: persistObject, module: listModule || persistObject,
         filters: v.filters || [], filterLogic: v.filterLogic || MATCH_ALL,
+        columnWidths: v.columnWidths || null,
         sortField: v.sortField || null, sortDir: v.sortDir || 'asc',
         visibleColumns: Array.isArray(v.visibleColumns) ? v.visibleColumns : null,
         systemBase: v.id,
@@ -2297,6 +2384,10 @@ export function ListView({
     setSortField(v.sortField || null);
     setSortDir(v.sortDir || 'asc');
     setVisibleColumns(Array.isArray(v.visibleColumns) ? v.visibleColumns : null);
+    // A view's column widths are part of its layout. Only applied when the view
+    // actually carries them, so opening a view saved before this existed leaves
+    // the browser's remembered widths alone rather than resetting them.
+    if (v.columnWidths) applyWidths(v.columnWidths);
     setIsDirty(false);
   };
 
