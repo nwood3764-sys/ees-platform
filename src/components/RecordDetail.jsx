@@ -377,7 +377,7 @@ const TABLE_META = {
   // building — work_orders.project_id is NOT NULL and the assessment knows its
   // project (derive_assessment_project, migration 20260817163750).
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id', 'opportunity_id', 'project_id'], parentTables: ['properties', 'buildings', 'opportunities', 'projects'] },
-  incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
+  incentive_applications:    { module: 'Qualification',  label: 'Incentive Applications', nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
   efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
   payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
@@ -931,9 +931,17 @@ async function resolveInheritedParents(targetTable, known, { maxHops = 6 } = {})
 //
 // Mutates prefillObj (seeds the FK, or records the outstanding question) and
 // returns the resolved parent id, or null when it is still owed / none exists.
-async function seedConstrainingParent(childTable, prefillObj) {
+async function seedConstrainingParent(childTable, prefillObj, scope = {}) {
   try {
-    const candidates = await fetchConstrainingParentCandidates(childTable, prefillObj)
+    // The ancestry to search under. Passed explicitly because the caller often
+    // knows the building/property from the record the create was launched from
+    // before the generic chain seeder has written them onto the prefill.
+    const seed = {
+      ...prefillObj,
+      ...(scope.buildingId ? { building_id: scope.buildingId } : {}),
+      ...(scope.propertyId ? { property_id: scope.propertyId } : {}),
+    }
+    const candidates = await fetchConstrainingParentCandidates(childTable, seed)
     if (!candidates) return null
     const choice = resolveParentChoice({
       seededId: prefillObj[candidates.fkColumn] || null,
@@ -5204,7 +5212,8 @@ function RelatedListWidget({
         // Never guessed: a guess here does not merely mis-default a field, it
         // hides every other program's form (Nicholas, 2026-08-29).
         if (!oppId && (bldId || propId)) {
-          oppId = await seedConstrainingParent('incentive_applications', prefillObj)
+          oppId = await seedConstrainingParent('incentive_applications', prefillObj,
+            { buildingId: bldId, propertyId: propId })
           if (oppId && !propId) {
             const { data: oppProp } = await supabase.from('opportunities')
               .select('property_id').eq('id', oppId).maybeSingle()
@@ -5365,7 +5374,8 @@ function RelatedListWidget({
         // asked for in the record-type picker when it gives several — the same
         // rule incentive applications follow, and for the same reason.
         if (!oppId && (bldId || propId)) {
-          oppId = await seedConstrainingParent('assessments', prefillObj)
+          oppId = await seedConstrainingParent('assessments', prefillObj,
+            { buildingId: bldId, propertyId: propId })
           if (oppId) {
             const { data: oppRow } = await supabase.from('opportunities')
               .select('property_id, building_id').eq('id', oppId).maybeSingle()
