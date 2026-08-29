@@ -516,7 +516,7 @@ function buildColumnSummaries(rows, columns, resolveDisplay) {
       default: return ''
     }
     const label = { sum:'Σ', avg:'avg', min:'min', max:'max', count:'#' }[c.summarize]
-    return val == null ? '—' : `${label} ${formatCellValue(val, c.type)}`
+    return val == null ? '—' : `${label} ${formatSummaryValue(val, c)}`
   })
 }
 
@@ -607,8 +607,23 @@ export function SummaryLayout({ result, fill = false }) {
     return next
   })
 
+  // A summary report whose last grouping was removed is not an empty report —
+  // it is a list of rows. Show them (with the column-total footer) and say what
+  // to do, rather than hiding data the report still returns.
   if (groupings.length === 0) {
-    return <EmptyState message="Summary reports require at least one grouping. Edit the report to add groupings." />
+    return (
+      <div style={{ display:'flex', flexDirection:'column', minHeight:0, gap:8, ...(fill ? { flex:1 } : null) }}>
+        <div style={{
+          fontSize:11, color:C.textSecondary, background:'#e8f1fb',
+          border:`1px solid ${C.border}`, borderRadius:6, padding:'7px 10px', flexShrink:0,
+        }}>
+          This summary report has no groupings, so its rows are listed ungrouped and there are no
+          group subtotals. Add a grouping in the report's <strong>Groupings</strong> tab, or set the
+          format to <strong>Tabular</strong> in <strong>Settings</strong>.
+        </div>
+        <TabularLayout result={result} fill={fill} />
+      </div>
+    )
   }
   if (rows.length === 0) {
     return <EmptyState message="No matching rows." />
@@ -971,7 +986,7 @@ function summarizeColumnValue(col, resolvedRows) {
   }
   if (val == null) return '—'
   const tag = { sum:'Σ', avg:'avg', min:'min', max:'max', count:'#' }[col.summarize]
-  return `${tag} ${formatCellValue(val, col.type)}`
+  return `${tag} ${formatSummaryValue(val, col)}`
 }
 
 // Rename an aggregate scope's keys with a prefix (SUM_x → PARENT_SUM_x) so a
@@ -1327,6 +1342,15 @@ function formatReportValue(v, col) {
     }
   }
   return formatCellValue(v, col ? col.type : undefined)
+}
+
+// A summarized value prints in its own column's format — a currency column
+// totals as currency. A record COUNT is exempt: it counts records, it is not a
+// value in that column's unit, so a count under a currency column is a plain
+// number.
+function formatSummaryValue(val, col) {
+  if (col && col.summarize === 'count') return formatCellValue(val, 'numeric')
+  return formatReportValue(val, col)
 }
 
 // Evaluate a column's conditional-format rules against a value; returns a
