@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
@@ -45,6 +45,7 @@ import DeletedRecordBanner from './DeletedRecordBanner'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
 import { objectNavFor, humanizeObjectLabel } from '../lib/objectNav'
+import { shouldCondenseHeader, stickyHeaderBandStyle, stickyTabBarStyle } from '../lib/stickyRecordHeader'
 import { useDataRefresh } from '../lib/dataRefresh'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
@@ -498,7 +499,7 @@ function deriveParentFksFromSections(sections) {
   return out
 }
 
-function Breadcrumbs({ tableName, record, lookups, derivedParents, onBack, onNavigateToRecord }) {
+function Breadcrumbs({ tableName, record, lookups, derivedParents, onBack, onNavigateToRecord, compact = false }) {
   // Every object gets an app name and a readable object name, whether or not
   // it was ever added to TABLE_META. Before this, an unlisted object rendered
   // its module as "—" and its own name as the raw table ("— / work_steps").
@@ -545,7 +546,7 @@ function Breadcrumbs({ tableName, record, lookups, derivedParents, onBack, onNav
   const sep = <span style={{ color: C.textMuted, margin: '0 6px', fontSize: 10 }}>/</span>
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginBottom: 14 }}>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginBottom: compact ? 8 : 14 }}>
       <span style={{ fontSize: 12, color: C.textMuted }}>{meta.module}</span>
       {sep}
       {hasList ? (
@@ -6800,6 +6801,37 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // breakpoint. 1280 (not 1024) since the rail widened to 480px (Nicholas,
   // 2026-07-26: related-list cards in a 320px rail truncated unreadably).
   const isNarrow = useMediaQuery('(max-width: 1280px)')
+
+  // ── Pinned record header ───────────────────────────────────────────────────
+  // The record's identity and its action buttons stay put while the record
+  // scrolls (Nicholas, 2026-08-29: "when we scroll down on a page, we kind of
+  // lose everything… I need this section here to remain locked so the Save
+  // button and edit buttons are still available, but the user also knows where
+  // they're at"). The rules live in src/lib/stickyRecordHeader.js.
+  //
+  // `headerCondensed` is decided from the scroll region's own scrollTop with
+  // hysteresis, so the band cannot flip between its two heights mid-gesture.
+  // `headerBandEl` is measured rather than assumed: the band's height changes
+  // when it condenses and when a long breadcrumb trail wraps to a second line,
+  // and the tab bar pins itself at exactly that offset.
+  const [headerCondensed, setHeaderCondensed] = useState(false)
+  const [headerBandEl, setHeaderBandEl] = useState(null)
+  const [headerBandHeight, setHeaderBandHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    if (!headerBandEl) { setHeaderBandHeight(0); return }
+    const measure = () => setHeaderBandHeight(headerBandEl.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(measure)
+    ro.observe(headerBandEl)
+    return () => ro.disconnect()
+  }, [headerBandEl])
+
+  const handleContentScroll = useCallback((e) => {
+    const top = e.currentTarget.scrollTop
+    setHeaderCondensed(prev => shouldCondenseHeader(top, prev))
+  }, [])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -9469,6 +9501,28 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const mainClaimedSlotTypes = slotTypesOnSurface(data?.sections, activeTab)
   const railClaimedSlotTypes = mainClaimedSlotTypes
 
+  // The record header's action cluster, defined once: the pinned band renders
+  // it in the full card and again in the condensed line, and two hand-written
+  // copies of Save/Cancel/Actions is two chances for one of them to drift.
+  const headerActionCluster = editing ? (
+    <>
+      <button onClick={handleSave} disabled={saving} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
+      </button>
+      <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
+    </>
+  ) : (
+    <TopbarActions
+      variant="desktop"
+      tableName={tableName}
+      record={data?.record}
+      ctx={topbarActionCtx}
+      actionOverrides={data?.actionOverrides || []}
+      handlers={topbarActionHandlers}
+      pendingByKey={topbarPendingByKey}
+    />
+  )
+
   return (
     <div style={{
       flex: 1,
@@ -9567,89 +9621,133 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         </div>
       )}
 
-      {/* Scrollable content region */}
-      <div style={{
-        flex: 1, overflow: 'auto', minHeight: 0,
-        padding: isMobile ? '10px 10px' : '20px 24px',
-        paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
-      }}>
-        {/* Desktop breadcrumbs (hidden on mobile — the sticky header handles back navigation) */}
-        {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} derivedParents={derivedParentFks} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+      {/* Scrollable content region.
+          On desktop the record's identity and its action buttons ride at the
+          top of it in a PINNED band (src/lib/stickyRecordHeader.js) — scrolling
+          a long record used to leave the user with a page of fields and no way
+          to tell which record they were on or to reach Save (Nicholas,
+          2026-08-29). onScroll is what tells the band when to condense; mobile
+          has its own fixed header bar above this region and needs neither. */}
+      <div
+        onScroll={isMobile ? undefined : handleContentScroll}
+        style={{
+          flex: 1, overflow: 'auto', minHeight: 0,
+          padding: isMobile ? '10px 10px' : '20px 24px',
+          paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
+        }}>
+        {/* Pinned header band (desktop) — the breadcrumb trail and the header
+            card, held at the top of the scroll region. Mobile is unchanged: it
+            already carries this information in the fixed bar above, and its own
+            actions sit in that bar and in the sticky bottom edit bar. */}
+        {!isMobile && (
+          <div
+            ref={setHeaderBandEl}
+            style={stickyHeaderBandStyle({ padX: 24, padY: 20, condensed: headerCondensed })}
+          >
+            <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} derivedParents={derivedParentFks} onBack={onBack} onNavigateToRecord={onNavigateToRecord} compact={headerCondensed} />
 
-        {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
-        {!isMobile ? (
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, minWidth: 0 }}>
-              <RecordVisualBadge
-                tableName={tableName}
-                recordTypeMeta={recordTypeMeta}
-                size={40}
-                title={recordTypeLabel ? `${singularizeLabel(objectLabel)} · ${recordTypeLabel}` : singularizeLabel(objectLabel)}
-                style={{ marginTop: 2 }}
-              />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{singularizeLabel(objectLabel)}</span>
-                  {recordTypeLabel && (
-                    <span style={{ fontSize: 11, fontWeight: 600, color: C.textSecondary, background: C.page, border: `1px solid ${C.border}`, borderRadius: 4, padding: '1px 7px' }}>
-                      {recordTypeLabel}
-                    </span>
-                  )}
-                  {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{recordNumber}</span>}
+            {headerCondensed ? (
+              /* Condensed header — one line, so the pinned band costs as little
+                 of the screen as it can while still answering "what am I looking
+                 at, what state is it in, and what can I do to it". The action
+                 cluster is the SAME cluster the full card renders, not a second
+                 set of controls that could drift from it. */
+              <div style={{
+                background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10,
+              }}>
+                <RecordVisualBadge
+                  tableName={tableName}
+                  recordTypeMeta={recordTypeMeta}
+                  size={26}
+                  title={recordTypeLabel ? `${singularizeLabel(objectLabel)} · ${recordTypeLabel}` : singularizeLabel(objectLabel)}
+                  style={{ flexShrink: 0 }}
+                />
+                {/* The name truncates rather than wrapping — a wrapped name here
+                    would change the band's height mid-scroll, which is the one
+                    thing a pinned band must not do. The full name stays
+                    available on hover and in the expanded card. */}
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span title={displayName} style={{
+                    fontSize: 15, fontWeight: 700, color: C.textPrimary,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{displayName}</span>
+                  {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, flexShrink: 0 }}>{recordNumber}</span>}
                 </div>
-                {/* Long record names must wrap, not widen the row: a work order
-                    name composed from project + unit + work type can run past
-                    100 characters, which pushed the action buttons off the card
-                    (Nicholas, 2026-08-16). overflowWrap handles the pathological
-                    case of a single unbroken token. */}
-                <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px', overflowWrap: 'anywhere' }}>{displayName}</h1>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  {statusLabel && <Badge s={statusLabel} />}
-                  {statusLocksRecord && (
-                    <span title={isSystemAdmin
-                      ? 'This record is locked. As a System Administrator you can still edit it.'
-                      : 'This record is locked. Only a System Administrator can edit it.'}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
-                        background: '#eef5fc', border: `1px solid #bcd9f2`, color: '#1a5a8a',
-                        borderRadius: 4, padding: '2px 9px', fontSize: 11.5, fontWeight: 600 }}>
-                      <Icon path="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={12} color="#1a5a8a" />
-                      Locked{isSystemAdmin ? ' · admin can edit' : ''}
-                    </span>
-                  )}
+                {statusLabel && <span style={{ flexShrink: 0 }}><Badge s={statusLabel} /></span>}
+                {statusLocksRecord && (
+                  <span title={isSystemAdmin
+                    ? 'This record is locked. As a System Administrator you can still edit it.'
+                    : 'This record is locked. Only a System Administrator can edit it.'}
+                    style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0,
+                      background: '#eef5fc', border: `1px solid #bcd9f2`,
+                      borderRadius: 4, padding: '3px 6px' }}>
+                    <Icon path="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={12} color="#1a5a8a" />
+                  </span>
+                )}
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  {headerActionCluster}
                 </div>
               </div>
-            </div>
-            {/* flexShrink: 0 is what keeps this cluster on the card — without it
-                the buttons shrink below their content width and spill off the
-                right edge whenever the title is long. */}
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {editing ? (<>
-                <button onClick={handleSave} disabled={saving} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
-                </button>
-                <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
-              </>) : (
-                <TopbarActions
-                  variant="desktop"
-                  tableName={tableName}
-                  record={data?.record}
-                  ctx={topbarActionCtx}
-                  actionOverrides={data?.actionOverrides || []}
-                  handlers={topbarActionHandlers}
-                  pendingByKey={topbarPendingByKey}
-                />
-              )}
-            </div>
+            ) : (
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, minWidth: 0 }}>
+                  <RecordVisualBadge
+                    tableName={tableName}
+                    recordTypeMeta={recordTypeMeta}
+                    size={40}
+                    title={recordTypeLabel ? `${singularizeLabel(objectLabel)} · ${recordTypeLabel}` : singularizeLabel(objectLabel)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{singularizeLabel(objectLabel)}</span>
+                      {recordTypeLabel && (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: C.textSecondary, background: C.page, border: `1px solid ${C.border}`, borderRadius: 4, padding: '1px 7px' }}>
+                          {recordTypeLabel}
+                        </span>
+                      )}
+                      {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{recordNumber}</span>}
+                    </div>
+                    {/* Long record names must wrap, not widen the row: a work order
+                        name composed from project + unit + work type can run past
+                        100 characters, which pushed the action buttons off the card
+                        (Nicholas, 2026-08-16). overflowWrap handles the pathological
+                        case of a single unbroken token. */}
+                    <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px', overflowWrap: 'anywhere' }}>{displayName}</h1>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {statusLabel && <Badge s={statusLabel} />}
+                      {statusLocksRecord && (
+                        <span title={isSystemAdmin
+                          ? 'This record is locked. As a System Administrator you can still edit it.'
+                          : 'This record is locked. Only a System Administrator can edit it.'}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
+                            background: '#eef5fc', border: `1px solid #bcd9f2`, color: '#1a5a8a',
+                            borderRadius: 4, padding: '2px 9px', fontSize: 11.5, fontWeight: 600 }}>
+                          <Icon path="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={12} color="#1a5a8a" />
+                          Locked{isSystemAdmin ? ' · admin can edit' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {/* flexShrink: 0 is what keeps this cluster on the card — without it
+                    the buttons shrink below their content width and spill off the
+                    right edge whenever the title is long. */}
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {headerActionCluster}
+                </div>
+              </div>
+            )}
           </div>
-        ) : (
-          /* Mobile status chip row — shown only when there's a status to display */
-          statusLabel && (
-            <div style={{ marginBottom: 10 }}>
-              <Badge s={statusLabel} />
-            </div>
-          )
         )}
 
+        {/* Mobile status chip row — shown only when there's a status to display */}
+        {isMobile && statusLabel && (
+          <div style={{ marginBottom: 10 }}>
+            <Badge s={statusLabel} />
+          </div>
+        )}
         {/* Editing / cloning indicator — hidden on mobile (sticky bottom bar makes state obvious) */}
         {!isMobile && editing && cloneSource && (
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -9737,12 +9835,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             match SectionTabs in UI.jsx: bottom border, 2px emerald underline
             on the active tab. On mobile, horizontally scrolls with snap. */}
         {orderedTabs.length > 1 && (
+          <div style={isMobile
+            ? { marginBottom: 10 }
+            /* Desktop: the tab bar pins directly under the header band, at the
+               band's MEASURED height — which record page you are on and which
+               tab of it are the same question, so they stay together. */
+            : stickyTabBarStyle({ bandHeight: headerBandHeight, padY: 20, gap: 16 })}>
           <div
             className={isMobile ? 'ees-hscroll' : ''}
             style={{
               background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
               padding: isMobile ? '0 4px' : '0 16px',
-              marginBottom: isMobile ? 10 : 16,
               display: 'flex', alignItems: 'center',
               ...(isMobile ? { scrollSnapType: 'x proximity' } : {}),
             }}
@@ -9767,6 +9870,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 </button>
               )
             })}
+          </div>
           </div>
         )}
 
