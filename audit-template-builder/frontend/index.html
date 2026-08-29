@@ -3831,7 +3831,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'PROPERTY / INSTALLATION'); t(rX,pT+8,'BILL TO');
+   tc(EMd); font(8,'bold'); t(M,pT+8,'BUILDING / PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
    stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
@@ -3889,8 +3889,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const isNC=m.state==='NC';
     // Each column: [label, value(row), width]. Values are right-aligned at the
     // column's right edge; the description column takes whatever is left.
+    const _qtyU=r=>{const q=_qty(r.qty); let u=r.unit||''; if(u==='Unit'&&Number(r.qty)!==1)u='Units'; return q+(u?(' '+u):'');};
     const numCols=isNC
-      ?[['QUANTITY',r=>_qty(r.qty)+(r.unit?(' '+r.unit):''),84],
+      ?[['QUANTITY',_qtyU,84],
         ['LABOR',   r=>_money(r.labor),64],
         ['MATERIAL',r=>_money(r.material),68],
         ['TOTAL',   r=>_money(r.cost),72]]
@@ -4003,14 +4004,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
       need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
   }
-  /* ---- acknowledgment + acceptance: on the proposal AND the invoices, with
-     wording to match (a proposal is authorized; an invoice is acknowledged). ---- */
-  {
+  /* ---- acknowledgment + signature: INVOICES ONLY. Proposals carry no
+     acknowledgment/signature block (Nicholas). ---- */
+  if(isAudit||isInv){
     head('Acknowledgment & Acceptance',10);
     const _ees='EES-'+(m.state||'WI');
-    const ack=(isAudit||isInv)
-      ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.'
-      :'The property owner authorizes '+_ees+' to perform the scope of work above and to submit for and receive the corresponding program incentive on their behalf. All eligible incentives are applied as an instant discount, so no deposit is required and no balance is due from the property owner.';
+    const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
     {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
      al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
     need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
@@ -4099,7 +4098,7 @@ function buildHearPdfBlob(){
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'PROPERTY / INSTALLATION'); t(rX,pT+8,'BILL TO');
+   tc(EMd); font(8,'bold'); t(M,pT+8,'BUILDING / PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
    stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
@@ -4177,15 +4176,7 @@ function buildHearPdfBlob(){
    t(W-M,sy+11,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
    st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
-  /* acknowledgment + signature */
-  head('Acknowledgment & Acceptance',12);
-  const _ees='EES-'+(m.state||'WI');
-  const ack='The property owner authorizes '+_ees+' to perform the electrification scope above and to submit for and receive the corresponding IRA HEAR incentive on their behalf. For income-qualified low-income projects the incentive covers 100% of the project cost up to the program caps.';
-  {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
-   al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
-  need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
-  d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
-  tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
+  /* no acknowledgment/signature block on the proposal (Nicholas) */
   _stampEesFooters(P,m.state);
   return d.output('blob');
 }
