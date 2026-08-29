@@ -607,3 +607,17 @@ export async function captureInspectionPhoto({ file, itemId }) {
     photoType: 'general',
   })
 }
+
+// Inspection videos (Interior Clean / Exterior Clean on the return leg) are
+// documents, not photos — the same shape work steps use. complete_vehicle_
+// inspection counts them against the item's videos_required, so a "record a
+// video" step cannot be closed with nothing.
+export async function captureInspectionVideo({ file, itemId, name }) {
+  return uploadDocument({
+    file,
+    relatedObject: 'vehicle_activity_items',
+    relatedId: itemId,
+    documentType: 'video',
+    name: name || file?.name || 'Inspection video',
+  })
+}

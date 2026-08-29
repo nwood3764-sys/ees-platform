@@ -83,6 +83,10 @@ const DOCUMENT_BUCKET_BY_OBJECT = {
   // field evidence — they belong with the step's photos, not in the
   // property paperwork bucket.
   work_steps: 'work-evidence',
+  // Daily Vehicle Inspection items — the interior/exterior clean videos are
+  // fleet evidence and belong beside that inspection's photos, not in the
+  // property paperwork bucket the fallback would have put them in.
+  vehicle_activity_items: 'fleet-evidence',
   // Everything else falls through to property-documents.
 }
 
