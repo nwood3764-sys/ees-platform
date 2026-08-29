@@ -4038,6 +4038,21 @@ function _stampEesFooters(P,state){
   }
 }
 
+/* Footer for the Sealed proposal / invoice: the document number on every page
+   (so shuffled pages can be traced) plus Page X of Y. Runs after all content. */
+function _stampSealedFooters(P,docLabel,docNo){
+  const {d,W,H,M,font,t,stroke,tc}=P;
+  const fy=H-40, N=d.getNumberOfPages();
+  const left=docNo?(docLabel+' No.: '+docNo):'';
+  for(let p=1;p<=N;p++){
+    d.setPage(p);
+    stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
+    tc([122,135,152]); font(8,'normal');
+    if(left) t(M,fy+12,left);
+    t(W-M,fy+12,'Page '+p+' of '+N,{align:'right'});
+  }
+}
+
 /* ===== HEAR model + proposal ================================================
    Low-income (<=80% AMI): 100% of project cost, up to the federal per-measure
    caps and $14,000 per dwelling unit (same schedule NC & WI). */
@@ -4194,8 +4209,21 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const isInv=kind==='invoice';
   const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   const bh=(txt,x,yy)=>{tc(C.sealBlue); font(9.5,'bold'); t(x,yy,txt.toUpperCase());};
+  // section header — the three sections (Scope of Work / Rebates / Project Summary)
+  // are set off with a larger title over a heavier rule so they read as distinct.
+  const sh=(txt,yy)=>{tc(C.sealBlue); font(11,'bold'); t(M,yy,txt.toUpperCase());
+    stroke(C.sealBlue); d.setLineWidth(1.2); d.line(M,yy+5,W-M,yy+5);};
   const lines9=(arr,x,yy)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*11.5,String(ln))); return yy+arr.filter(v=>v).length*11.5;};
+  const docLabel=isInv?'Project Invoice':'Project Proposal';
+  const docNo=F.pjProjInvNo||F.pjIQ||'';
   st.y=M+4;
+  // document title / letterhead — names the program, state, document type and number
+  tc(C.sealBlue); font(15,'bold'); t(M,st.y+6,'Inflation Reduction Act Multifamily HOMES');
+  tc(C.ink); font(11,'bold'); t(M,st.y+22,stateFullName(m.state)+' '+docLabel);
+  tc(C.mut); font(9,'normal');
+  t(W-M,st.y+6,(isInv?'Invoice No.: ':'Proposal No.: ')+docNo,{align:'right'});
+  t(W-M,st.y+20,'Date: '+(F.pjInvDate||''),{align:'right'});
+  st.y+=30; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=14;
   bh('Primary Contractor:',M,st.y);
   let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+15);
   const RX=W/2+20;
@@ -4210,7 +4238,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   bh('Project Address:',RX,st.y);
   yB=lines9([F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily',isInv?'':F.pjIQ],RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
-  tc(C.sealBlue); font(14,'bold'); t(M,st.y+11,isInv?'INVOICE':'PROPOSAL'); st.y+=17;
+  /* ===== Section 1: Scope of Work ===== */
+  need(72); sh('Scope of Work',st.y+11); st.y+=20;
   /* items table */
   stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
   tc(C.sealBlue); font(8,'bold');
@@ -4237,9 +4266,13 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
   });
-  /* rebate sections — keep the rebate block and the totals summary together so
-     the summary never lands nearly alone on a fresh page */
-  need(m.foe?250:170);
+  // Section 1 total — the full cost of all the work above
+  {need(24); st.y+=6; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
+   tc(C.ink); font(9.5,'bold'); t(M,st.y+13,'Total Cost of Work'); t(W-M,st.y+13,_money(m.total),{align:'right'}); st.y+=16;}
+  /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
+     the project summary together so the summary never lands nearly alone. */
+  need(m.foe?300:220);
+  sh('Rebates & Incentives',st.y+12); st.y+=20;
   const sect=(title,desc,name,amt)=>{need(46); st.y+=12; bh(title,M,st.y);
     st.y+=5; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     const dl=wrap(desc,270), h=Math.max(dl.length*9.5,19)+10; need(h);
@@ -4255,9 +4288,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   {need(24); st.y+=8; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
    tc(C.ink); font(9,'bold'); t(M,st.y+13,'Total Rebates Available');
    tc(C.red); t(W-M,st.y+13,_money(m.total),{align:'right'}); st.y+=18;}
-  /* totals */
-  need(90); st.y+=12; bh('Totals',M,st.y); st.y+=5;
-  stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=4;
+  /* ===== Section 3: Project Summary ===== */
+  need(96); st.y+=14; sh('Project Summary',st.y+9); st.y+=18;
   const trows=[['Total Project Cost',_money(m.total),false],['Total Rebates',_money(m.total),false],
     ['Total Deposits','$0.00',false],[isInv?'Total Due':'Total Project Final Cost','$0.00',true]];
   for(const [lbl,val,strong] of trows){
@@ -4268,12 +4300,13 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
      proposal. It certifies the project is complete, signed by both parties. */
   if(isInv){
     const sl=wrap('By signing below, the customer and the contractor confirm that the project described above has been completed.',CW);
-    need(48+sl.length*11); st.y+=24;
+    need(90+sl.length*11); st.y+=24;
     tc(C.ink); font(8.5); sl.forEach((ln,k)=>t(M,st.y+k*11,ln)); st.y+=sl.length*11+34;
     stroke([68,68,68]); d.setLineWidth(1);
     d.line(M,st.y,M+230,st.y); d.line(W-M-230,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-230,st.y+11,'Contractor Signature');
   }
+  _stampSealedFooters(P,docLabel,docNo);
   return d.output('blob');
 }
 
