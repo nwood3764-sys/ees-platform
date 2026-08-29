@@ -251,6 +251,7 @@
       <label>Owner Address<input id="pjOwnerAddr" placeholder="street"></label>
       <label>Owner City, State Zip<input id="pjOwnerCsz" placeholder="City, ST 55555"></label>
       <label>Contact Name<input id="pjContact"></label>
+      <label>Contact Title<input id="pjContactTitle" placeholder="e.g. CEO, Asset Manager"></label>
       <label>Email<input id="pjEmail"></label>
       <label>Phone<input id="pjPhone"></label>
       <label>Property Name<input id="pjPropName"></label>
@@ -3255,11 +3256,14 @@ function buildMappedForReview(){
    - Measure costs = breakout fractions × total rebate (attic ins .44, air seal .5483,
      bath aerators .0033, kitchen aerators .0035, showerheads .0049), largest row absorbs
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
-const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
+const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjContactTitle','pjEmail','pjPhone','pjPropName',
   'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd',
   'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas',
   'occUnits','occBeds','occBedsTotal'];   // occupancy persists per property too
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
+// Contacts are company representatives, so show "Name — Title" (e.g. "Kevin — CEO").
+function contactWithTitle(F){const n=(F.pjContact||'').trim(),tt=(F.pjContactTitle||'').trim();
+  return n?(tt?n+' — '+tt:n):'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
   try{localStorage.setItem(k,JSON.stringify(Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))));}catch(e){}}
@@ -3828,7 +3832,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,
     'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
+  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
    tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
@@ -3952,7 +3956,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
   else{
     if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
-    if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+' ('+m.tier.note+')',iraAmt]);
+    if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+'  \u00b7  '+(m.units||0)+' units \u00d7 '+_money(m.tier.perUnit)+' per unit = '+_money(iraAmt),iraAmt]);
   }
   // clean rebate rows (matching the line-item table), heading kept with the
   // column header and first credit line so a title is never orphaned.
@@ -3990,7 +3994,6 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
    trow('Total Cost',_money(gross));
    trow('Rebates & Incentives Applied','('+_money(reb)+')');
-   trow('Total Deposits',_money(deposits));
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
    tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
@@ -4092,7 +4095,7 @@ function buildHearPdfBlob(){
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
    tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
    stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
@@ -4156,7 +4159,7 @@ function buildHearPdfBlob(){
    st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
    const nm='IRA HEAR — Instant Discount';
    const perUnit=m.units?Math.round(incentive/m.units*100)/100:incentive;
-   const desc=stateFullName(m.state)+' HEAR — income-qualified instant discount ('+_money(perUnit)+' per dwelling unit).';
+   const desc=stateFullName(m.state)+' HEAR — income-qualified instant discount  ·  '+m.units+' units × '+_money(perUnit)+' per unit = '+_money(incentive);
    font(9.5,'bold'); const nl=wrap(nm,CW-160);
    font(8.5);        const dl=wrap(desc,CW-160);
    const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
@@ -4177,7 +4180,6 @@ function buildHearPdfBlob(){
      stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
    trow('Total Cost',_money(m.totalCost));
    trow('Rebates & Incentives Applied','('+_money(incentive)+')');
-   trow('Total Deposits',_money(0));
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
    tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
@@ -4204,7 +4206,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   let yB=lines9(det,RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
   bh('Bill To:',M,st.y);
-  yA=lines9([F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+15);
+  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+15);
   bh('Project Address:',RX,st.y);
   yB=lines9([F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily',isInv?'':F.pjIQ],RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
