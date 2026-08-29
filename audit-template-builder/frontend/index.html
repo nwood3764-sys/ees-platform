@@ -4237,7 +4237,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
   });
-  /* rebate sections */
+  /* rebate sections — keep the rebate block and the totals summary together so
+     the summary never lands nearly alone on a fresh page */
+  need(m.foe?250:170);
   const sect=(title,desc,name,amt)=>{need(46); st.y+=12; bh(title,M,st.y);
     st.y+=5; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     const dl=wrap(desc,270), h=Math.max(dl.length*9.5,19)+10; need(h);
@@ -4249,19 +4251,29 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     'IRA HOMES '+(isInv?'Incentive ':'')+'- Instant Discount',m.homesAmt);
   if(m.foe) sect('Other Non-IRA Rebates','Incentive Description: '+m.foe.desc+'. Notes: '+m.foe.note+'.',
     'Focus on Energy - Instant Discount',m.foeAmt);
+  // total of every rebate available toward the project cost
+  {need(24); st.y+=8; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
+   tc(C.ink); font(9,'bold'); t(M,st.y+13,'Total Rebates Available');
+   tc(C.red); t(W-M,st.y+13,_money(m.total),{align:'right'}); st.y+=18;}
   /* totals */
   need(90); st.y+=12; bh('Totals',M,st.y); st.y+=5;
   stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=4;
-  const trows=[['Total Cost',_money(m.total),false],['Total Rebates',_money(m.total),false],
-    ['Total Deposits','$0.00',false],[isInv?'Total Due':'Total Final','$0.00',true]];
+  const trows=[['Total Project Cost',_money(m.total),false],['Total Rebates',_money(m.total),false],
+    ['Total Deposits','$0.00',false],[isInv?'Total Due':'Total Project Final Cost','$0.00',true]];
   for(const [lbl,val,strong] of trows){
     tc(C.ink); font(9,strong?'bold':'normal');
     t(M,st.y+12,lbl); t(W-M,st.y+12,val,{align:'right'});
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+17,W-M,st.y+17); st.y+=18;}
-  /* signature */
-  need(64); st.y+=40; stroke([68,68,68]); d.setLineWidth(1);
-  d.line(M,st.y,M+300,st.y); d.line(W-M-160,st.y,W-M,st.y);
-  tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-160,st.y+11,'Date');
+  /* signature — ONLY on the final invoice / project payment request, never on a
+     proposal. It certifies the project is complete, signed by both parties. */
+  if(isInv){
+    const sl=wrap('By signing below, the customer and the contractor confirm that the project described above has been completed.',CW);
+    need(48+sl.length*11); st.y+=24;
+    tc(C.ink); font(8.5); sl.forEach((ln,k)=>t(M,st.y+k*11,ln)); st.y+=sl.length*11+34;
+    stroke([68,68,68]); d.setLineWidth(1);
+    d.line(M,st.y,M+230,st.y); d.line(W-M-230,st.y,W-M,st.y);
+    tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-230,st.y+11,'Contractor Signature');
+  }
   return d.output('blob');
 }
 
