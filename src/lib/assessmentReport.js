@@ -329,8 +329,8 @@ const SUMMARY_SPEC = [
   ['Window Type',             'building_window_type'],
   ['Heating System Type',     'building_heating_system_type'],
   ['Heating Fuel',            'building_heating_fuel_type'],
-  ['Cooling System Type',     'building_cooling_system_type'],
-  ['Water Heating Type',      'building_water_heating_system_type'],
+  ['Cooling System Type',     'building_cooling_type'],
+  ['Water Heating Type',      'building_water_heater_type'],
   ['Ventilation Type',        'building_ventilation_type'],
 ]
 

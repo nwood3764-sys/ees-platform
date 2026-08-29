@@ -5,6 +5,7 @@ import { loadPicklists } from './outreachService'
 import { invalidateAll } from '../lib/useCachedFetch'
 import { getEditableFieldsForTable } from './fieldMetadataService'
 import { isChoiceColumn, getChoiceOptions } from './choiceColumns'
+import { scopePicklistOptionsToState } from '../lib/picklistStateScope'
 export { loadPicklists }
 
 /**
@@ -1753,8 +1754,13 @@ export async function saveRecord(tableName, recordId, changes) {
 /**
  * Fetch picklist options for a given object + field.
  * Used to populate <select> dropdowns in edit mode.
+ *
+ * `state` is the state the record is in (see picklistStateScope). It narrows a
+ * value set whose values name a state — the building utility picklists are the
+ * first — and does nothing at all to a set where none do, which is every other
+ * picklist in the platform.
  */
-export async function fetchPicklistOptions(objectName, fieldName, recordTypeId = null) {
+export async function fetchPicklistOptions(objectName, fieldName, recordTypeId = null, state = null) {
   // Status / lifecycle fields are the ONE place where sort_order is the
   // logical order (To Be Scheduled -> Scheduled -> In Progress ...). Every
   // other picklist is a choice list and must be alphabetical ascending so the
@@ -1788,9 +1794,15 @@ export async function fetchPicklistOptions(objectName, fieldName, recordTypeId =
       })
       if (!error && Array.isArray(data)) {
         const lc = isLifecycleField(resolvedField)
-        return data
-          .map(r => ({ id: r.id, value: r.id, label: r.picklist_label || r.picklist_value, sortOrder: r.picklist_sort_order ?? 0 }))
+        const opts = data
+          .map(r => ({
+            id: r.id, value: r.id,
+            label: r.picklist_label || r.picklist_value,
+            state: r.picklist_state || null,
+            sortOrder: r.picklist_sort_order ?? 0,
+          }))
           .sort((a, b) => lc ? (a.sortOrder - b.sortOrder) : String(a.label).localeCompare(String(b.label)))
+        return scopePicklistOptionsToState(opts, state)
       }
       // On RPC error, fall through to the unscoped path below (never blank a field
       // because of a transient error).
@@ -1806,7 +1818,7 @@ export async function fetchPicklistOptions(objectName, fieldName, recordTypeId =
   const tryFetch = async (field) => {
     let q = supabase
       .from('picklist_values')
-      .select('id, picklist_value, picklist_label, picklist_sort_order')
+      .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_state')
       .eq('picklist_object', objectName)
       .eq('picklist_field', field)
       .eq('picklist_is_active', true)
@@ -1834,12 +1846,34 @@ export async function fetchPicklistOptions(objectName, fieldName, recordTypeId =
     }
   }
 
-  return rows.map(r => ({
+  return scopePicklistOptionsToState(rows.map(r => ({
     id: r.id,
     value: r.id,        // the UUID stored in the record
     label: r.picklist_label || r.picklist_value,
+    state: r.picklist_state || null,
     sortOrder: r.picklist_sort_order ?? 0,
-  }))
+  })), state)
+}
+
+/**
+ * Resolve picklist_values ids to their labels: Map(id -> label).
+ *
+ * For the one case a picklist column is copied into a plain TEXT column on
+ * another object — the incentive application's Electric Provider and the
+ * assessment's Gas Fuel Provider are prefilled from the building's utility —
+ * where writing the raw uuid would print a uuid on the form and in every report
+ * built on it. Ignores anything that is not a uuid, so a column that still holds
+ * free text passes through untouched.
+ */
+export async function fetchPicklistLabelsByIds(ids) {
+  const wanted = [...new Set((ids || []).filter(v => typeof v === 'string' && UUID_RE.test(v)))]
+  if (wanted.length === 0) return new Map()
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_label, picklist_value')
+    .in('id', wanted)
+  if (error) return new Map()
+  return new Map((data || []).map(r => [r.id, r.picklist_label || r.picklist_value]))
 }
 
 /**

@@ -90,6 +90,8 @@ import {
   fetchLookupOptions,
   fetchDependentLookupOptions,
   fetchPageLayout,
+  getTableColumnPrefix,
+  fetchPicklistLabelsByIds,
   loadPicklists as loadAllPicklists,
   getCurrentUserId,
   getCurrentUserProfile,
@@ -112,6 +114,7 @@ import RecordTypePicker from './RecordTypePicker'
 import { resolveParentChoice } from '../lib/constrainingParentChoice'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
+import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
@@ -5275,9 +5278,15 @@ function RelatedListWidget({
           fill('ia_installation_address_city',    b.building_city)
           fill('ia_installation_address_state',   b.building_state)
           fill('ia_installation_address_zip',     b.building_zip)
-          fill('ia_electric_provider',            b.building_electric_utility || b.building_electric_fuel_provider)
+          // Gas/Electric Utility are picklists on the building but plain text on
+          // the application form, so the label is copied across — writing the
+          // stored uuid would print a uuid on the form and in every report on it.
+          const utilityLabels = await fetchPicklistLabelsByIds(
+            [b.building_electric_utility, b.building_gas_utility])
+          const utilityLabel = (v) => utilityLabels.get(v) || null
+          fill('ia_electric_provider',            utilityLabel(b.building_electric_utility) || b.building_electric_fuel_provider)
           fill('ia_electric_account_number',      b.building_electric_account_number)
-          fill('ia_natural_gas_provider',         b.building_gas_utility || b.building_gas_fuel_provider)
+          fill('ia_natural_gas_provider',         utilityLabel(b.building_gas_utility) || b.building_gas_fuel_provider)
           fill('ia_natural_gas_account_number',   b.building_gas_account_number)
           fill('ia_other_heating_fuel_provider',  b.building_heating_fuel_provider)
           fill('ia_how_is_this_building_heated',  resolvePicklistLabel(b.building_heating_fuel_type))
@@ -5433,7 +5442,11 @@ function RelatedListWidget({
           fill('assessment_existing_attic_insulation_type',    b.building_existing_attic_insulation_type)
           fill('assessment_existing_attic_insulation_depth',   b.building_existing_attic_insulation_depth)
           fill('assessment_existing_attic_insulation_r_value', b.building_existing_attic_insulation_r_value)
-          fill('assessment_gas_fuel_provider', b.building_gas_fuel_provider ?? b.building_gas_utility)
+          // Gas Utility is a picklist on the building, plain text here — copy the
+          // label, never the stored uuid.
+          const gasUtilityLabels = await fetchPicklistLabelsByIds([b.building_gas_utility])
+          fill('assessment_gas_fuel_provider',
+            b.building_gas_fuel_provider ?? gasUtilityLabels.get(b.building_gas_utility) ?? null)
           if (b.building_year_built != null && b.building_year_built !== '') {
             fill('assessment_year_built', b.building_year_built)
           }
@@ -7847,9 +7860,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // has no record type.
     if (pickFields.length) {
       const recordTypeId = getRecordTypeValue(currentRecord)
+      // …and to the state the record is in, for the value sets whose values name
+      // one (the building utility picklists). Does nothing to any other field.
+      const recordState = recordStateValue(currentRecord, getTableColumnPrefix(tableName))
       const opts = {}
       await Promise.all(pickFields.map(async fn => {
-        try { opts[fn] = await fetchPicklistOptions(tableName, fn, recordTypeId) } catch { opts[fn] = [] }
+        try { opts[fn] = await fetchPicklistOptions(tableName, fn, recordTypeId, recordState) } catch { opts[fn] = [] }
       }))
       setAllPicklistOpts(opts)
     }
