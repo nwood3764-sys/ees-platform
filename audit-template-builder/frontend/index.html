@@ -276,8 +276,8 @@
   </div>
 
   <div id="hearRow" style="margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
-    <strong style="font-size:13.5px">HEAR — Home Electrification &amp; Appliance Rebates (mechanical)</strong>
-    <span class="copyhint">— the electrification scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
+    <strong style="font-size:13.5px">HEAR — Appliance &amp; Equipment Rebates (mechanical)</strong>
+    <span class="copyhint">— the HEAR scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
     <div style="font-size:12px;color:var(--mut);margin-top:6px">Low-income (&le;80% AMI): the program pays <b>100% of the project cost</b>, up to the ENERGY STAR product-category caps (Heat Pump for Space Heating/Cooling $8,000 · Heat Pump Water Heater $1,750 · Heat Pump Clothes Dryer $840 · Electric Cooking Appliance $840 · Insulation, Air Sealing, and Ventilation $1,600 · Electrical Panel $4,000 · Electric Wiring $2,500) and <b>$14,000 maximum per dwelling unit</b>. Same in North Carolina and Wisconsin.</div>
     <div id="hearBody" style="margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -359,7 +359,7 @@
   </div>
 
   <div class="expSect sectHear">
-  <div class="expHdr">HEAR — Home Electrification Deliverables</div>
+  <div class="expHdr">HEAR Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="hearProp" disabled>HEAR Proposal (PDF)</button>
   </div>
@@ -4109,12 +4109,12 @@ function buildHearPdfBlob(){
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   /* scope table: measure/system/model/eff/description (left) + numbers (right).
      NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
-  head('Electrification Scope — HEAR Program',12);
+  head('Proposed Scope of Work — HEAR Program',12);
   const isNC=m.state==='NC';
+  const _qU=r=>String(r.qty)+' '+(Number(r.qty)===1?'Unit':'Units');
   const cols=isNC
-    ?[['QTY',r=>String(r.qty),34],['LABOR',r=>_money(r.labor),62],['MATERIAL',r=>_money(r.material),66],
-      ['TOTAL',r=>_money(r.cost),66],['REBATE',r=>_money(r.rebate),66]]
-    :[['QTY',r=>String(r.qty),40],['COST',r=>_money(r.cost),80],['REBATE',r=>_money(r.rebate),80]];
+    ?[['QUANTITY / UNIT',_qU,96],['LABOR',r=>_money(r.labor),74],['MATERIAL',r=>_money(r.material),74],['TOTAL',r=>_money(r.cost),74]]
+    :[['QUANTITY / UNIT',_qU,120],['TOTAL',r=>_money(r.cost),84]];
   let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
   const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
@@ -4129,16 +4129,14 @@ function buildHearPdfBlob(){
     stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
     st.y+=headH;};
   tableHeader();
-  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No equipment entered yet.'); st.y+=26;}
   m.rows.forEach((r,i)=>{
     const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
     font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-10);
     font(8.5); const dl=sub?wrap(sub,descW-10):[];
     font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];        // free-text description
-    const capNote='Cap '+_money(r.cap)+'/unit × '+r.qty+' unit'+(r.qty>1?'s':'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
-    const dl2=wrap(capNote,descW-10);
-    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0, capH=dl2.length*9.5;
-    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+4+capH+9;
+    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0;
+    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+9;
     if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
     const y0=st.y;
     if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
@@ -4146,34 +4144,46 @@ function buildHearPdfBlob(){
     let dy=y0+8+nameH;
     if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=subH;}
     if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=descH;}
-    dy+=4; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+5,dy+k*9.5+7,ln));
     const numY=y0+8+9;                        // top-aligned on the measure's first line
     cols.forEach(([lbl,fn,w,rx],c)=>{
-      const isTot=(lbl==='TOTAL'||lbl==='COST'), isReb=(lbl==='REBATE');
-      font(9.5,(isTot||isReb)?'bold':'normal');
-      tc(isReb?EMd:(isTot?NAVY:[64,78,96]));
+      const isTot=(lbl==='TOTAL');
+      font(9.5,isTot?'bold':'normal'); tc(isTot?NAVY:[64,78,96]);
       t(rx-4,numY,fn(r),{align:'right'});});
     st.y=y0+h; colRules(y0,st.y);
     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
   });
-  /* totals: hero Total Due, right-aligned summary */
-  need(132); st.y+=18;
-  {const SUMW=252, x0=W-M-SUMW;
+  /* Applicable Rebates & Incentives — the IRA HEAR instant discount (mirrors HOMES) */
+  const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
+  need(90);
+  head('Applicable Rebates & Incentives',12);
+  {stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+   tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
+   st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
+   const nm='IRA HEAR — Instant Discount';
+   const desc=stateFullName(m.state)+' HEAR — income-qualified rebate applied as an instant discount, up to $14,000 per dwelling unit.';
+   font(9.5,'bold'); const nl=wrap(nm,CW-160);
+   font(8.5);        const dl=wrap(desc,CW-160);
+   const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
+   const y0=st.y;
+   tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
+   if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2; dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
+   tc(NAVY); font(10,'bold'); t(W-M,y0+h/2+3,'('+_money(incentive)+')',{align:'right'});
+   st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;}
+  /* totals — same layout as the HOMES proposal */
+  need(100); st.y+=16;
+  {const SUMW=248, x0=W-M-SUMW;
    tc(INKM); font(8.5,'italic');
-   const note=wrap('Home Electrification & Appliance Rebates (HEAR) is an income-qualified program. For low-income households (at or below 80% of area median income) the program pays 100% of the project cost, up to the federal per-measure caps and $14,000 total per dwelling unit - applied here as an instant discount at the point of service.',x0-M-16);
+   const note=wrap('HEAR is an income-qualified program. For low-income households (at or below 80% of area median income) the rebate covers 100% of the project cost, up to the program caps and $14,000 per dwelling unit, applied as an instant discount.',x0-M-16);
    note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
-   const srows=[['Total Project Cost',_money(m.totalCost)],
-     ['HEAR Incentive (100%)','('+_money(m.totalRebate)+')']];
-   if(m.capped) srows.push(['Program Maximum ($14,000 × '+m.units+')',_money(m.programMax)]);
    let sy=st.y;
-   for(const [lb,v] of srows){
-     tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
+   const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
      tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
-     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;}
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
+   trow('Total Cost',_money(m.totalCost));
+   trow('Rebates & Incentives Applied','('+_money(incentive)+')');
+   trow('Total Deposits',_money(0));
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
-   tc(NAVY); font(11,'bold');
-   t(x0,sy+11,m.totalDue>0.005?'Balance Due':'Total Due');
-   t(W-M,sy+11,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
+   tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
    st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* no acknowledgment/signature block on the proposal (Nicholas) */
