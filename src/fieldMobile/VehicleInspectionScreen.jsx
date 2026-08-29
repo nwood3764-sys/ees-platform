@@ -6,13 +6,18 @@
 //     create_vehicle_daily_inspection — one inspection per vehicle per day.
 //
 //   • VehicleInspection (/field/vehicle-inspection/<activityId>) — the
-//     checklist, split into Pre-Trip and Return legs. Each leg has its
-//     odometer + gas level fields; each item takes photos (camera capture →
-//     canonical uploadPhoto: on-device compression, EXIF preserved,
-//     fleet-evidence bucket) and, where required, an OK / Needs Repair
-//     answer (Needs Repair forces a comment). Complete = the driver's
-//     attestation — the server re-validates everything and routes one
+//     checklist, split into Pre-Trip and Return legs. Each item takes photos
+//     (camera capture → canonical uploadPhoto: on-device compression, EXIF
+//     preserved, fleet-evidence bucket), a video where the item calls for one
+//     (Interior / Exterior Clean), and where required an OK / Needs Repair
+//     answer (Needs Repair forces a comment AND a photo). Complete = the
+//     driver's attestation — the server re-validates everything and routes one
 //     Needs-Repair task to the Shop Steward if anything was flagged.
+//
+//     The odometer and fuel level are captured ON the step that photographs
+//     the dash, not in a panel of their own: the photo is the proof of the
+//     reading, so typing the number somewhere else made the odometer appear
+//     four times in one inspection (Nicholas, 2026-08-29).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -21,12 +26,20 @@ import { usePullToRefresh } from './usePullToRefresh'
 import {
   fetchFleetVehicles, startVehicleInspection, fetchVehicleInspection,
   saveVehicleInspectionLeg, saveVehicleInspectionItem, completeVehicleInspection,
-  captureInspectionPhoto,
+  captureInspectionPhoto, captureInspectionVideo,
 } from './fieldMobileService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary } from './styles'
 import { blockNegativeKeys, clampNonNegative } from '../lib/numberInput'
 
 const GAS_LEVELS = ['E', '1/4', '1/2', '3/4', 'F']
+
+// The step that photographs the dash is the step that carries that leg's
+// odometer and fuel readings. Matched on the item name, which the inspection
+// templates own ("Odometer, Fuel Gauge & Dash - Start" / "- Return") — the
+// alternative was a column on the table to describe a presentation detail.
+function isReadingsStep(item) {
+  return /^odometer/i.test(item?.name || '')
+}
 
 // ── Vehicle picker ───────────────────────────────────────────────────────────
 
@@ -97,6 +110,7 @@ export default function VehicleInspection({ activityId, navigate }) {
   const [completing, setCompleting] = useState(false)
   const [missing, setMissing] = useState(null)      // server-reported gaps on complete
   const fileRef = useRef(null)
+  const videoRef       = useRef(null)
   const captureItemRef = useRef(null)
 
   const load = useCallback(async () => {
@@ -126,6 +140,26 @@ export default function VehicleInspection({ activityId, navigate }) {
       await load()
     } catch (err) {
       setError(err.message || 'Photo upload failed.')
+    } finally { setBusyItem(null) }
+  }
+
+  const triggerVideo = (item) => {
+    captureItemRef.current = item
+    if (videoRef.current) videoRef.current.click()
+  }
+
+  const onVideoFile = async (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = ''
+    const item = captureItemRef.current
+    if (!file || !item) return
+    setBusyItem(item.item_id)
+    try {
+      await captureInspectionVideo({ file, itemId: item.item_id, name: `${item.name} - video` })
+      flash(`Video saved · ${item.name}`)
+      await load()
+    } catch (err) {
+      setError(err.message || 'Video upload failed.')
     } finally { setBusyItem(null) }
   }
 
@@ -185,6 +219,8 @@ export default function VehicleInspection({ activityId, navigate }) {
       <PullIndicator {...pr} />
       <input ref={fileRef} type="file" accept="image/*" capture="environment"
         onChange={onFile} style={{ display: 'none' }} />
+      <input ref={videoRef} type="file" accept="video/*" capture="environment"
+        onChange={onVideoFile} style={{ display: 'none' }} />
 
       {error && <div style={{ ...card, padding: 12, color: C.danger, fontSize: 13, marginBottom: 10 }}>{error}</div>}
       {toast && <div style={{ ...card, padding: 12, color: '#1a6e44', background: '#eafaf2', fontSize: 13, marginBottom: 10 }}>{toast}</div>}
@@ -206,26 +242,28 @@ export default function VehicleInspection({ activityId, navigate }) {
             </div>
           </div>
 
-          <LegFields
-            title="Start of day" leg="pre_trip" disabled={complete}
-            odometer={data.odometer_start} gasLevel={data.gas_level_start} onSave={saveLeg} />
-
           <SectionHeading>Pre-trip checklist</SectionHeading>
           {preTrip.map(item => (
             <ItemCard key={item.item_id} item={item} disabled={complete}
               busy={busyItem === item.item_id}
-              onPhoto={() => triggerCapture(item)} onCondition={setCondition} />
+              onPhoto={() => triggerCapture(item)} onVideo={() => triggerVideo(item)}
+              onCondition={setCondition}
+              readings={isReadingsStep(item) ? {
+                leg: 'pre_trip', odometer: data.odometer_start,
+                gasLevel: data.gas_level_start, onSave: saveLeg,
+              } : null} />
           ))}
-
-          <LegFields
-            title="Return" leg="return" disabled={complete}
-            odometer={data.odometer_return} gasLevel={data.gas_level_return} onSave={saveLeg} />
 
           <SectionHeading>Return checklist</SectionHeading>
           {returns.map(item => (
             <ItemCard key={item.item_id} item={item} disabled={complete}
               busy={busyItem === item.item_id}
-              onPhoto={() => triggerCapture(item)} onCondition={setCondition} />
+              onPhoto={() => triggerCapture(item)} onVideo={() => triggerVideo(item)}
+              onCondition={setCondition}
+              readings={isReadingsStep(item) ? {
+                leg: 'return', odometer: data.odometer_return,
+                gasLevel: data.gas_level_return, onSave: saveLeg,
+              } : null} />
           ))}
 
           {missing && missing.length > 0 && (
@@ -267,9 +305,10 @@ function SectionHeading({ children }) {
   )
 }
 
-// Odometer + gas level for one leg, saved together. Local draft state so
-// typing doesn't fire a network call per keystroke.
-function LegFields({ title, leg, odometer, gasLevel, disabled, onSave }) {
+// Odometer + fuel level for one leg, saved together and rendered INSIDE the
+// step that photographs the dash. Local draft state so typing doesn't fire a
+// network call per keystroke.
+function ReadingsFields({ leg, odometer, gasLevel, disabled, onSave }) {
   const [odo, setOdo] = useState(odometer != null ? String(odometer) : '')
   const [gas, setGas] = useState(gasLevel || '')
   useEffect(() => { setOdo(odometer != null ? String(odometer) : '') }, [odometer])
@@ -278,11 +317,12 @@ function LegFields({ title, leg, odometer, gasLevel, disabled, onSave }) {
   const dirty = odo !== (odometer != null ? String(odometer) : '') || gas !== (gasLevel || '')
 
   return (
-    <div style={{ ...card, padding: 14, marginBottom: 4 }}>
-      <div style={{ fontFamily: FONT, fontSize: 13.5, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>
-        {title}
-        {saved && !dirty && <span style={{ color: C.emeraldMid, marginLeft: 8, fontSize: 12 }}>✓ saved</span>}
-      </div>
+    <div style={{ marginTop: 10 }}>
+      {saved && !dirty && (
+        <div style={{ fontFamily: FONT, fontSize: 12, color: C.emeraldMid, fontWeight: 700, marginBottom: 6 }}>
+          ✓ {Number(odometer).toLocaleString()} mi · {gasLevel}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
           type="number" inputMode="numeric" placeholder="Odometer" min={0}
@@ -318,10 +358,16 @@ function LegFields({ title, leg, odometer, gasLevel, disabled, onSave }) {
   )
 }
 
-function ItemCard({ item, disabled, busy, onPhoto, onCondition }) {
-  const photosDone = item.photo_count >= item.photos_required
+function ItemCard({ item, disabled, busy, onPhoto, onVideo, onCondition, readings }) {
+  const videosRequired = item.videos_required || 0
+  const videoCount     = item.video_count || 0
+  const photosDone    = item.photo_count >= item.photos_required
+  const videosDone    = videoCount >= videosRequired
   const conditionDone = !item.requires_condition || !!item.condition
-  const done = photosDone && conditionDone && (item.photos_required > 0 || item.requires_condition)
+  // A readings step isn't finished until its odometer and fuel level are in.
+  const readingsDone  = !readings || (readings.odometer != null && !!readings.gasLevel)
+  const asks = item.photos_required > 0 || videosRequired > 0 || item.requires_condition || !!readings
+  const done = photosDone && videosDone && conditionDone && readingsDone && asks
 
   return (
     <div style={{ ...card, padding: 12, marginBottom: 8, borderColor: done ? C.emerald : C.border }}>
@@ -339,18 +385,36 @@ function ItemCard({ item, disabled, busy, onPhoto, onCondition }) {
           Needs repair: {item.comment}
         </div>
       )}
+      {readings && (
+        <ReadingsFields
+          leg={readings.leg} odometer={readings.odometer} gasLevel={readings.gasLevel}
+          disabled={disabled} onSave={readings.onSave} />
+      )}
       <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         {(item.photos_required > 0 || item.photo_count > 0 || item.condition === 'needs_repair') && (
           <span style={{ fontFamily: MONO, fontSize: 11.5, color: photosDone ? C.emeraldMid : C.textSecondary }}>
             {item.photo_count}/{item.photos_required || item.photo_count || 0} photo{(item.photos_required || item.photo_count) === 1 ? '' : 's'}
           </span>
         )}
+        {videosRequired > 0 && (
+          <span style={{ fontFamily: MONO, fontSize: 11.5, color: videosDone ? C.emeraldMid : C.textSecondary }}>
+            {videoCount}/{videosRequired} video{videosRequired === 1 ? '' : 's'}
+          </span>
+        )}
         {!disabled && (
           <>
-            <button onClick={onPhoto} disabled={busy}
-              style={{ ...btnSecondary, minHeight: 40, fontSize: 12.5 }}>
-              {busy ? 'Uploading…' : (item.photo_count > 0 ? 'Add photo' : 'Take photo')}
-            </button>
+            {(item.photos_required > 0 || item.requires_condition) && (
+              <button onClick={onPhoto} disabled={busy}
+                style={{ ...btnSecondary, minHeight: 40, fontSize: 12.5 }}>
+                {busy ? 'Uploading…' : (item.photo_count > 0 ? 'Add photo' : 'Take photo')}
+              </button>
+            )}
+            {videosRequired > 0 && (
+              <button onClick={onVideo} disabled={busy}
+                style={{ ...btnSecondary, minHeight: 40, fontSize: 12.5 }}>
+                {busy ? 'Uploading…' : (videoCount > 0 ? 'Add video' : 'Record video')}
+              </button>
+            )}
             {item.requires_condition && (
               <>
                 <button onClick={() => onCondition(item, 'ok')} disabled={busy}
