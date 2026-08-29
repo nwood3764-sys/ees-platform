@@ -624,6 +624,14 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'assessment_documents', config: { heading: 'Documents' } },
     { type: 'assessment_footer' },
   ],
+  // Submitted Enrollment — its own engine. What was filed, and the attachments
+  // that went with it.
+  submittedEnrollment: [
+    { type: 'submitted_enrollment_cover' },
+    { type: 'submitted_enrollment_summary', config: { heading: 'What Was Submitted' } },
+    { type: 'submitted_enrollment_documents', config: { heading: 'Documents Submitted' } },
+    { type: 'submitted_enrollment_footer' },
+  ],
   // Combustion Safety Notification (Large Multifamily 5+ Units) — its own engine.
   combustionSafety: [
     { type: 'combustion_intro' },
@@ -1496,7 +1504,7 @@ export const ASSESSMENT_SECTION_RENDERERS = {
       const textX = hasPreview ? M + thumbW + 12 : M
       const textW = W - M - textX
       const nameLines = wrap(String(doc.name || 'Document'), textW)
-      const metaBits = [doc.typeLabel, doc.size, doc.date].filter(v => v != null && String(v).trim() !== '')
+      const metaBits = [doc.step, doc.typeLabel, doc.size, doc.date].filter(v => v != null && String(v).trim() !== '')
       const textH = nameLines.length * 12 + (metaBits.length ? 12 : 0) + (doc.linkUrl ? 11 : 0)
       const rowH = Math.max(thumbH, textH) + 12
       need(rowH)
@@ -1595,6 +1603,261 @@ export const ASSESSMENT_SECTION_RENDERERS = {
   },
 }
 
+// ===========================================================================
+// SUBMITTED ENROLLMENT — its own engine.
+//
+// What an enrollment FILED: the values that were claimed, and a manifest of
+// the attachments with a working download link for each. It shares nothing
+// with the assessment report — that one prints a building walk (captured
+// field data, photographs, findings) and is keyed by the assessment work
+// order's record type. This one prints a filing and is keyed by the
+// enrollment's. Its own kind, its own section types, its own templates.
+//
+// The model is assembled by submittedEnrollmentService:
+//
+//   m = {
+//     title, programLabel,
+//     enrollment: { number, name, status },
+//     property:   { name, addressLines[], cityStateZip },
+//     building:   { name, label },
+//     opportunity:{ number, name },
+//     company:    { name, addressLines[] },
+//     submittedBy, submittedOn, generatedOn, generatedBy,
+//     summary:   [{ heading, rows: [{ label, value }] }],
+//     documents: [{ name, typeLabel, size, inSubmission, uploadedOn,
+//                   uploadedBy, linkUrl }],
+//     documentNote,
+//     textBlocks,
+//   }
+//
+// Documents arrive already signed — the links are minted in the service,
+// which needs the network; this module stays pure and node-testable.
+// ===========================================================================
+
+/** Shared drawing context for the Submitted Enrollment document. */
+async function buildSubmittedEnrollmentContext(m, kind, opts = {}) {
+  const P = await pdfCanvas(48)
+  const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
+  const INK = C.ink, MUT = C.mut, NAVY = C.navy
+  const RULE = [208, 216, 232]
+  const EMERALD = [42, 171, 114]
+  const LINK = [42, 110, 178]
+  const text = (key) => resolveTextBlock(m.textBlocks, key)
+  const pv = v => (v != null && String(v).trim() !== '') ? String(v) : '\u2014'
+
+  try {
+    d.setProperties({
+      title: [m.enrollment?.number, m.title].filter(Boolean).join(' \u2014 '),
+      subject: m.programLabel || '',
+      author: m.company?.name || 'Energy Efficiency Services',
+    })
+  } catch { /* metadata is a nicety; never fail a record over it */ }
+
+  const band = (txt, gap = 16) => {
+    need(34); st.y += gap
+    fill(EMERALD); d.rect(M, st.y + 1, 3, 12, 'F')
+    tc(NAVY); font(10.5, 'bold'); t(M + 10, st.y + 11, String(txt).toUpperCase())
+    st.y += 16; stroke(RULE); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 8
+  }
+  const subHead = (txt) => { need(16); tc([60, 76, 94]); font(9, 'bold'); t(M, st.y + 9, txt); st.y += 13 }
+  const para = (txt, sz = 9) => {
+    if (txt == null || String(txt).trim() === '') return
+    tc(INK); font(sz)
+    for (const block of String(txt).split('\n')) {
+      if (!block.trim()) { st.y += sz * 0.6; continue }
+      for (const ln of wrap(block, CW)) { need(sz + 4); t(M, st.y + sz, ln); st.y += sz + 3.5 }
+    }
+    st.y += 4
+  }
+  // Label/value rows. A declared field with no value prints an em dash: on a
+  // record of what was filed, "left blank" and "not mentioned in this report"
+  // must not look the same.
+  const kvTable = (rows, opts2 = {}) => {
+    const list = (rows || []).filter(Boolean)
+    if (!list.length) return
+    const labW = opts2.labelWidth || Math.round(CW * 0.42)
+    const valX = M + labW + 10
+    const valW = W - M - valX
+    let zebra = 0
+    for (const row of list) {
+      const label = Array.isArray(row) ? row[0] : row.label
+      const value = Array.isArray(row) ? row[1] : row.value
+      tc(INK); font(8.5)
+      const vls = wrap(pv(value), valW)
+      const lls = wrap(String(label ?? ''), labW)
+      const h = Math.max(lls.length, vls.length) * 11 + 6
+      need(h)
+      if (zebra % 2 === 1) { fill([247, 249, 252]); d.rect(M - 4, st.y, CW + 8, h, 'F') }
+      let yy = st.y
+      tc([74, 94, 122]); font(8.5)
+      lls.forEach(ln => { yy += 11; t(M, yy, ln) })
+      yy = st.y
+      tc(value == null ? MUT : INK); font(8.5)
+      vls.forEach(ln => { yy += 11; t(valX, yy, ln) })
+      st.y += h
+      zebra++
+    }
+    st.y += 4
+  }
+
+  return { m, kind, opts, d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc,
+           INK, MUT, NAVY, RULE, EMERALD, LINK, text, pv, band, subHead, para, kvTable }
+}
+
+export const SUBMITTED_ENROLLMENT_SECTION_RENDERERS = {
+  /* Cover: which filing this is, for which property, and its provenance. */
+  submitted_enrollment_cover(x, cfg = {}) {
+    const { m, W, M, CW, st, font, t, tc, wrap, d, fill, RULE, NAVY, MUT, INK, EMERALD, text } = x
+    fill([13, 26, 46]); d.rect(0, 0, W, 4, 'F')
+    tc(MUT); font(8.5, 'bold')
+    t(M, st.y + 10, String(cfg.eyebrow || m.company?.name || text('submitted_enrollment.header.company_name')
+      || 'Energy Efficiency Services').toUpperCase())
+    st.y += 26
+    tc(NAVY); font(19, 'bold')
+    for (const ln of wrap(cfg.title || m.title || 'Submitted Enrollment', CW)) {
+      t(M, st.y + 18, ln); st.y += 23
+    }
+    if (cfg.subtitle || m.programLabel) {
+      tc([74, 94, 122]); font(11)
+      for (const ln of wrap(cfg.subtitle || m.programLabel, CW)) { t(M, st.y + 11, ln); st.y += 15 }
+    }
+    st.y += 6
+    fill(EMERALD); d.rect(M, st.y, 54, 3, 'F'); st.y += 16
+
+    const colW = (CW - 24) / 2
+    const leftX = M, rightX = M + colW + 24
+    const yStart = st.y
+    const stack = (px, heading, lines) => {
+      let yy = yStart
+      tc(MUT); font(7.5, 'bold'); t(px, yy + 8, heading.toUpperCase()); yy += 14
+      tc(INK); font(9)
+      for (const ln of (lines || []).filter(Boolean)) {
+        for (const w of wrap(String(ln), colW)) { t(px, yy + 9, w); yy += 12 }
+      }
+      return yy
+    }
+    const p = m.property || {}, b = m.building || {}
+    const yL = stack(leftX, cfg.subject_heading || 'Property', [
+      p.name, b.label || b.name, ...(p.addressLines || []), p.cityStateZip,
+    ])
+    const yR = stack(rightX, cfg.provenance_heading || 'Submission Details', [
+      m.programLabel ? `Program: ${m.programLabel}` : null,
+      m.enrollment?.number ? `Enrollment: ${m.enrollment.number}` : null,
+      m.enrollment?.status ? `Status: ${m.enrollment.status}` : null,
+      m.opportunity?.number ? `Opportunity: ${m.opportunity.number}` : null,
+      m.submittedBy ? `Submitted By: ${m.submittedBy}` : null,
+      m.submittedOn ? `Submitted: ${m.submittedOn}` : null,
+      m.generatedOn ? `Record Generated: ${m.generatedOn}` : null,
+    ])
+    st.y = Math.max(yL, yR) + 8
+  },
+
+  /* What was submitted: every declared field, grouped, blanks included. */
+  submitted_enrollment_summary(x, cfg = {}) {
+    const { m, band, kvTable, subHead, para } = x
+    const groups = (m.summary || []).filter(g => g && (g.rows || []).length)
+    if (!groups.length && cfg.omit_when_empty !== false) return
+    band(cfg.heading || 'What Was Submitted')
+    if (cfg.body) para(cfg.body)
+    if (!groups.length) { subHead(cfg.empty_label || 'Nothing was recorded on this enrollment.'); return }
+    for (const group of groups) {
+      if (group.heading) subHead(group.heading)
+      kvTable(group.rows)
+    }
+  },
+
+  /* The attachment manifest: every file, what it is, and a link to it. */
+  submitted_enrollment_documents(x, cfg = {}) {
+    const { m, W, M, st, d, font, t, tc, wrap, need, stroke, RULE, NAVY, MUT, LINK, band, para, subHead } = x
+    const docs = (m.documents || []).filter(Boolean)
+    if (!docs.length && cfg.omit_when_empty !== false) return
+    band(cfg.heading || 'Documents Submitted')
+    if (cfg.body) para(cfg.body)
+    if (m.documentNote) para(m.documentNote, 8)
+    if (!docs.length) {
+      subHead(cfg.empty_label || 'No documents are attached to this enrollment.')
+      return
+    }
+    for (const doc of docs) {
+      const textW = W - M * 2
+      const nameLines = wrap(String(doc.name || 'Document'), textW - 16)
+      const metaBits = [doc.typeLabel, doc.size, doc.uploadedOn, doc.uploadedBy ? `by ${doc.uploadedBy}` : null]
+        .filter(v => v != null && String(v).trim() !== '')
+      const rowH = nameLines.length * 12 + (metaBits.length ? 12 : 0) + (doc.linkUrl ? 11 : 0) + 12
+      need(rowH)
+      const top = st.y
+      let ty = top
+
+      // A marker for the files explicitly flagged as part of the submission,
+      // so a manifest that also lists working copies still says which is which.
+      if (doc.inSubmission) {
+        x.fill(x.EMERALD); d.circle(M + 3, top + 7, 2.6, 'F')
+      }
+      tc(doc.linkUrl ? LINK : NAVY); font(9, 'bold')
+      nameLines.forEach(ln => { ty += 11; t(M + 12, ty, ln) })
+      if (doc.linkUrl) {
+        const lw = Math.min(textW, d.getTextWidth(nameLines[nameLines.length - 1] || ''))
+        stroke(LINK); d.setLineWidth(.5); d.line(M + 12, ty + 2, M + 12 + lw, ty + 2)
+        d.link(M + 12, top, textW - 12, Math.max(rowH - 12, 14), { url: doc.linkUrl })
+      }
+      if (metaBits.length) { tc(MUT); font(7.5); ty += 11; t(M + 12, ty, metaBits.join('  \u00b7  ')) }
+      if (doc.linkUrl) {
+        tc(MUT); font(7.5); ty += 10
+        t(M + 12, ty, cfg.link_hint || 'Click the name to open or download this file.')
+      } else {
+        tc(MUT); font(7.5); ty += 10
+        t(M + 12, ty, cfg.missing_link_label || 'This file could not be linked \u2014 open it from the record.')
+      }
+      st.y = top + rowH
+      stroke(RULE); d.setLineWidth(.4); d.line(M, st.y - 4, W - M, st.y - 4)
+    }
+  },
+
+  /* Free text a template author controls — a program's filing instructions,
+     a certification line, whatever the packet needs said. */
+  submitted_enrollment_note(x, cfg = {}) {
+    const { band, para, text } = x
+    const body = cfg.body || text(cfg.text_key || '')
+    if (!body && cfg.omit_when_empty !== false) return
+    if (cfg.heading) band(cfg.heading)
+    para(body)
+  },
+
+  /* Footer: who generated this record and when. */
+  submitted_enrollment_footer(x, cfg = {}) {
+    const { m, W, M, H, st, d, font, t, tc, stroke, RULE, MUT, need, text } = x
+    need(48); st.y += 10
+    stroke(RULE); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 12
+    tc(MUT); font(7.5)
+    const lines = [
+      cfg.body || text('submitted_enrollment.footer.body')
+        || 'This record was generated by LEAP from the enrollment as it stood at the time shown. It lists the values submitted and the files attached to that submission.',
+      [m.company?.name, m.generatedOn ? `Generated ${m.generatedOn}` : null,
+       m.generatedBy ? `by ${m.generatedBy}` : null].filter(Boolean).join('  \u00b7  '),
+    ].filter(Boolean)
+    for (const ln of lines) {
+      for (const w of x.wrap(String(ln), W - M * 2)) { need(11); t(M, st.y + 8, w); st.y += 10 }
+      st.y += 2
+    }
+  },
+}
+
+/**
+ * Render a Submitted Enrollment. `sections` overrides the built-in list (that
+ * is how a stored template drives the output). Returns a Blob.
+ */
+export async function buildSubmittedEnrollmentPdf(m, kind, sections, opts = {}) {
+  const x = await buildSubmittedEnrollmentContext(m, kind, opts)
+  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS.submittedEnrollment
+  if (!list) throw new Error(`Unknown Submitted Enrollment kind: ${kind}`)
+  for (const s of list) {
+    const render = SUBMITTED_ENROLLMENT_SECTION_RENDERERS[s.type]
+    if (!render) throw new Error(`Unknown Submitted Enrollment section type: ${s.type}`)
+    render(x, s.config || {})
+  }
+  return x.d.output('blob')
+}
+
 /**
  * Render an energy assessment report. `sections` overrides the built-in list
  * (that is how a stored template drives the output). Returns a Blob, or
@@ -1625,6 +1888,7 @@ export const DOCUMENT_KIND_ENGINE = Object.freeze({
   sealed_proposal: 'sealed', sealed_invoice: 'sealed',
   combustion_safety_notification: 'combustion_safety',
   energy_assessment_report: 'energy_assessment',
+  submitted_enrollment: 'submitted_enrollment',
 })
 
 /** Section-type catalogue per engine — the source of truth for the editor palette. */
@@ -1633,6 +1897,7 @@ export const SECTION_TYPES_BY_ENGINE = Object.freeze({
   sealed: Object.keys(SEALED_SECTION_RENDERERS),
   combustion_safety: Object.keys(COMBUSTION_SECTION_RENDERERS),
   energy_assessment: Object.keys(ASSESSMENT_SECTION_RENDERERS),
+  submitted_enrollment: Object.keys(SUBMITTED_ENROLLMENT_SECTION_RENDERERS),
 })
 
 /** Render any submittal document by kind, dispatching to the right engine. */
@@ -1641,6 +1906,7 @@ export async function buildSubmittalPdf(m, kind, sections) {
   if (engine === 'sealed') return buildSealedPdf(m, kind, sections)
   if (engine === 'combustion_safety') return buildCombustionPdf(m, kind, sections)
   if (engine === 'energy_assessment') return buildAssessmentReportPdf(m, kind, sections)
+  if (engine === 'submitted_enrollment') return buildSubmittedEnrollmentPdf(m, kind, sections)
   return buildEesPdf(m, kind, sections)
 }
 

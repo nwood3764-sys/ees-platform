@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
+import { storageSafeFileName } from '../lib/storageKey'
 
 const CONV_COLUMNS = [
   'id',
@@ -896,7 +897,7 @@ export async function uploadAttachmentForMessage({ messageId, conversationId, fi
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   // Sanitize the filename for the storage key — keep the original on the row
-  const safeName = file.name.replace(/[^\w.\-]+/g, '_')
+  const safeName = storageSafeFileName(file.name)
   const storagePath = `${conversationId}/${messageId}/${uniquePrefix}-${safeName}`
 
   // Upload
@@ -947,7 +948,7 @@ export async function uploadAttachmentToStorage(file) {
   const uniquePrefix = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  const safeName = file.name.replace(/[^\w.\-]+/g, '_')
+  const safeName = storageSafeFileName(file.name)
   const storagePath = `staged/${uniquePrefix}-${safeName}`
 
   const { error: upErr } = await supabase.storage

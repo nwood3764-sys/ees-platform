@@ -15,6 +15,7 @@
 
 import {
   CATCH_ALL_DOCUMENT_TYPE,
+  slotTypesOnSurface,
   documentSlotType,
   isDocumentSlot,
   isRequiredDocumentSlot,
@@ -191,6 +192,72 @@ check('audit: two of three outstanding after the asset score lands',
 check('audit: the catch-all shows only the unclaimed file',
   filterSlotDocuments(auditDocs, auditLayout[3].widget_config, slotTypesOnLayout(auditLayout)).map(d => d.id),
   ['a2'])
+
+// ─── A slot claims on its own SCREEN, not across the whole layout ────────────
+//
+// The real WI-IRA-MF-HOMES-PR enrollment layout: five typed slots in
+// Supporting Documentation on the DETAILS tab, a catch-all Documents gallery on
+// the RELATED tab, and a second catch-all in the right rail (visible on every
+// tab). Claiming layout-wide emptied the Related tab's Documents card, so the
+// six files that had been uploaded into slots could only be reached one slot
+// card at a time — which is what Nicholas hit on 2026-08-27.
+const prSections = [
+  {
+    section_label: 'Supporting Documentation', section_tab: 'Details', section_placement: 'main',
+    widgets: [
+      gallery('Reservation HPXMLv4 / BuildingSync File', { target: 'documents', document_type: 'reservation_hpxml' }),
+      gallery('Audit Template Report', { target: 'documents', document_type: 'audit_template_report' }),
+      gallery('Reservation Customer Report (PDF)', { target: 'documents', document_type: 'reservation_customer_report' }),
+      gallery('Customer Contract Scope of Work', { target: 'documents', document_type: 'customer_contract_sow' }),
+      gallery('Low-Income Building Owner Acknowledgment Form', { target: 'documents', document_type: 'li_owner_acknowledgment' }),
+    ],
+  },
+  {
+    section_label: 'Documents', section_tab: 'Details', section_placement: 'right',
+    widgets: [gallery('Documents', { target: 'documents', document_type: CATCH_ALL_DOCUMENT_TYPE })],
+  },
+  {
+    section_label: 'New Section', section_tab: 'Related', section_placement: 'main',
+    widgets: [gallery('Documents', { target: 'documents', document_type: CATCH_ALL_DOCUMENT_TYPE })],
+  },
+]
+// The six documents actually on the record, all of them uploaded into slots.
+const prDocs = [
+  { id: 'd1', document_type: 'reservation_hpxml' },
+  { id: 'd2', document_type: 'reservation_hpxml' },
+  { id: 'd3', document_type: 'reservation_customer_report' },
+  { id: 'd4', document_type: 'reservation_customer_report' },
+  { id: 'd5', document_type: 'audit_template_report' },
+  { id: 'd6', document_type: 'audit_template_report' },
+]
+const catchAll = prSections[2].widgets[0].widget_config
+
+check('on the Details tab the slots claim their own kinds',
+  [...slotTypesOnSurface(prSections, 'Details')].sort(),
+  ['audit_template_report', 'customer_contract_sow', 'li_owner_acknowledgment',
+   'reservation_customer_report', 'reservation_hpxml'])
+check('on the Related tab nothing is claimed — the slots are not on that screen',
+  [...slotTypesOnSurface(prSections, 'Related')], [])
+check('so the Related tab’s Documents card lists every file on the record',
+  filterSlotDocuments(prDocs, catchAll, slotTypesOnSurface(prSections, 'Related')).map(d => d.id),
+  ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'])
+check('while on the Details tab the rail’s catch-all still shows none of them twice',
+  filterSlotDocuments(prDocs, catchAll, slotTypesOnSurface(prSections, 'Details')).map(d => d.id),
+  [])
+check('the layout-wide question still answers layout-wide, for Verify Fields',
+  slotTypesOnLayout(prSections.flatMap(s => s.widgets)).size, 5)
+check('a right-rail slot claims on every tab, because the rail renders on every tab',
+  [...slotTypesOnSurface([
+    { section_tab: 'Details', section_placement: 'right',
+      widgets: [gallery('W-9', { target: 'documents', document_type: 'w9' })] },
+  ], 'Related')],
+  ['w9'])
+check('a section with no tab is a Details section',
+  [...slotTypesOnSurface([
+    { section_placement: 'main', widgets: [gallery('W-9', { target: 'documents', document_type: 'w9' })] },
+  ], 'Details')],
+  ['w9'])
+check('no sections at all claims nothing', [...slotTypesOnSurface(null, 'Details')], [])
 
 console.log(failures === 0
   ? `document-slots fixture: ${checks} checks passed`

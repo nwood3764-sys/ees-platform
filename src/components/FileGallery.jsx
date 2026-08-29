@@ -7,7 +7,6 @@ import {
   UNTAGGED,
   buildStepFilterOptions,
   buildTagChoices,
-  flattenTagChoices,
   buildTagFilterOptions,
   stepEvidenceInSelection,
   filterGalleryPhotos,
@@ -25,10 +24,10 @@ import {
   hydratePhotoUrls,
   softDeletePhoto,
   setPhotoReportInclusion,
+  setDocumentReportInclusion,
   reprocessPhoto,
   repairUnrenderedPhotos,
-  fetchPhotoTagOptions,
-  fetchWorkStepPhotoPrompts,
+  fetchWorkPlanPhotoTags,
   setPhotoTag,
   uploadDocument,
   listDocuments,
@@ -40,7 +39,8 @@ import {
   freshDocumentUrlsBatch,
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
-import { isImageFile, fileTypeLabel } from '../lib/fileKinds'
+import { isImageFile, isVideoFile, fileTypeLabel, extensionOf } from '../lib/fileKinds'
+import { uploadOutcomeMessages } from '../lib/galleryUploadOutcome'
 import { usePhotoRepair } from '../lib/usePhotoRepair'
 import {
   documentFileName,
@@ -54,6 +54,8 @@ import {
   documentSlotHelpText,
   filterSlotDocuments,
 } from '../lib/documentSlots'
+import { documentTypeLabel } from '../lib/documentTypes'
+import { objectHasReportInclusion } from '../lib/reportInclusion'
 
 // ---------------------------------------------------------------------------
 // FileGallery — Salesforce-style related-list card for photos and documents.
@@ -85,7 +87,14 @@ const HEADER_THEME = {
 }
 
 const ACCEPT_BY_MODE = {
-  photos: 'image/*',
+  // Photos card: pictures AND video. A 360 pan of an attic is evidence of the
+  // same job as the stills either side of it, and the assessor is standing on
+  // the step that wants it — sending them to find a different card is how a
+  // video ends up on the wrong step, or nowhere (Nicholas, 2026-08-27: "we need
+  // to include videos"). The bytes still land in `documents`, because `photos`
+  // is an image pipeline (watermark, EXIF, HEIC rendition); what changes is
+  // that the person is never turned away.
+  photos: 'image/*,video/*',
   // Documents: no picker filter. The storage bucket governs what's actually
   // allowed, and drag-and-drop bypasses `accept` regardless — so an over-tight
   // filter only hides valid files (video, CAD/.dwg, Matterport/point-cloud
@@ -240,6 +249,11 @@ export default function FileGalleryWidget({
     target === 'photos' &&
     parentTable === 'work_orders' &&
     !config.work_step_id
+  // "Include in report" is only offered where a report READS it. On every
+  // other object the flag writes a value nothing consumes, which invites
+  // somebody to curate a deliverable that will never be produced — see
+  // src/lib/reportInclusion.js.
+  const offersReportFlag = objectHasReportInclusion(parentTable)
   const isMobile = useIsMobile()
   const toast = useToast()
   const fileInputRef = useRef(null)
@@ -386,7 +400,11 @@ export default function FileGalleryWidget({
 
   // The rows a bulk action can actually reach: the filtered grid in photo
   // mode, the whole list in document mode (documents carry no filters).
-  const visibleItems = target === 'photos' ? visiblePhotos : items
+  const visibleItems = target === 'photos'
+    ? visiblePhotos
+    // Documents carry the same curation flag as photos, so the same "In
+    // report" filter applies to them.
+    : (showReportOnly ? items.filter(d => d.include_in_final_report) : items)
 
   // ── Selection + download ────────────────────────────────────────────
   // Drop selections that scroll out of the current filter, or that were just
@@ -446,15 +464,22 @@ export default function FileGalleryWidget({
 
   // Toggle the internal "include in final report" flag. Optimistic — flips the
   // local row immediately, reverts on failure. Not shown on the watermark.
-  const setLocalReportFlag = (photoId, val) =>
-    setItems(prev => prev.map(p => p.id === photoId ? { ...p, include_in_final_report: val } : p))
-  const handleToggleReport = async (photo) => {
-    const next = !photo.include_in_final_report
-    setLocalReportFlag(photo.id, next)
+  const setLocalReportFlag = (rowId, val) =>
+    setItems(prev => prev.map(p => p.id === rowId ? { ...p, include_in_final_report: val } : p))
+  // One curation flag, two objects. A document belongs in a deliverable for
+  // exactly the reasons a photo does, so it is flagged once and the report
+  // reads the flag — rather than the person re-picking files on every
+  // generation (Nicholas, 2026-08-27).
+  const setReportInclusion = (id, include) => (target === 'photos'
+    ? setPhotoReportInclusion(id, include)
+    : setDocumentReportInclusion(id, include))
+  const handleToggleReport = async (row) => {
+    const next = !row.include_in_final_report
+    setLocalReportFlag(row.id, next)
     try {
-      await setPhotoReportInclusion(photo.id, next)
+      await setReportInclusion(row.id, next)
     } catch (e) {
-      setLocalReportFlag(photo.id, !next) // revert
+      setLocalReportFlag(row.id, !next) // revert
       toast.error(e.message || 'Could not update report flag')
     }
   }
@@ -463,12 +488,11 @@ export default function FileGalleryWidget({
   // keeps up with a 40-photo selection.
   const [reportBusy, setReportBusy] = useState(false)
   const [tagPicker, setTagPicker] = useState(null)   // {photos} while choosing a tag
-  const [tagVocabulary, setTagVocabulary] = useState([]) // picklist: photos / photo_type
   const [tagPrompts, setTagPrompts] = useState([])       // this work order's own photo prompts
   const [tagBusy, setTagBusy] = useState(null)       // {done,total} while applying
   const selectedPhotos = useMemo(
-    () => visiblePhotos.filter(p => selectedIds.has(p.id)),
-    [visiblePhotos, selectedIds])
+    () => (target === 'photos' ? visiblePhotos : visibleItems).filter(p => selectedIds.has(p.id)),
+    [target, visiblePhotos, visibleItems, selectedIds])
   const selectedAllInReport = selectedPhotos.length > 0
     && selectedPhotos.every(p => p.include_in_final_report)
   const handleReportSelected = async () => {
@@ -481,7 +505,7 @@ export default function FileGalleryWidget({
       if (!!photo.include_in_final_report === next) continue
       setLocalReportFlag(photo.id, next)
       try {
-        await setPhotoReportInclusion(photo.id, next)
+        await setReportInclusion(photo.id, next)
         changed += 1
       } catch (e) {
         setLocalReportFlag(photo.id, !next)
@@ -490,17 +514,18 @@ export default function FileGalleryWidget({
     }
     setReportBusy(false)
     if (changed > 0) {
+      const noun = target === 'photos' ? 'photo' : 'document'
       toast.success(next
-        ? `${changed} photo${changed === 1 ? '' : 's'} added to the final report`
-        : `${changed} photo${changed === 1 ? '' : 's'} removed from the final report`)
+        ? `${changed} ${noun}${changed === 1 ? '' : 's'} added to the final report`
+        : `${changed} ${noun}${changed === 1 ? '' : 's'} removed from the final report`)
     }
     if (failed > 0) toast.error(`${failed} could not be updated`)
     if (changed > 0 || failed > 0) exitSelect()
   }
 
   const reportCount = useMemo(
-    () => (target === 'photos' ? items.filter(p => p.include_in_final_report).length : 0),
-    [items, target]
+    () => items.filter(p => p.include_in_final_report).length,
+    [items]
   )
 
   // Photos still being processed won't have their watermarked URL on first
@@ -516,19 +541,20 @@ export default function FileGalleryWidget({
     return () => clearTimeout(t)
   }, [items, target, refresh])
 
-  // The tag vocabulary is admin-managed, so it is read from the picklist rather
-  // than compiled in. Loaded once per card; an empty list is a real answer (an
-  // admin has retired every tag) and the picker says so.
+  // The tag vocabulary belongs to the work plan — its steps and their photo
+  // prompts. There is no second, generic list: a photo on a job documents part
+  // of that job.
   useEffect(() => {
     if (target !== 'photos') return
     let cancelled = false
-    fetchPhotoTagOptions()
-      .then(opts => { if (!cancelled) setTagVocabulary(opts) })
-      .catch(() => {})
-    // The work order's OWN prompts — the vocabulary that matches what was
-    // actually walked. Without these the picker offers only generic tags.
-    if (parentTable === 'work_orders' && parentRecordId) {
-      fetchWorkStepPhotoPrompts(parentRecordId)
+    // The work PLAN's own vocabulary — its work steps and their photo prompts.
+    // Resolved from either end, because the Photos card lives on the work order
+    // AND on each work step; gating this on work orders alone is exactly why a
+    // work step's picker showed nothing but generic tags.
+    if (parentRecordId && (parentTable === 'work_orders' || parentTable === 'work_steps')) {
+      fetchWorkPlanPhotoTags(parentTable === 'work_orders'
+        ? { workOrderId: parentRecordId }
+        : { workStepId: parentRecordId })
         .then(list => { if (!cancelled) setTagPrompts(list) })
         .catch(() => {})
     }
@@ -545,12 +571,31 @@ export default function FileGalleryWidget({
   // ── Upload handlers ─────────────────────────────────────────────────
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList || fileList.length === 0) return
-    if (photoLockoutMessage) {
-      toast.error(photoLockoutMessage)
+
+    // The lockout is about the `photos` TABLE, so it refuses the files that
+    // would go there — and nothing else. A Photos card on an object that
+    // cannot hold photos is still a card on a record, and a video (or a
+    // document) filed against that record is perfectly storable: those rows go
+    // to `documents`, which has no such restriction. Refusing the whole drop
+    // turned a layout-configuration fact into a person being told they may not
+    // file footage (Nicholas, 2026-08-27: "the user can upload videos
+    // anywhere. You can't restrict this"). The notice still explains why there
+    // is no photo grid.
+    const files = Array.from(fileList).filter(f => {
+      if (!photoLockoutMessage) return true
+      if (isImageFile(f.name, f.type)) return false
+      return true
+    })
+    if (files.length === 0) {
+      toast.error(photoLockoutMessage || 'Nothing to upload.')
       return
     }
-    const files = Array.from(fileList)
-    const misfiled = []   // non-images filed as documents instead
+    if (photoLockoutMessage && files.length < fileList.length) {
+      toast.error(photoLockoutMessage)
+    }
+    const misfiled = []   // non-images, non-videos filed as documents instead
+    const videosFiled = [] // videos dropped on the Photos card — evidence, not a misfile
+    const photoNames  = [] // for the single-photo confirmation, which names the file
     let successCount = 0
     let failCount = 0
     setUploading(c => c + files.length)
@@ -560,22 +605,35 @@ export default function FileGalleryWidget({
       // real-world uploads are 1-3 files at a time.
       for (const file of files) {
         try {
-          // A PDF floor plan, a DWG, a spreadsheet — these are documents that
-          // happened to be dropped on the Photos card. Taking them as photos
-          // produced a tile that could never show anything (Nicholas,
-          // 2026-08-24). They are filed as documents on the SAME record
-          // instead: documentation is never blocked, it just lands in the
-          // right place, and the work step already has a Documents card.
+          // Neither a PDF floor plan nor a 360 video is an image, and the two
+          // are not the same event.
+          //
+          // A PDF, a DWG, a spreadsheet is a DOCUMENT that happened to be
+          // dropped on the Photos card. Taking it as a photo produced a tile
+          // that could never show anything (Nicholas, 2026-08-24), so it is
+          // filed as a document on the SAME record and the person is told
+          // where it went — silently filing it elsewhere looks like the upload
+          // vanished.
+          //
+          // A VIDEO is evidence of the very work this card is for, so it is
+          // filed as one — document_type 'video', named as a video, no
+          // "you misfiled this". It goes to `documents` rather than `photos`
+          // only because `photos` is an image pipeline (watermark, EXIF, HEIC
+          // rendition) with nothing to do to a video; that is an
+          // implementation fact and not something to make the assessor's
+          // problem.
+          const asVideo = target === 'photos' && isVideoFile(file.name, file.type)
           if (target === 'photos' && !isImageFile(file.name, file.type)) {
             await uploadDocument({
               file,
               relatedObject: parentTable,
               relatedId: parentRecordId,
-              documentType: config.document_type || 'attachment',
+              documentType: asVideo ? 'video' : (config.document_type || 'attachment'),
               category: config.category || null,
               programId: config.program_id || null,
             })
-            misfiled.push({ name: file.name, kind: fileTypeLabel(file.name, file.type) })
+            if (asVideo) videosFiled.push({ name: file.name })
+            else misfiled.push({ name: file.name, kind: fileTypeLabel(file.name, file.type) })
           } else if (target === 'photos') {
             await uploadPhoto({
               file,
@@ -590,6 +648,7 @@ export default function FileGalleryWidget({
               photoType: config.photo_type || 'general',
               applyWatermark: config.apply_watermark !== false,
             })
+            photoNames.push(file.name)
           } else {
             await uploadDocument({
               file,
@@ -612,24 +671,16 @@ export default function FileGalleryWidget({
       setUploading(c => Math.max(0, c - files.length))
     }
     if (successCount > 0) {
-      if (misfiled.length === successCount) {
-        // Everything dropped was a document. Say where it went — silently
-        // filing it elsewhere would look like the upload vanished.
-        toast.success(misfiled.length === 1
-          ? `${misfiled[0].name} is a ${misfiled[0].kind}, not a photo — filed under Documents`
-          : `${misfiled.length} files were documents, not photos — filed under Documents`)
-      } else if (misfiled.length > 0) {
-        toast.success(`Uploaded ${successCount - misfiled.length} photo${successCount - misfiled.length === 1 ? '' : 's'}`)
-        toast.success(misfiled.length === 1
-          ? `${misfiled[0].name} is a ${misfiled[0].kind} — filed under Documents`
-          : `${misfiled.length} of them were documents — filed under Documents`)
-      } else {
-        toast.success(
-          files.length === 1
-            ? `Uploaded ${files[0].name}`
-            : `Uploaded ${successCount} of ${files.length} files`
-        )
-      }
+      // Wording lives in src/lib/galleryUploadOutcome.js — three outcomes off
+      // one drag is more branching than belongs in an upload handler, and it
+      // is the part worth testing.
+      for (const message of uploadOutcomeMessages({
+        attempted: files.length,
+        photos: successCount - misfiled.length - videosFiled.length,
+        photoNames,
+        videos: videosFiled,
+        documents: misfiled,
+      })) toast.success(message)
       await refresh()
     } else if (failCount > 0) {
       // Errors already toasted per-file above; nothing to add.
@@ -774,7 +825,7 @@ export default function FileGalleryWidget({
         ref={fileInputRef}
         type="file"
         multiple
-        accept={ACCEPT_BY_MODE[target]}
+        accept={photoLockoutMessage ? 'video/*' : ACCEPT_BY_MODE[target]}
         style={{ display: 'none' }}
         onChange={onPickerChange}
       />
@@ -806,7 +857,7 @@ export default function FileGalleryWidget({
         }}
       >
         {/* Drag-over overlay */}
-        {dragActive && !photoLockoutMessage && (
+        {dragActive && (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 5,
             background: 'rgba(62,207,142,0.08)',
@@ -881,14 +932,12 @@ export default function FileGalleryWidget({
                 label="Take"
               />
             )}
-            {!photoLockoutMessage && (
-              <HeaderButton
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
-                primary={!isMobile || target !== 'photos'}
-                iconPath="M12 5v14M5 12h14"
-                label="Upload"
-              />
-            )}
+            <HeaderButton
+              onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
+              primary={!isMobile || target !== 'photos'}
+              iconPath="M12 5v14M5 12h14"
+              label={photoLockoutMessage ? 'Video' : 'Upload'}
+            />
             <Icon
               path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'}
               size={12} color={C.textMuted}
@@ -956,14 +1005,14 @@ export default function FileGalleryWidget({
                   selectedCount={selectedIds.size}
                   totalCount={visiblePhotos.length}
                   downloading={downloading}
-                  reportCount={reportCount}
-                  showReportOnly={showReportOnly}
-                  onToggleReportFilter={() => setShowReportOnly(v => !v)}
+                  reportCount={offersReportFlag ? reportCount : 0}
+                  showReportOnly={offersReportFlag && showReportOnly}
+                  onToggleReportFilter={offersReportFlag ? () => setShowReportOnly(v => !v) : null}
                   onEnterSelect={() => setSelectMode(true)}
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
                   onDownload={handleDownloadSelected}
-                  onReportSelected={handleReportSelected}
+                  onReportSelected={offersReportFlag ? handleReportSelected : null}
                   selectedAllInReport={selectedAllInReport}
                   reportBusy={reportBusy}
                   onTagSelected={() => {
@@ -1017,7 +1066,7 @@ export default function FileGalleryWidget({
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
-                  onToggleReport={handleToggleReport}
+                  onToggleReport={offersReportFlag ? handleToggleReport : null}
                   onOpen={(idx) => setLightboxIdx(idx)}
                   onReprocess={handleReprocess}
                   onDelete={(p) => setConfirmDelete({ id: p.id, name: p.photo_number || 'photo' })}
@@ -1031,6 +1080,12 @@ export default function FileGalleryWidget({
                   selectedCount={selectedIds.size}
                   totalCount={visibleItems.length}
                   downloading={downloading}
+                  reportCount={offersReportFlag ? reportCount : 0}
+                  showReportOnly={offersReportFlag && showReportOnly}
+                  onToggleReportFilter={offersReportFlag ? () => setShowReportOnly(v => !v) : null}
+                  onReportSelected={offersReportFlag ? handleReportSelected : null}
+                  selectedAllInReport={selectedAllInReport}
+                  reportBusy={reportBusy}
                   onEnterSelect={() => setSelectMode(true)}
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
@@ -1047,13 +1102,14 @@ export default function FileGalleryWidget({
                   }}
                 />
                 <DocumentList
-                  documents={items}
+                  documents={visibleItems}
                   isMobile={isMobile}
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
                   onPreview={(d) => setPreviewDoc(d)}
                   onDownload={handleDownloadDocument}
+                  onToggleReport={offersReportFlag ? handleToggleReport : null}
                   onDelete={(d) => setConfirmDelete({ id: d.id, name: d.name || 'document' })}
                 />
               </>
@@ -1070,7 +1126,7 @@ export default function FileGalleryWidget({
           onClose={() => setLightboxIdx(null)}
           onIndexChange={setLightboxIdx}
           onTag={(p) => setTagPicker({ photos: [p] })}
-          onToggleReport={handleToggleReport}
+          onToggleReport={offersReportFlag ? handleToggleReport : null}
         />
       )}
 
@@ -1088,7 +1144,6 @@ export default function FileGalleryWidget({
       {tagPicker && (
         <PhotoTagPickerModal
           photos={tagPicker.photos}
-          vocabulary={tagVocabulary}
           prompts={tagPrompts}
           busy={tagBusy}
           onApply={handleApplyTag}
@@ -1156,6 +1211,10 @@ function LockoutNotice({ message }) {
     }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>This widget is misconfigured.</div>
       {message}
+      <div style={{ marginTop: 8 }}>
+        A <strong>video</strong> can still be filed here — it is saved to this
+        record under Documents, which has no such restriction.
+      </div>
     </div>
   )
 }
@@ -1461,7 +1520,9 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
   })
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
-      {!selectMode && (
+      {/* No handler means this object has no report reading the flag, so the
+          filter is not offered either — see src/lib/reportInclusion.js. */}
+      {!selectMode && onToggleReportFilter && (
         <button
           onClick={onToggleReportFilter}
           title="Show only photos marked for the final report"
@@ -1507,6 +1568,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
               multi-select filters this is the point of selecting at all: filter
               to Roof / Ceiling + Windows & Doors, Select all, and mark them.
               Toggles to Remove once everything selected is already in. */}
+          {onReportSelected && (
           <button
             onClick={onReportSelected}
             disabled={selectedCount === 0 || reportBusy}
@@ -1527,6 +1589,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
                 ? `Remove from report${selectedCount ? ` (${selectedCount})` : ''}`
                 : `Add to report${selectedCount ? ` (${selectedCount})` : ''}`}
           </button>
+          )}
           {/* Delete the selection. The per-photo delete is hover-revealed and
               hidden while selecting, so without this there was no way to remove
               a batch of photos you'd just uploaded (Nicholas, 2026-08-17).
@@ -1567,6 +1630,15 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
   )
 }
 
+// An optional callback stays optional all the way down. Wrapping it in an
+// arrow — `onToggleReport={() => onToggleReport(p)}` — makes a null prop
+// arrive at the tile as a function, so the tile's own `{onToggleReport && …}`
+// guard passes, the "In report" button renders on an object that has no report
+// to read the flag, and pressing it calls null. That is exactly what happened
+// on a WORK STEP page (Lucas, 2026-08-27): `objectHasReportInclusion` returns
+// false for work_steps, so the flag was correctly withheld — and the button was
+// drawn anyway, and crashed the record page to the error screen the moment he
+// flagged the video he had just uploaded. Pass the null through.
 function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   return (
     <div style={{
@@ -1583,7 +1655,7 @@ function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, se
           selectMode={selectMode}
           selected={selectedIds?.has(p.id)}
           onToggleSelect={() => onToggleSelect(p.id)}
-          onToggleReport={() => onToggleReport(p)}
+          onToggleReport={onToggleReport ? () => onToggleReport(p) : null}
           onOpen={() => onOpen(idx)}
           rendering={!!renderingIds?.has(p.id)}
           onReprocess={() => onReprocess(p.id)}
@@ -1750,28 +1822,21 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
           the work order's roll-up gallery (on a step's own card the step is
           already the context); the photo tag — the named prompt the
           technician answered — appears wherever it says something. */}
+      {/* ONE chip. A photo has one tag — if we switch it the old one falls
+          off (Nicholas, 2026-08-27: "I don't know how we have two tags on a
+          photo. We should only ever have one"). What looked like two was the
+          step chip and the tag chip side by side; now the tag wins where there
+          is one, and the step name stands in only for an untagged photo. */}
       {(showStepTag || isMeaningfulTag(photo.photo_type)) && (
         <div style={{
           position: 'absolute', left: 6, right: 6, bottom: 6,
-          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', gap: 4,
           pointerEvents: 'none',
         }}>
-          {showStepTag && (
+          {isMeaningfulTag(photo.photo_type) ? (
             <span style={{
               maxWidth: '100%',
-              background: 'rgba(7,17,31,0.82)', color: '#fff',
-              fontSize: 10, fontWeight: 600,
-              padding: '2px 7px', borderRadius: 10,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {photo._work_step_name || 'Step'}
-            </span>
-          )}
-          {isMeaningfulTag(photo.photo_type) && (
-            <span style={{
-              maxWidth: '100%',
-              background: photo.photo_type === 'before' ? '#e8f3fb' : '#e8f8f0',
-              color: photo.photo_type === 'before' ? '#1a5a8a' : '#1a7a4f',
+              background: '#e8f8f0', color: '#1a7a4f',
               fontSize: 9.5, fontWeight: 700,
               padding: '2px 6px', borderRadius: 10,
               letterSpacing: 0.3,
@@ -1779,7 +1844,17 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
             }}>
               {photoTagLabel(photo)}
             </span>
-          )}
+          ) : showStepTag ? (
+            <span style={{
+              maxWidth: '100%',
+              background: 'rgba(7,17,31,0.82)', color: '#fff',
+              fontSize: 10, fontWeight: 600,
+              padding: '2px 7px', borderRadius: 10,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {photo._work_step_name || 'Untagged'}
+            </span>
+          ) : null}
         </div>
       )}
 
@@ -1804,8 +1879,8 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
 // Delete / Download. Purpose-built for documents rather than shared with
 // PhotoToolbar, which carries the final-report flag actions that mean nothing
 // to a document (Nicholas, 2026-08-24).
-function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected }) {
-  if (totalCount === 0) return null
+function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected, onReportSelected, selectedAllInReport, reportBusy }) {
+  if (totalCount === 0 && !showReportOnly && !reportCount) return null
   const btn = (extra = {}) => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
     padding: '5px 10px', fontSize: 12, fontWeight: 600,
@@ -1817,6 +1892,16 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, o
       display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
       gap: 8, marginBottom: 10, flexWrap: 'wrap',
     }}>
+      {!selectMode && onToggleReportFilter && (
+        <button
+          onClick={onToggleReportFilter}
+          title="Show only documents marked for the final report"
+          style={{ ...btn(showReportOnly ? { background: '#e8f8f2', borderColor: C.emerald, color: C.emeraldMid } : {}), marginRight: 'auto' }}
+        >
+          <Icon path={FLAG_ICON} size={12} color={showReportOnly ? C.emeraldMid : C.textMuted} />
+          In report{reportCount ? ` (${reportCount})` : ''}
+        </button>
+      )}
       {!selectMode ? (
         <button onClick={onEnterSelect} style={btn()}>
           <Icon path="M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={13} color={C.textSecondary} />
@@ -1831,6 +1916,31 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, o
             {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
           </button>
           <button onClick={onCancel} style={btn()}>Cancel</button>
+          {/* Flag the whole selection for the final report. This is the point
+              of the flag: say once which documents belong in the deliverable,
+              instead of re-picking them on every generation. */}
+          {onReportSelected && (
+          <button
+            onClick={onReportSelected}
+            disabled={selectedCount === 0 || reportBusy}
+            title={selectedAllInReport
+              ? 'Remove the selected documents from the final report'
+              : 'Add the selected documents to the final report'}
+            style={btn({
+              background: (selectedCount === 0 || reportBusy) ? C.border : '#e8f8f2',
+              borderColor: (selectedCount === 0 || reportBusy) ? C.border : C.emerald,
+              color: (selectedCount === 0 || reportBusy) ? C.textMuted : C.emeraldMid,
+              cursor: (selectedCount === 0 || reportBusy) ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path={FLAG_ICON} size={12}
+              color={(selectedCount === 0 || reportBusy) ? C.textMuted : C.emeraldMid} />
+            {reportBusy ? 'Saving…'
+              : selectedAllInReport
+                ? `Remove from report${selectedCount ? ` (${selectedCount})` : ''}`
+                : `Add to report${selectedCount ? ` (${selectedCount})` : ''}`}
+          </button>
+          )}
           {/* Blue, not red, per the design system; soft delete either way. */}
           <button
             onClick={onDeleteSelected}
@@ -1871,7 +1981,8 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, o
   )
 }
 
-function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onDelete }) {
+// Same null-through rule as PhotoGrid above.
+function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {documents.map((d) => (
@@ -1884,6 +1995,7 @@ function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSe
           onToggleSelect={() => onToggleSelect(d.id)}
           onPreview={() => onPreview(d)}
           onDownload={() => onDownload(d)}
+          onToggleReport={onToggleReport ? () => onToggleReport(d) : null}
           onDelete={() => onDelete(d)}
         />
       ))}
@@ -1891,7 +2003,7 @@ function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSe
   )
 }
 
-function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onDelete }) {
+function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
   const [hover, setHover] = useState(false)
   const ext = (doc.name || '').split('.').pop()?.toLowerCase() || ''
   const iconPath = ext === 'pdf'
@@ -1904,6 +2016,11 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
     ? new Date(doc.created_at).toLocaleDateString('en-US',
         { month: 'short', day: 'numeric', year: 'numeric' })
     : null
+
+  // The type in words. listDocuments hydrates the label from the
+  // (documents, document_type) picklist; a row that reached here another way
+  // still humanizes its slug rather than printing it raw.
+  const typeLabel = doc._document_type_label ?? documentTypeLabel(doc.document_type, null)
 
   // While selecting, the whole row is the checkbox — clicking a row to open a
   // preview mid-selection is how you lose a selection you were building.
@@ -1961,7 +2078,7 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
           fontSize: 11, color: C.textMuted,
           display: 'flex', gap: 8, marginTop: 1,
         }}>
-          {doc.document_type && <span>{doc.document_type}</span>}
+          {typeLabel && <span>{typeLabel}</span>}
           {sizeStr && <span>· {sizeStr}</span>}
           {dateStr && !isMobile && <span>· {dateStr}</span>}
         </div>
@@ -1970,6 +2087,29 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
           then, and a stray per-row delete mid-selection is a surprise. */}
       {!selectMode && (
         <>
+          {/* Include in final report — the same curation flag photos carry, so
+              the deliverable's contents are recorded once instead of re-picked
+              on every generation. Sits outside the _url guard: a document is
+              curated whether or not its signed URL resolved this load.
+              Internal only — never shown on the file, never restricts access. */}
+          {onToggleReport && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleReport() }}
+              title={doc.include_in_final_report
+                ? 'Included in final report — click to remove'
+                : 'Include in final report'}
+              style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: doc.include_in_final_report ? C.emerald : 'transparent',
+                border: doc.include_in_final_report ? 'none' : `1px solid ${C.border}`,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', flexShrink: 0,
+              }}
+            >
+              <Icon path={FLAG_ICON} size={13}
+                color={doc.include_in_final_report ? '#fff' : C.textMuted} />
+            </button>
+          )}
           {doc._url && (
             <button
               onClick={(e) => { e.stopPropagation(); onDownload() }}
@@ -2292,6 +2432,10 @@ function getPreviewKind(doc) {
   const mime = (doc.mime_type || '').toLowerCase()
   if (mime === 'application/pdf' || ext === 'pdf') return 'pdf'
   if (mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext)) return 'image'
+  // Video plays in the modal. It is evidence someone recorded on site, and a
+  // Download button was the whole of what LEAP offered for it until
+  // 2026-08-27 — nobody reviews a 430 MB attic pan by saving it first.
+  if (isVideoFile(doc.name, doc.mime_type)) return 'video'
   // Spreadsheets render client-side via SheetJS (workbook → HTML table). The
   // file bytes are read in the browser the user already authenticated to —
   // nothing transits a third-party viewer, which matters for PII-bearing
@@ -2356,6 +2500,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
         { year: 'numeric', month: 'short', day: 'numeric',
           hour: 'numeric', minute: '2-digit' })
     : null
+  const typeLabel = doc._document_type_label ?? documentTypeLabel(doc.document_type, null)
 
   return (
     <div
@@ -2397,6 +2542,8 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
             <Icon
               path={kind === 'image'
                 ? 'M3 7h18v12H3V7z M3 7l5-5h8l5 5 M9 13a2 2 0 100-4 2 2 0 000 4z'
+                : kind === 'video'
+                ? 'M3 5h18v14H3V5z M3 9h18 M3 15h18 M7 5v14 M17 5v14'
                 : 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z M14 2v6h6'}
               size={14} color="#1a5a8a"
             />
@@ -2413,7 +2560,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
               display: 'flex', gap: 8, marginTop: 1,
               flexWrap: 'wrap',
             }}>
-              {doc.document_type && <span>{doc.document_type}</span>}
+              {typeLabel && <span>{typeLabel}</span>}
               {sizeStr && <span>· {sizeStr}</span>}
               {createdStr && !isMobile && <span>· Uploaded {createdStr}</span>}
             </div>
@@ -2476,7 +2623,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
         {/* Body */}
         <div style={{
           flex: 1, minHeight: 0,
-          background: kind === 'image' ? '#0d1a2e' : '#f5f7fa',
+          background: (kind === 'image' || kind === 'video') ? '#0d1a2e' : '#f5f7fa',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'auto',
           position: 'relative',
@@ -2507,6 +2654,8 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
                 objectFit: 'contain', display: 'block',
               }}
             />
+          ) : kind === 'video' ? (
+            <VideoPreview doc={doc} url={url} onDownload={onDownload} />
           ) : kind === 'spreadsheet' ? (
             <SpreadsheetPreview doc={doc} />
           ) : kind === 'word' ? (
@@ -2594,6 +2743,72 @@ function FallbackPreview({ doc }) {
         </a>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// VideoPreview — plays an evidence video in the modal.
+//
+// Streamed straight from its signed Storage URL: <video preload="metadata">
+// fetches byte ranges on demand, so opening a 430 MB attic pan costs the first
+// few hundred kilobytes and not the whole file.
+//
+// The honest part is the failure. A browser decodes what it decodes, and an
+// iPhone capture arrives as a .MOV (video/quicktime) that Chrome on Windows
+// often will not play — the very file that started this (IMG_0346.MOV,
+// 2026-08-27). There is nothing the app can do about that, and a black
+// rectangle is not an answer: on `error` this names the format, says the
+// browser cannot play it, and puts Download right there. The file is fine and
+// it is safe on the record either way, which is the thing the person needs to
+// know.
+// ---------------------------------------------------------------------------
+function VideoPreview({ doc, url, onDownload }) {
+  const [failed, setFailed] = useState(false)
+  const kindLabel = fileTypeLabel(doc.name, doc.mime_type)
+  const format = extensionOf(doc.name) ? `.${extensionOf(doc.name)}` : kindLabel
+
+  if (failed) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 12, padding: 32, textAlign: 'center', maxWidth: 420,
+      }}>
+        <Icon path="M3 5h18v14H3V5z M3 9h18 M3 15h18 M7 5v14 M17 5v14" size={26} color="#8fa0b8" />
+        <div style={{ color: '#e8eef6', fontSize: 14, fontWeight: 600 }}>
+          This browser cannot play a {format} video
+        </div>
+        <div style={{ color: '#8fa0b8', fontSize: 12.5, lineHeight: 1.5 }}>
+          The file is saved on this record and is not damaged — download it and
+          play it in your video player, or open this page in Safari.
+        </div>
+        {onDownload && (
+          <button
+            onClick={onDownload}
+            style={{
+              background: C.emerald, color: '#fff', border: 'none', borderRadius: 5,
+              padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+              size={12} color="#fff" />
+            Download
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <video
+      key={url}
+      src={url}
+      controls
+      playsInline
+      preload="metadata"
+      onError={() => setFailed(true)}
+      style={{ maxWidth: '100%', maxHeight: '100%', display: 'block', outline: 'none' }}
+    />
   )
 }
 
@@ -2911,12 +3126,9 @@ function WordPreview({ doc }) {
 //     possible, so the warning names what is affected instead of blocking.
 //   - It says the watermark is being redrawn. The tag is printed onto the face
 //     of the evidence copy, so tagging is not a metadata-only edit.
-function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCancel }) {
+function PhotoTagPickerModal({ photos, prompts, busy, onApply, onCancel }) {
   const count = photos.length
-  const groups = useMemo(
-    () => buildTagChoices({ prompts, picklist: vocabulary, photos }),
-    [prompts, vocabulary, photos])
-  const choices = useMemo(() => flattenTagChoices(groups), [groups])
+  const choices = useMemo(() => buildTagChoices(prompts), [prompts])
   const stepEvidence = useMemo(() => stepEvidenceInSelection(photos), [photos])
   // Every photo already carrying the same tag → show it as the current value.
   const currentTag = useMemo(() => {
@@ -2965,44 +3177,36 @@ function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCan
 
         <div style={{ overflowY: 'auto', padding: '8px 8px 4px', flex: 1 }}>
           {choices.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted }}>
-              No photo tags are configured. An administrator adds them at
-              Setup → Picklists, on <strong>photos / photo_type</strong>.
+            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted, lineHeight: 1.5 }}>
+              This job's work plan defines no photo tags, so there is nothing to
+              choose. Tags come from the work steps and the shots they ask for —
+              add them to the work plan template and they appear here.
             </div>
-          ) : groups.map(g => (
-            <div key={g.id} style={{ marginBottom: 6 }}>
-              <div style={{
-                fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5,
-                textTransform: 'uppercase', color: C.textMuted,
-                padding: '8px 12px 4px',
-              }}>{g.title}</div>
-              {g.choices.map(c => {
-                const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
-                return (
-                  <button
-                    key={c.value}
-                    onClick={() => onApply(c.value)}
-                    disabled={!!busy}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left',
-                      padding: '9px 12px', marginBottom: 2,
-                      border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
-                      background: isCurrent ? '#e8f8f2' : 'transparent',
-                      borderRadius: 6, cursor: busy ? 'default' : 'pointer',
-                      fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
-                    }}
-                  >
-                    {c.label}
-                    {isCurrent && (
-                      <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
-                        current
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+          ) : choices.map(c => {
+            const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
+            return (
+              <button
+                key={c.value}
+                onClick={() => onApply(c.value)}
+                disabled={!!busy}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '9px 12px', marginBottom: 2,
+                  border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
+                  background: isCurrent ? '#e8f8f2' : 'transparent',
+                  borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+                  fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
+                }}
+              >
+                {c.label}
+                {isCurrent && (
+                  <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
+                    current
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         <div style={{

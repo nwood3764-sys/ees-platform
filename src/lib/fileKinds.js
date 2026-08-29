@@ -27,6 +27,12 @@ const BROWSER_IMAGE_EXTENSIONS = new Set([
 // them. These are rendered on the device; a failure here is a real fault.
 const CONVERTIBLE_IMAGE_EXTENSIONS = new Set(['heic', 'heif', 'tif', 'tiff'])
 
+// Video containers a phone or a laptop produces. `.mov` is the iPhone default
+// and `.3gp` still turns up from older Android handsets; both are as much
+// evidence as a JPEG is, so they are recognised by name and not left to be
+// guessed at from a mime type the browser may not have set.
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'avi', '3gp', 'mkv', 'mpeg', 'mpg'])
+
 // Everything worth naming by the application that made it. Extension → label.
 const FORMAT_LABELS = {
   dwg: 'AutoCAD', dxf: 'AutoCAD', rvt: 'Revit', skp: 'SketchUp',
@@ -37,6 +43,7 @@ const FORMAT_LABELS = {
   psd: 'Photoshop', ai: 'Illustrator', indd: 'InDesign', eps: 'EPS',
   zip: 'Archive', rar: 'Archive', '7z': 'Archive',
   mp4: 'Video', mov: 'Video', webm: 'Video', avi: 'Video', '3gp': 'Video',
+  m4v: 'Video', mkv: 'Video', mpeg: 'Video', mpg: 'Video',
   mp3: 'Audio', wav: 'Audio', m4a: 'Audio',
   txt: 'Text', xml: 'XML', json: 'JSON',
   heic: 'HEIC', heif: 'HEIF', tif: 'TIFF', tiff: 'TIFF',
@@ -67,6 +74,24 @@ export function isImageFile(pathOrName, mimeType) {
   if (mime && !mime.startsWith('image/') && mime !== 'application/octet-stream') return false
   const ext = extensionOf(pathOrName)
   return BROWSER_IMAGE_EXTENSIONS.has(ext) || CONVERTIBLE_IMAGE_EXTENSIONS.has(ext)
+}
+
+/**
+ * Is this a video? The counterpart to isImageFile, and the reason both exist:
+ * a video is EVIDENCE — a 360 pan of an attic, a walk through a mechanical
+ * room — and must never be lumped in with the PDFs and drawings as "not a
+ * photo". Before 2026-08-27 it was: dropping a video on a Photos card filed it
+ * as a nondescript attachment and told the person they had misfiled it.
+ *
+ * Same precedence as isImageFile — a mime type that actually says what the file
+ * is beats the extension, and only a missing or generic mime falls through to
+ * the name.
+ */
+export function isVideoFile(pathOrName, mimeType) {
+  const mime = String(mimeType ?? '').toLowerCase()
+  if (mime.startsWith('video/')) return true
+  if (mime && mime !== 'application/octet-stream') return false
+  return VIDEO_EXTENSIONS.has(extensionOf(pathOrName))
 }
 
 /** True for an image a browser cannot paint until it is converted. */

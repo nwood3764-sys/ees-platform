@@ -46,45 +46,78 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
+// Pure transcript / search-term / model-fallback rules, kept in their own
+// Deno-free module so they can be pinned by scripts/assistant-transcript-fixture.mjs.
+import {
+  trimHistory, compactTranscript, relaxedSearchTerms, isModelUnavailable,
+  addUsage, costOf, totalInputTokens, emptySpend,
+  deadlineState, DEADLINE_NOTE,
+} from "./transcript.js"
+
+// The Anthropic messages shape. Declared here because transcript.js is plain
+// JavaScript on purpose (see its header — the Netlify build's Node 20 cannot
+// import a .ts file), so it carries no exported type.
+interface AnthropicMessage {
+  role: "user" | "assistant"
+  content: unknown
+}
 
 const cors = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-pipeline-test-secret",
 }
 
-const MODEL = "claude-sonnet-4-6"
-const PRICE_INPUT_PER_MTOK  = 3.00
-const PRICE_OUTPUT_PER_MTOK = 15.00
+// The assistant's model, env-overridable via ASSISTANT_MODEL so it can be moved
+// without a deploy. Opus 5 is the default deliberately: this surface is judged
+// against Claude itself, and with the system prompt + tool catalog cached the
+// input side (which dominates every turn here) bills at a tenth of list.
+const MODEL = Deno.env.get("ASSISTANT_MODEL") || "claude-opus-5"
+// Tried in order if the configured model is not available to this API key (a
+// 404/400 naming the model). Each step is a real downgrade, so the substitution
+// is recorded on the usage row rather than passed off as normal service.
+const FALLBACK_MODELS = ["claude-sonnet-5", "claude-sonnet-4-6"]
+
 const MAX_TURNS = 8   // tool-use loop ceiling per request
 // Output budget per model call. Must be large enough to emit a whole batch of
 // tool calls at once — a 17-record create is ~2k tokens of tool_use alone, so
 // the old 1500 truncated mid-batch and the proposed cards never materialised.
-const MAX_TOKENS = 8192
+// Raised from 8192 when the model moved to a thinking model: reasoning is
+// drawn from this same budget, so the old ceiling would now be shared and a
+// big batch could be cut off again.
+const MAX_TOKENS = 16000
 const CLOSE_MAX_TOKENS = 2048
-// Cap the replayed history sent to the model (chars). Conversation memory can
-// balloon to 100k+ tokens over a long session; that degrades the model and can
-// starve the output budget. Keep the most recent slice.
-const HISTORY_CHAR_BUDGET = 60000
 
-// Keep the most recent history messages within a char budget (newest-first),
-// so a long-running conversation can't bloat the request to 100k+ tokens.
-function trimHistory(history: AnthropicMessage[]): AnthropicMessage[] {
-  if (!Array.isArray(history)) return []
-  let total = 0
-  const kept: AnthropicMessage[] = []
-  for (let i = history.length - 1; i >= 0; i--) {
-    const len = JSON.stringify(history[i] ?? "").length
-    if (total + len > HISTORY_CHAR_BUDGET && kept.length) break
-    kept.unshift(history[i]); total += len
-  }
-  return kept
+// Adaptive thinking, sent explicitly on every call. On Opus 5 it is already
+// the default, but ASSISTANT_MODEL can point at Opus 4.8 / 4.7, where OMITTING
+// this means the model does not think at all — a silent, invisible downgrade
+// of exactly the capability this surface was failing for.
+const THINKING = { type: "adaptive" }
+// Reasoning depth. Unset means the API default (high), which is the documented
+// balance of quality and token efficiency; ASSISTANT_EFFORT can dial it to
+// low/medium if turns feel slow, or xhigh/max for correctness-critical work.
+const EFFORT = Deno.env.get("ASSISTANT_EFFORT") || ""
+const OUTPUT_CONFIG = EFFORT ? { effort: EFFORT } : undefined
+interface ScopeContext {
+  table:         string          // the object being listed
+  fk:            string          // that object's FK toward the parent
+  via?:          { table: string; fk: string }[] | null   // multi-hop chain
+  parent_id:     string          // the parent record the list is filtered to
+  parent_label?: string | null   // its display name
 }
 
 interface RecordContext {
-  object?:      string   // table name of the record the user is viewing
-  record_id?:   string   // uuid of that record
-  record_label?: string  // human label for the prompt
+  object?:       string   // table name of the record the user is viewing
+  record_id?:    string   // uuid of that record
+  record_label?: string   // human label for the prompt
+  // The related-list filter on the screen — Contacts filtered to ONE account,
+  // for example. On such a screen there is no selected record, so before this
+  // existed the parent the user was looking at was invisible to the model and
+  // it would search for, and fail to find, the very account on screen.
+  list_scope?:   ScopeContext | null
+  // Records / scoped lists named by a LEAP URL the user pasted in the message.
+  referenced_records?: { object: string; record_id: string }[]
+  referenced_scopes?:  ScopeContext[]
 }
 
 interface ReqBody {
@@ -94,11 +127,6 @@ interface ReqBody {
   app_base_url?: string         // the site origin the user is on, for shareable record URLs
   flow_id?:   string
   run_id?:    string
-}
-
-interface AnthropicMessage {
-  role: "user" | "assistant"
-  content: unknown
 }
 
 function json(body: unknown, status = 200) {
@@ -329,21 +357,26 @@ const TOOLS = [
 // actual site origin in shareable record URLs. appBaseUrl is the origin the
 // user is on (e.g. https://leap.ees-wi.org); when absent we fall back to a
 // clearly-labelled placeholder rather than inventing a domain.
+//
+// It is split in two so the big half can be prompt-cached.
+// Everything that changes between requests — the clock, the signed-in user —
+// lives in the small `volatile` half; `stable` is byte-identical for a given
+// site origin, so it is read from cache instead of re-billed on every single
+// turn. That saving is what makes carrying real working memory affordable.
 function buildSystemPrompt(
   appBaseUrl: string,
   now: { human: string; iso: string; time: string },
   caller: CallerProfile,
-): string {
+): { stable: string; volatile: string } {
   const URL_FORM = appBaseUrl ? `${appBaseUrl}/<table>/<id>` : "<your LEAP site>/<table>/<id>"
   const callerDesc = caller.role
     ? `${caller.name} (role: ${caller.role}${caller.title ? `, ${caller.title}` : ""})`
     : (caller.title ? `${caller.name} (${caller.title})` : caller.name)
-  return `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
-
-## Right now — the current date/time and who you are helping (these are FACTS you already have; never ask for them)
+  const volatile = `## Right now — the current date/time and who you are helping (these are FACTS you already have; never ask for them)
 
 - Today is ${now.human} (${now.iso}). The current time is ${now.time}, Energy Efficiency Services' local time (US Central). You already know this — NEVER ask the user what today's date or the current time is. When the user says "today", "now", "this morning", "this week", or "schedule it for today", compute the actual date/time from the values above yourself.
-- You are assisting ${callerDesc}. That is the signed-in user. When the user says "me", "my", "for me", or "assign it to me", they mean ${caller.name} — resolve it from this, do not ask who they are.
+- You are assisting ${callerDesc}. That is the signed-in user. When the user says "me", "my", "for me", or "assign it to me", they mean ${caller.name} — resolve it from this, do not ask who they are.`
+  const stable = `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
 
 You help the signed-in user two ways:
 1. Take actions by plain conversation: creating records, updating fields, changing statuses, running reports, looking things up. You operate strictly within the user's own permissions — if an action is refused, explain plainly and stop; never try to work around a permission.
@@ -407,6 +440,16 @@ If several required pieces are missing, ask for all of them together in one mess
 
 ## Resolving names and typos
 
+### Never announce that a record does not exist
+
+Telling the user "no account found" / "that property doesn't exist" when it does is the worst thing you can do — it is confidently wrong, and it makes them do a lookup you were supposed to do. Before you say a record is missing, all of these must be true:
+
+1. You read the "[What the user is looking at right now:" block. If it names a record — an open record, or the parent a list is filtered to — that record EXISTS and you already hold its id. Never search for it, and never contradict it.
+2. You actually ran a search this turn. Never infer absence from memory or from an earlier turn.
+3. The search came back empty on the FULL name AND on a shortened form. Company names are the common trap: "Community Management Corporation" may be stored as "Community Management Corp" or "Community Management". global_search returns a \`relaxed_search\` block when the exact term found nothing — read it before concluding anything.
+
+If a search returns nothing, the honest sentence is "I couldn't find X — is it under a different name?", never "X does not exist". And if the user tells you a record exists ("you're on it right now", "here's the link"), believe them, take the id from the context block or their URL, and proceed — do not ask them to confirm what they just told you.
+
 When the user names an existing record, resolve its id with global_search or query_records before acting; never invent ids. Treat the user's wording as approximate — if a term might be misspelled or mis-heard, use fuzzy_resolve, and always state any correction you applied. For statuses/record types/work types, resolve the value with fuzzy_resolve kind='picklist' and use the returned id (e.g. as to_status_id for change_status). Never set a status column with update_record.
 
 To resolve a RECORD TYPE for any \`<object>_record_type\` column (project_record_type, opportunity_record_type, work_order_record_type, etc.), call fuzzy_resolve kind='picklist', object=<table>, and either OMIT \`field\` or pass field='record_type'. The picklist field for record types is ALWAYS the literal string 'record_type' — NEVER the column name (never field='project_record_type'). Passing the column name as the field is why a record type looks "missing." So do NOT tell the user a record type "isn't configured" or "doesn't exist yet" because one lookup came back empty — first search again with field='record_type' (or omit field entirely, which searches every field on the object); only if THAT is also empty is it truly not set up.
@@ -437,6 +480,7 @@ Rules for links:
 - The panel also renders a clickable button and a copyable URL for every record actually created, so the user has the link there too — but still state the URL in text when they ask.
 
 Be concise and concrete. Use the record context provided if present. Never fabricate field values, dates, amounts, names, ids, or URLs. If you don't know a required value, ask.`
+  return { stable, volatile }
 }
 
 // Accept only a well-formed http(s) origin and return it without a trailing
@@ -453,13 +497,265 @@ function sanitizeBaseUrl(raw: unknown): string {
   }
 }
 
+/**
+ * Re-run a search on progressively looser forms of the term and report the
+ * first form that found anything — or state plainly that every form was tried
+ * and came back empty, which is the only basis on which the model may say a
+ * record is not there.
+ */
+async function runRelaxedSearch(
+  run: (q: string) => Promise<{ data: any; error: any }>,
+  term: string,
+): Promise<Record<string, unknown>> {
+  const tried: string[] = []
+  for (const t of relaxedSearchTerms(term)) {
+    tried.push(t)
+    const { data, error } = await run(t)
+    if (error) continue
+    if (Array.isArray(data) && data.length) {
+      return {
+        relaxed_search: {
+          note: `The exact term "${term}" matched nothing, but the shortened form "${t}" did. These are very likely the record the user means — check the names before concluding anything is missing.`,
+          term: t,
+          results: data,
+        },
+      }
+    }
+  }
+  return {
+    relaxed_search: null,
+    searched_terms: [term, ...tried],
+    note: tried.length
+      ? `No match for "${term}" or for the shortened form(s) ${tried.map(t => `"${t}"`).join(", ")}. Say you could not FIND it and ask if it is under another name — do not state that it does not exist.`
+      : `No match for "${term}". Say you could not FIND it and ask if it is under another name — do not state that it does not exist.`,
+  }
+}
+
+// Tool schemas exactly as the API takes them (the `mutating` marker is ours).
+// Built once: the catalog is identical on every request, which is the whole
+// point of putting a cache breakpoint at the end of it.
+const API_TOOLS: any[] = TOOLS.map(({ mutating, ...t }) => t)
+
+// The cached prefix is tools + the stable half of the system prompt. Anthropic
+// caches in that order, so the breakpoint goes on the LAST system block that is
+// still stable — the volatile clock/caller block sits after it and is re-read
+// each time, as it must be.
+function cachedSystem(stable: string, volatile: string): unknown[] {
+  return [
+    { type: "text", text: stable, cache_control: { type: "ephemeral" } },
+    { type: "text", text: volatile },
+  ]
+}
+
+// Mark the end of the replayed conversation as a second cache breakpoint, so a
+// long session re-reads its own transcript from cache rather than paying for it
+// again every turn. Mutates a shallow copy: the caller's array is untouched.
+function withConversationCacheBreakpoint(messages: AnthropicMessage[]): AnthropicMessage[] {
+  if (!messages.length) return messages
+  const out = [...messages]
+  const last = out[out.length - 1]
+  const blocks = Array.isArray(last.content)
+    ? [...(last.content as any[])]
+    : [{ type: "text", text: String(last.content ?? "") }]
+  if (!blocks.length) return messages
+  blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: "ephemeral" } }
+  out[out.length - 1] = { ...last, content: blocks }
+  return out
+}
+
+// Resolve which OBJECT a related-list scope is filtered by, from the foreign
+// key it filters on. A direct scope filters `<table>.<fk>`; a via-chain scope
+// filters the last hop, whose fk points at the object whose page the list came
+// from. Returns null when the column is not a foreign key (nothing to name) —
+// the scope is still reported with its id, which is what the model acts on.
+async function resolveScopeParentObject(
+  userClient: SupabaseClient, scope: ScopeContext,
+): Promise<string | null> {
+  const via = Array.isArray(scope.via) && scope.via.length ? scope.via : null
+  const table = via ? via[via.length - 1].table : scope.table
+  const column = via ? via[via.length - 1].fk : scope.fk
+  if (!table || !column) return null
+  try {
+    const { data } = await userClient.rpc("describe_object_columns", { p_table: table })
+    const col = (Array.isArray(data) ? data : []).find((c: any) => c.column_name === column)
+    return (col && col.is_foreign_key && col.references_table) ? String(col.references_table) : null
+  } catch {
+    return null
+  }
+}
+
+// Render everything known about the screen the user is on into one block the
+// model reads before it searches for anything. Stated as facts it already
+// holds — the point is that it must NOT go looking for a record that is
+// already named here.
+async function renderScreenContext(
+  userClient: SupabaseClient, ctx: RecordContext | undefined,
+): Promise<string> {
+  if (!ctx) return ""
+  const lines: string[] = []
+  if (ctx.object) {
+    lines.push(`- Object on screen: ${ctx.object}` +
+      (ctx.record_id ? ` — open record ${ctx.record_id}` : " (a list, no single record open)") +
+      (ctx.record_label ? ` ("${ctx.record_label}")` : ""))
+  }
+  if (ctx.list_scope?.parent_id) {
+    const parentObject = await resolveScopeParentObject(userClient, ctx.list_scope)
+    const named = ctx.list_scope.parent_label ? ` ("${ctx.list_scope.parent_label}")` : ""
+    lines.push(
+      `- THE LIST IS FILTERED TO ONE PARENT RECORD: ` +
+      `${parentObject || "the record"} ${ctx.list_scope.parent_id}${named}. ` +
+      `The user is looking at the ${ctx.list_scope.table} that belong to it (via ${ctx.list_scope.table}.${ctx.list_scope.fk}). ` +
+      `That record EXISTS — you are holding its id. Use it directly; do not search for it, and never tell the user it could not be found.`)
+  }
+  for (const r of (ctx.referenced_records || [])) {
+    lines.push(`- The user's message links to ${r.object} ${r.record_id}. That record exists; use this id.`)
+  }
+  for (const sc of (ctx.referenced_scopes || [])) {
+    const parentObject = await resolveScopeParentObject(userClient, sc)
+    const named = sc.parent_label ? ` ("${sc.parent_label}")` : ""
+    lines.push(
+      `- The user's message links to the ${sc.table} list filtered to ` +
+      `${parentObject || "record"} ${sc.parent_id}${named}. That record exists; use this id.`)
+  }
+  if (!lines.length) return ""
+  return "\n\n[What the user is looking at right now:\n" + lines.join("\n") + "]"
+}
+
+// ── Autonomous self-test ───────────────────────────────────────────────────
+// The one thing that could never be checked from a build sandbox: does the
+// CONFIGURED model actually answer for this API key, and does prompt caching
+// engage on the real cached prefix? Both were shipped on 2026-08-26 unverified.
+//
+// Same shared-secret shape the rest of the platform already uses for autonomous
+// harnesses (admin-test-send-email, property-owner-research): a named row in
+// internal_cron_auth, readable only by the service role, presented as
+// x-pipeline-test-secret. Fail closed — no row or no match and this is not a
+// self-test at all, so the request falls through to the normal 401.
+//
+// DELIBERATELY NARROW: it builds the real system blocks and the real tool
+// catalog (so the cache entry it exercises is the one live traffic hits) and
+// then asks the model for one word. It reads NO user data and touches the
+// user-scoped client not at all, so it can carry no RLS or permission risk —
+// and it is honest that it therefore proves connectivity, model and caching,
+// not record access.
+async function maybeRunSelfTest(
+  admin: SupabaseClient, req: Request, body: any, apiKey: string | undefined,
+): Promise<Record<string, unknown> | null> {
+  if (!body?.self_test) return null
+  const presented = req.headers.get("x-pipeline-test-secret") || ""
+  if (!presented) return null
+  const { data: row } = await admin
+    .from("internal_cron_auth").select("secret").eq("name", "assistant_self_test").maybeSingle()
+  const expected = row?.secret || ""
+  if (!expected || !constantTimeEquals(presented, expected)) return null
+  if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY is not set (mock mode)" }
+
+  const appBaseUrl = sanitizeBaseUrl(body.app_base_url) || "https://leap.energyefficiencyservices.org"
+  const { stable, volatile } = buildSystemPrompt(
+    appBaseUrl, buildNowContext(), { name: "the self-test harness", role: "", title: "" })
+  const systemBlocks = cachedSystem(stable, volatile)
+
+  // Two identical calls. The first writes the cached prefix (or reads one a
+  // real user just warmed); the second must READ it. cache_read still zero on
+  // the second call is the signal that a silent invalidator is in the prefix.
+  const probe = async (model: string) => {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        // Room for adaptive thinking to run and still emit the word. At 64 the
+        // probe would hit the cap mid-reasoning and come back with empty text,
+        // which reads as a failure when the call actually succeeded.
+        max_tokens: 1024,
+        system: systemBlocks,
+        tools: API_TOOLS,
+        thinking: THINKING,
+        ...(OUTPUT_CONFIG ? { output_config: OUTPUT_CONFIG } : {}),
+        messages: [{ role: "user", content: "Reply with the single word OK and nothing else." }],
+      }),
+    })
+    const text = await resp.text()
+    return { status: resp.status, text }
+  }
+
+  const attempts: Record<string, unknown>[] = []
+  let served: string | null = null
+  let first: any = null, second: any = null
+
+  for (const model of [MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)]) {
+    const r = await probe(model)
+    if (r.status === 200) { served = model; first = JSON.parse(r.text); break }
+    attempts.push({ model, status: r.status, error: r.text.slice(0, 300) })
+    if (!isModelUnavailable(r.status, r.text)) break   // a real failure, not availability
+  }
+  if (!served) {
+    return { ok: false, configured_model: MODEL, attempts, note: "No model in the chain answered." }
+  }
+  const r2 = await probe(served)
+  if (r2.status === 200) second = JSON.parse(r2.text)
+
+  const u1 = first?.usage ?? {}
+  const u2 = second?.usage ?? {}
+  const cacheRead2 = u2.cache_read_input_tokens ?? 0
+  const spend = emptySpend()
+  addUsage(spend, u1); addUsage(spend, u2)
+
+  await logUsage(admin, {
+    userId: null, flowId: undefined, runId: undefined,
+    model: served, inTok: totalInputTokens(spend), outTok: spend.output,
+    cost: costOf(spend, served), outcome: "ok",
+    purpose: "assistant_self_test",
+    message: `served on ${served}; cache read ${cacheRead2} on the repeat call`,
+  })
+
+  return {
+    ok: true,
+    configured_model: MODEL,
+    served_model: served,
+    served_configured_model: served === MODEL,
+    fallback_attempts: attempts,
+    reply: (first?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join(" ").trim(),
+    call_1: {
+      uncached: u1.input_tokens ?? 0,
+      cache_written: u1.cache_creation_input_tokens ?? 0,
+      cache_read: u1.cache_read_input_tokens ?? 0,
+      output: u1.output_tokens ?? 0,
+    },
+    call_2: {
+      uncached: u2.input_tokens ?? 0,
+      cache_written: u2.cache_creation_input_tokens ?? 0,
+      cache_read: cacheRead2,
+      output: u2.output_tokens ?? 0,
+    },
+    caching_working: cacheRead2 > 0,
+    estimated_cost_usd: costOf(spend, served),
+    note: "Proves the deployed code path, the model, and prompt caching on the real cached prefix. It reads NO user records, so it says nothing about RLS or record access.",
+  }
+}
+
+// Length-independent comparison so a shared secret cannot be probed byte by
+// byte from response timing.
+function constantTimeEquals(a: string, b: string): boolean {
+  const ba = new TextEncoder().encode(a)
+  const bb = new TextEncoder().encode(b)
+  if (ba.length !== bb.length) return false
+  let diff = 0
+  for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i]
+  return diff === 0
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   if (req.method !== "POST") return json({ error: "POST only" }, 405)
 
   let body: ReqBody
   try { body = await req.json() } catch { return json({ error: "Invalid JSON body" }, 400) }
-  if (!body.message && !(body.history && body.history.length)) {
+  if (!body.self_test && !body.message && !(body.history && body.history.length)) {
     return json({ error: "Provide a message" }, 400)
   }
 
@@ -473,6 +769,11 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+
+  // Autonomous self-test (shared-secret gated, reads no user data) runs before
+  // caller resolution — it deliberately has no signed-in user.
+  const selfTest = await maybeRunSelfTest(admin, req, body, apiKey)
+  if (selfTest) return json(selfTest, selfTest.ok === false ? 502 : 200)
 
   const authHeader = req.headers.get("Authorization") || ""
   const callerUserId = await resolveCallerUserId(admin, authHeader)
@@ -507,28 +808,37 @@ Deno.serve(async (req) => {
   // ── Build the running message list ──────────────────────────────────────────
   const messages: AnthropicMessage[] = [...trimHistory(body.history || [])]
   if (body.message) {
-    let userText = body.message
-    if (body.context?.object) {
-      userText += `\n\n[Current record context: object=${body.context.object}` +
-        (body.context.record_id ? `, record_id=${body.context.record_id}` : "") +
-        (body.context.record_label ? `, label="${body.context.record_label}"` : "") + "]"
-    }
-    messages.push({ role: "user", content: userText })
+    messages.push({ role: "user", content: body.message + await renderScreenContext(userClient, body.context) })
   }
 
   // Origin the user is on, sanitised — used so the model can quote real,
   // shareable record URLs (<origin>/<table>/<id>) instead of refusing or
   // inventing an example id. Only http(s) origins are accepted.
   const appBaseUrl = sanitizeBaseUrl(body.app_base_url)
-  const systemPrompt = buildSystemPrompt(appBaseUrl, buildNowContext(), callerProfile)
+  const { stable, volatile } = buildSystemPrompt(appBaseUrl, buildNowContext(), callerProfile)
+  const systemBlocks = cachedSystem(stable, volatile)
 
+  const startedAt = Date.now()
   const proposedActions: unknown[] = []
-  let totalIn = 0, totalOut = 0
+  const spend = emptySpend()
   let finalText = ""
   let endedNaturally = false
+  let ranOutOfTime = false
+  // The model actually served. Starts at the configured one and moves to the
+  // fallback only if the API says that model is unavailable to this key.
+  let activeModel = MODEL
+  let modelNote: string | null = null
 
-  try {
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
+  // One Anthropic call, walking the fallback chain if the configured model is
+  // unavailable to this key. Returns the parsed body, or throws with the API's
+  // own text so the caller can report it. Once a fallback serves a turn it
+  // becomes activeModel, so the rest of the request stops probing the model
+  // that already answered 404.
+  const callModel = async (payload: Record<string, unknown>): Promise<any> => {
+    const chain = [activeModel, ...FALLBACK_MODELS.filter(m => m !== activeModel)]
+    for (let i = 0; i < chain.length; i++) {
+      const model = chain[i]
+      const isLast = i === chain.length - 1
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -536,28 +846,54 @@ Deno.serve(async (req) => {
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: MODEL,
-          max_tokens: MAX_TOKENS,
-          system: systemPrompt,
-          tools: TOOLS.map(({ mutating, ...t }) => t),
-          messages,
-        }),
+        body: JSON.stringify({ ...payload, model }),
       })
+      if (resp.ok) {
+        if (model !== activeModel) {
+          modelNote = `model ${activeModel} unavailable; served on ${model}`
+          activeModel = model
+        }
+        return await resp.json()
+      }
+      const errText = await resp.text()
+      if (!isLast && isModelUnavailable(resp.status, errText)) continue
+      const err = new Error(`Anthropic API ${resp.status}: ${errText.slice(0, 300)}`)
+      ;(err as any).status = resp.status
+      ;(err as any).detail = errText.slice(0, 300)
+      throw err
+    }
+    throw new Error("Anthropic API: no model available")
+  }
 
-      if (!resp.ok) {
-        const errText = await resp.text()
+  try {
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+      // Out of clock? Stop issuing tool rounds and go compose an answer from
+      // what is already held, rather than being killed mid-request.
+      if (turn > 0 && deadlineState(Date.now() - startedAt) !== "continue") {
+        ranOutOfTime = true
+        break
+      }
+      let data: any
+      try {
+        data = await callModel({
+          max_tokens: MAX_TOKENS,
+          system: systemBlocks,
+          tools: API_TOOLS,
+          thinking: THINKING,
+          ...(OUTPUT_CONFIG ? { output_config: OUTPUT_CONFIG } : {}),
+          messages: withConversationCacheBreakpoint(messages),
+        })
+      } catch (e) {
+        const status = (e as any).status || 502
         await logUsage(admin, {
           userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
-          model: MODEL, inTok: 0, outTok: 0, cost: 0,
-          outcome: "error", message: `Anthropic API ${resp.status}: ${errText.slice(0, 300)}`,
+          model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost: costOf(spend, activeModel),
+          outcome: "error", message: (e as Error).message.slice(0, 300),
         })
-        return json({ error: `Assistant call failed (${resp.status}).`, detail: errText.slice(0, 300) }, 502)
+        return json({ error: `Assistant call failed (${status}).`, detail: (e as any).detail || (e as Error).message }, 502)
       }
 
-      const data = await resp.json()
-      totalIn  += data?.usage?.input_tokens  ?? 0
-      totalOut += data?.usage?.output_tokens ?? 0
+      addUsage(spend, data?.usage)
 
       const blocks: any[] = data?.content ?? []
       const textBlocks = blocks.filter(b => b.type === "text").map(b => b.text)
@@ -613,54 +949,75 @@ Deno.serve(async (req) => {
     // If the loop exhausted MAX_TURNS while still mid-tool-use, the model never
     // composed a closing answer — finalText holds only interim narration. Make
     // one more call with tool_choice:none to force a text-only final reply.
-    if (!endedNaturally) {
-      const closeResp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODEL,
+    if (!endedNaturally && deadlineState(Date.now() - startedAt) !== "abandon") {
+      const closeMessages = [...messages, { role: "user" as const, content: ranOutOfTime
+        ? DEADLINE_NOTE
+        : "Give your final answer now in plain text, using what you have already gathered. Do not call any more tools." }]
+      try {
+        const cd = await callModel({
           max_tokens: CLOSE_MAX_TOKENS,
-          system: systemPrompt,
-          tools: TOOLS.map((t) => { const c = { ...t }; delete (c as any).mutating; return c }),
+          system: systemBlocks,
+          tools: API_TOOLS,
+          thinking: THINKING,
+          ...(OUTPUT_CONFIG ? { output_config: OUTPUT_CONFIG } : {}),
           tool_choice: { type: "none" },
-          messages: [...messages, { role: "user", content: "Give your final answer now in plain text, using what you have already gathered. Do not call any more tools." }],
-        }),
-      })
-      if (closeResp.ok) {
-        const cd = await closeResp.json()
-        totalIn  += cd?.usage?.input_tokens  ?? 0
-        totalOut += cd?.usage?.output_tokens ?? 0
+          messages: withConversationCacheBreakpoint(closeMessages),
+        })
+        addUsage(spend, cd?.usage)
         const closeText = (cd?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")
         if (closeText) finalText = closeText
-      }
+      } catch { /* keep the interim narration rather than failing the whole turn */ }
     }
   } catch (e) {
     await logUsage(admin, {
       userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
-      model: MODEL, inTok: totalIn, outTok: totalOut, cost: 0,
+      model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost: costOf(spend, activeModel),
       outcome: "error", message: `Request error: ${(e as Error).message}`,
     })
     return json({ error: "Assistant request failed." }, 502)
   }
 
-  const cost = (totalIn / 1_000_000) * PRICE_INPUT_PER_MTOK
-             + (totalOut / 1_000_000) * PRICE_OUTPUT_PER_MTOK
+  const cost = costOf(spend, activeModel)
+
+  // The transcript this turn produced, ending on the assistant's own answer, so
+  // the NEXT turn starts holding what this one learned instead of blind. The
+  // loop breaks before recording a text-only final turn, so add it here.
+  const transcript = [...messages]
+  if (finalText) transcript.push({ role: "assistant", content: finalText })
+
+  // Record the cache split on every turn. Without it there is no way to tell
+  // from the usage report whether prompt caching is actually working — and
+  // "cache_read is zero across repeated requests" is the one symptom that
+  // means a silent invalidator crept into the prefix.
+  const cacheNote = (spend.cacheWrite || spend.cacheRead)
+    ? `cache ${spend.cacheRead} read / ${spend.cacheWrite} written / ${spend.uncached} uncached`
+    : `no cache hit (${spend.uncached} uncached input tokens)`
+  const outcomeParts = [
+    proposedActions.length ? `${proposedActions.length} action(s) proposed` : null,
+    modelNote,
+    ranOutOfTime ? `tool loop cut short at ${Math.round((Date.now() - startedAt) / 1000)}s (turn deadline)` : null,
+    cacheNote,
+  ].filter(Boolean)
 
   await logUsage(admin, {
     userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
-    model: MODEL, inTok: totalIn, outTok: totalOut, cost,
-    outcome: "ok", message: proposedActions.length ? `${proposedActions.length} action(s) proposed` : null,
+    model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost,
+    outcome: "ok", message: outcomeParts.length ? outcomeParts.join("; ") : null,
   })
 
   return json({
     mock: false,
     reply: finalText,
     proposed_actions: proposedActions,
-    usage: { input_tokens: totalIn, output_tokens: totalOut, estimated_cost_usd: cost },
+    // Working memory. The client threads this straight back on the next turn.
+    history: compactTranscript(transcript),
+    model: activeModel,
+    usage: {
+      input_tokens: totalInputTokens(spend), output_tokens: spend.output,
+      cache_read_input_tokens: spend.cacheRead,
+      cache_creation_input_tokens: spend.cacheWrite,
+      estimated_cost_usd: cost,
+    },
   })
 })
 
@@ -795,13 +1152,18 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
       return JSON.stringify({ rows: data, row_count: (data || []).length })
     }
     if (name === "global_search") {
-      const { data, error } = await userClient.rpc("global_search", {
-        p_query: input.query,
-        p_limit_per_object: Math.min(Number(input.limit_per_object) || 5, 20),
-        p_object_type: input.object_type || null,
+      const perObject = Math.min(Number(input.limit_per_object) || 5, 20)
+      const objectType = input.object_type || null
+      const run = (q: string) => userClient.rpc("global_search", {
+        p_query: q, p_limit_per_object: perObject, p_object_type: objectType,
       })
+      const { data, error } = await run(input.query)
       if (error) return JSON.stringify({ error: error.message })
-      return JSON.stringify({ results: data })
+      if (Array.isArray(data) && data.length) return JSON.stringify({ results: data })
+      // Nothing on the exact term. Retry on the looser forms BEFORE handing the
+      // model an empty result it might report as "does not exist".
+      const relaxed = await runRelaxedSearch(run, input.query)
+      return JSON.stringify({ results: data ?? [], ...relaxed })
     }
     if (name === "run_report") {
       if (!input.report_id) return JSON.stringify({ note: "No report_id provided; ask the user which saved report to run." })
@@ -832,18 +1194,27 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
       }
 
       // kind === 'record': lean on global_search (RLS-scoped record matching).
-      const { data, error } = await userClient.rpc("global_search", {
-        p_query: term,
-        p_limit_per_object: limit,
-        p_object_type: input.object || null,
+      const run = (q: string) => userClient.rpc("global_search", {
+        p_query: q, p_limit_per_object: limit, p_object_type: input.object || null,
       })
+      const { data, error } = await run(term)
       if (error) return JSON.stringify({ error: error.message })
-      const candidates = (Array.isArray(data) ? data : []).map((r: any) => ({
+      const toCandidate = (r: any) => ({
         id: r.id, object: r.table_name, object_label: r.object_label,
         label: r.primary_label, secondary: r.secondary_label || undefined,
         record_number: r.record_number || undefined, match_rank: r.match_rank,
-      }))
-      return JSON.stringify({ kind, term, object: input.object || null, candidates })
+      })
+      const candidates = (Array.isArray(data) ? data : []).map(toCandidate)
+      if (candidates.length) {
+        return JSON.stringify({ kind, term, object: input.object || null, candidates })
+      }
+      const relaxed = await runRelaxedSearch(run, term)
+      return JSON.stringify({
+        kind, term, object: input.object || null, candidates,
+        ...(relaxed.relaxed_search
+          ? { relaxed_search: { ...relaxed.relaxed_search, results: (relaxed.relaxed_search.results || []).map(toCandidate) } }
+          : relaxed),
+      })
     }
     if (name === "search_help_articles") {
       const query = String(input.query ?? "").trim()
@@ -908,9 +1279,12 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
 }
 
 interface UsageLog {
-  userId: string; flowId?: string; runId?: string
+  userId: string | null; flowId?: string; runId?: string
   model: string; inTok: number; outTok: number; cost: number
   outcome: string; message: string | null
+  // Defaults to "assistant". The self-test logs under its own purpose so a
+  // diagnostic probe never lands in the assistant's real usage figures.
+  purpose?: string
 }
 
 async function logUsage(admin: SupabaseClient, u: UsageLog) {
@@ -920,7 +1294,7 @@ async function logUsage(admin: SupabaseClient, u: UsageLog) {
       fau_user_id: u.userId,
       fau_flow_id: u.flowId || null,
       fau_run_id: u.runId || null,
-      fau_purpose: "assistant",
+      fau_purpose: u.purpose || "assistant",
       fau_model: u.model,
       fau_input_tokens: u.inTok,
       fau_output_tokens: u.outTok,

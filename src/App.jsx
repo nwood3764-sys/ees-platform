@@ -632,6 +632,7 @@ function AuthedApp({ session }) {
         activeModule={activeModule}
         selectedRecord={selectedRecord}
         listTable={getTableForSection(activeModule, sectionFromUrl)}
+        listScope={listScope}
         onNavigateToRecord={navigateToRecord}
       />
     </div>

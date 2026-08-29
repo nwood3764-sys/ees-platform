@@ -449,6 +449,42 @@ export async function fetchAccountContactsForWorkOrder(woId) {
   return data || []
 }
 
+// Company vehicles, for the `vehicle` field picker (Vehicle Inspection's
+// "Vehicle Inspected"). Retired vehicles are dropped because they are not in
+// service; "In Maintenance" and "Out of Service" ones are KEPT — a technician
+// standing at a real truck must always be able to document it. RLS still
+// decides what comes back (`vehicles` read is granted to every field role).
+export async function fetchVehiclesForInspection() {
+  const [{ data, error }, { data: retired }] = await Promise.all([
+    supabase
+      .from('vehicles')
+      .select('id, vehicle_record_number, vehicle_name, vehicle_license_plate, vehicle_status')
+      .eq('vehicle_is_deleted', false)
+      .order('vehicle_name'),
+    supabase
+      .from('picklist_values')
+      .select('id')
+      .eq('picklist_object', 'vehicles')
+      .eq('picklist_field', 'vehicle_status')
+      .eq('picklist_value', 'Retired'),
+  ])
+  if (error) throw error
+  const retiredIds = new Set((retired || []).map((r) => r.id))
+  return (data || []).filter((v) => !retiredIds.has(v.vehicle_status))
+}
+
+// Save a `vehicle` field. Takes the vehicle's ID, not display text: the server
+// composes the readable value AND stamps work_orders.vehicle_id from the same
+// row, so the text a person reads and the foreign key a report joins on can
+// never disagree.
+export async function saveWorkStepVehicle(stepId, templateFieldId, vehicleId) {
+  const { data, error } = await supabase.rpc('save_work_step_vehicle', {
+    p_step_id: stepId, p_template_field_id: templateFieldId, p_vehicle_id: vehicleId,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not save the vehicle.')
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Session / identity
 // ───────────────────────────────────────────────────────────────────────────

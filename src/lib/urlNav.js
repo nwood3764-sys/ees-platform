@@ -37,7 +37,14 @@ import { objectModuleFor } from './objectNav.js'
 // The pure URL grammar. Re-exported below so every existing import of
 // parsePath / buildPath / getTableListUrl / getTableForSection /
 // buildScopedListUrl / isUrlAddressableTable from this module keeps working.
-import { parsePath, buildPath } from './urlGrammar.js'
+// getTableListUrl is imported (not just re-exported) because closeRecord
+// USES it below: `export { x } from './y'` forwards the name to this module's
+// consumers without binding it in this module's own scope, so calling it here
+// off the re-export alone throws "getTableListUrl is not defined" — which is
+// exactly what happened to every record close with no in-page history behind
+// it (a deep link, a bookmark, a fresh tab, and the screen right after a
+// delete). Guarded by scripts/reexport-binding-fixture.mjs.
+import { parsePath, buildPath, getTableListUrl } from './urlGrammar.js'
 
 export {
   parsePath, buildPath, isUrlAddressableTable, getTableListUrl,

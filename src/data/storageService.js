@@ -10,6 +10,10 @@ import {
 } from '../lib/heifRendition'
 import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY, UNTAGGED as UNTAGGED_PHOTO_TYPE } from '../lib/photoTags'
 import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
+import { CATCH_ALL_DOCUMENT_TYPE } from '../lib/documentSlots'
+import { documentTypeLabel } from '../lib/documentTypes'
+import { storageSafeFileName, isStorageSafeKey } from '../lib/storageKey'
+import { isVideoFile } from '../lib/fileKinds'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -97,17 +101,17 @@ function fileExt(name) {
   return name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-// Strip path separators, quotes, control chars, and collapse whitespace.
-// Storage paths must be URL-safe; collisions are prevented by prefixing the
-// generated record id, so this only needs to be readable, not unique.
-function safeName(name) {
-  if (!name) return 'file'
-  return name
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[\\/'"`<>?*|:]/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/_{2,}/g, '_')
-    .slice(0, 120) || 'file'
+// Last line of defence before bytes cross the wire. Every key this file builds
+// is a prefix we control plus a sanitized file name, so this should be
+// unreachable — but "Invalid key" is reported by the API only AFTER the upload
+// has been attempted, and it names a raw storage path at a person who was
+// filing a spec sheet. If a key is ever malformed again, it is named here, by
+// the code that built it, in words the person can act on.
+function assertStorageKey(path, originalName) {
+  if (isStorageSafeKey(path)) return path
+  throw new Error(
+    `Could not build a storage location for “${originalName || path}”. ` +
+    'Rename the file using letters, numbers, spaces, hyphens and periods, then upload it again.')
 }
 
 function newId() {
@@ -125,7 +129,7 @@ function photoOriginalPath(relatedObject, relatedId, photoId, originalName) {
 }
 
 function documentStoragePath(relatedObject, relatedId, docId, originalName) {
-  return `${relatedObject}/${relatedId}/${docId}__${safeName(originalName)}`
+  return `${relatedObject}/${relatedId}/${docId}__${storageSafeFileName(originalName)}`
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -273,7 +277,7 @@ export async function uploadPhoto({
 
   const bucket = defaultPhotoBucket(relatedObject) // throws if not allowed
   const photoId = newId()
-  const path = photoOriginalPath(relatedObject, relatedId, photoId, file.name)
+  const path = assertStorageKey(photoOriginalPath(relatedObject, relatedId, photoId, file.name), file.name)
 
   // A HEIC capture (the iPhone default) is decoded HERE, on the device, and
   // uploaded alongside the untouched original. Nothing server-side can decode
@@ -661,75 +665,51 @@ async function resolvePhotoTagLabels(types) {
 }
 
 /**
- * The tags a person may apply by hand, from the `photos` / `photo_type`
- * picklist. Admin-managed at Setup → Picklists — nothing here is compiled in,
- * so adding a tag the crew needs is a configuration change, not a deploy.
+ * The tags this work order's work plan offers: its WORK STEPS, and nothing
+ * else (Nicholas, 2026-08-27: "The tag names need to match the work steps").
  *
- * Returns [] rather than throwing: an unreachable picklist should leave the
- * picker empty and honest, not break the Photos card.
+ * An earlier version also offered each step's template photo prompts. That was
+ * wrong twice over. It produced near-duplicates that do not match the plan a
+ * person is looking at — the step "Service Hot Water" sitting beside its prompt
+ * "Water Heater" — so a tag could disagree with the step it documents. And the
+ * prompts are stored as machine tokens ('mf_dhw_photo'), which process-photo
+ * prints onto the watermark verbatim.
+ *
+ * A work step name is already human text, already the thing the assessment
+ * report groups by, and already what the crew walked. It is the tag.
+ *
+ * Resolvable from EITHER end: pass the work order, or pass a work step and the
+ * work order is looked up from it — the Photos card lives on both.
+ *
+ * Returns [] on failure; a missing list is survivable, a thrown picker is not.
  */
-export async function fetchPhotoTagOptions() {
-  const { data, error } = await supabase
-    .from('picklist_values')
-    .select('picklist_value, picklist_label, picklist_description, picklist_sort_order')
-    .eq('picklist_object', 'photos')
-    .eq('picklist_field', 'photo_type')
-    .eq('picklist_is_active', true)
-    .order('picklist_sort_order', { ascending: true })
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.warn('photo tag options unavailable:', error.message)
-    return []
+export async function fetchWorkPlanPhotoTags({ workOrderId = null, workStepId = null } = {}) {
+  let orderId = workOrderId
+  if (!orderId && workStepId) {
+    const { data, error } = await supabase
+      .from('work_steps')
+      .select('work_order_id')
+      .eq('id', workStepId)
+      .maybeSingle()
+    if (error || !data?.work_order_id) return []
+    orderId = data.work_order_id
   }
-  return (data || []).map(r => ({
-    value: r.picklist_value,
-    label: r.picklist_label || r.picklist_value,
-    description: r.picklist_description || null,
-  }))
-}
+  if (!orderId) return []
 
-/**
- * The photo prompts this work order's own work plan asks for — "Roofs",
- * "Windows", "Service Hot Water Systems" — read from the work step templates
- * behind its steps.
- *
- * This is the vocabulary that actually matters on an assessment, and it is
- * per-job: a Multifamily Energy Assessment asks for different shots than an
- * insulation removal. It cannot live in the global picklist for that reason,
- * which is why the tag picker reads both.
- *
- * Returns [] on any failure — a tag picker missing a group is worse than one
- * that throws, but only slightly, and the generic tags still work.
- */
-export async function fetchWorkStepPhotoPrompts(workOrderId) {
-  if (!workOrderId) return []
-  const { data: steps, error: stepErr } = await supabase
+  const { data: steps, error } = await supabase
     .from('work_steps')
-    .select('work_step_template_id')
-    .eq('work_order_id', workOrderId)
-    .eq('is_deleted', false)
-  if (stepErr) return []
-  const templateIds = Array.from(new Set(
-    (steps || []).map(s => s.work_step_template_id).filter(Boolean)
-  ))
-  if (templateIds.length === 0) return []
-
-  const { data, error } = await supabase
-    .from('work_step_template_fields')
-    .select('wstf_field_name, wstf_field_label, wstf_sort_order, work_step_template_id')
-    .in('work_step_template_id', templateIds)
-    .eq('wstf_field_type', 'photo')
-    .eq('wstf_is_deleted', false)
-    .order('wstf_sort_order', { ascending: true })
-  if (error) return []
+    .select('work_step_name, work_step_execution_order')
+    .eq('work_order_id', orderId)
+    .order('work_step_execution_order', { ascending: true })
+  if (error || !steps) return []
 
   const seen = new Set()
   const out = []
-  for (const row of data || []) {
-    const value = String(row.wstf_field_name || '').trim()
-    if (!value || seen.has(value.toLowerCase())) continue
-    seen.add(value.toLowerCase())
-    out.push({ value, label: row.wstf_field_label || value })
+  for (const step of steps) {
+    const name = String(step.work_step_name || '').trim()
+    if (!name || seen.has(name.toLowerCase())) continue
+    seen.add(name.toLowerCase())
+    out.push({ value: name, label: name })
   }
   return out
 }
@@ -799,6 +779,23 @@ export async function softDeletePhoto(photoId) {
  * @param {boolean} include
  * @returns {Promise<boolean>} the new flag value
  */
+/**
+ * Flag (or unflag) a DOCUMENT for the record's final report — the same curation
+ * mark photos carry, so the set of things that belong in a deliverable is
+ * recorded once instead of re-picked on every generation.
+ *
+ * Internal only: it never appears on the file and never restricts access.
+ */
+export async function setDocumentReportInclusion(documentId, include) {
+  if (!documentId) throw new Error('setDocumentReportInclusion: documentId is required')
+  const { data, error } = await supabase.rpc('set_document_report_inclusion', {
+    p_document_id: documentId,
+    p_include: !!include,
+  })
+  if (error) throw new Error(`report inclusion update failed: ${error.message}`)
+  return data === true
+}
+
 export async function setPhotoReportInclusion(photoId, include) {
   if (!photoId) throw new Error('setPhotoReportInclusion: photoId is required')
   const { data, error } = await supabase.rpc('set_photo_report_inclusion', {
@@ -839,9 +836,22 @@ export async function uploadDocument({
   if (!relatedObject) throw new Error('uploadDocument: relatedObject is required')
   if (!relatedId)     throw new Error('uploadDocument: relatedId is required')
 
+  // A video is typed as a video, wherever it came in.
+  //
+  // `documentType` names the SLOT a file was filed into, and a named slot
+  // always wins — a video uploaded into "Utility Bill" is still that slot's
+  // file. But the generic default is 'attachment', and a video landing under
+  // it is how two 360 captures came to sit on a work step on 2026-08-27
+  // indistinguishable from a spec sheet: nothing could find them, count them,
+  // or offer them to a report. The type is a fact about the bytes, so it is
+  // read from the bytes here rather than trusted to every call site.
+  if ((documentType || 'attachment') === 'attachment' && isVideoFile(file.name, file.type)) {
+    documentType = 'video'
+  }
+
   const bucket = defaultDocumentBucket(relatedObject)
   const docId = newId()
-  const path = documentStoragePath(relatedObject, relatedId, docId, file.name)
+  const path = assertStorageKey(documentStoragePath(relatedObject, relatedId, docId, file.name), file.name)
 
   const { error: upErr } = await supabase.storage
     .from(bucket)
@@ -880,6 +890,68 @@ export async function uploadDocument({
   return docRow
 }
 
+/**
+ * Every document filed against a work order — on the order itself AND on any of
+ * its work steps — each tagged with the step it belongs to.
+ *
+ * The Energy Assessment Report's generate dialog offered only documents
+ * attached to the WORK ORDER, so a file captured where the work happened was
+ * invisible to the report it is evidence for. That is where a video lands: an
+ * assessor records the roof standing on the "Roof / Ceiling" step, and the step
+ * is the correct place for it — the report just could not see it (2026-08-27).
+ *
+ * Ordered the way the steps run, so the list reads down the building the same
+ * way the report does, with the work order's own files first.
+ */
+export async function listWorkOrderAndStepDocuments(workOrderId) {
+  if (!workOrderId) return []
+
+  const { data: steps, error: stepErr } = await supabase
+    .from('work_steps')
+    .select('id, work_step_name, work_step_execution_order, work_step_plan_execution_order')
+    .eq('work_order_id', workOrderId)
+    .eq('work_step_is_deleted', false)
+  if (stepErr) throw new Error(`work order steps load failed: ${stepErr.message}`)
+
+  const stepIds = (steps || []).map(s => s.id)
+  const stepNameById = new Map((steps || []).map(s => [s.id, s.work_step_name]))
+  const stepPosById = new Map((steps || []).map(s => [
+    s.id,
+    s.work_step_execution_order ?? s.work_step_plan_execution_order ?? STEP_POSITION_LAST,
+  ]))
+
+  const docSelect = () => supabase.from('documents').select('*').eq('is_deleted', false)
+  const queries = [docSelect().eq('related_object', 'work_orders').eq('related_id', workOrderId)]
+  if (stepIds.length > 0) {
+    queries.push(docSelect().eq('related_object', 'work_steps').in('related_id', stepIds))
+  }
+  const results = await Promise.all(queries)
+  const failed = results.find(r => r.error)
+  if (failed) throw new Error(`work order documents load failed: ${failed.error.message}`)
+
+  const byId = new Map()
+  for (const r of results) for (const d of r.data || []) byId.set(d.id, d)
+  const rows = Array.from(byId.values())
+  if (rows.length === 0) return []
+
+  const labels = await resolveDocumentTypeLabels(rows.map(d => d.document_type))
+  return rows
+    .map(d => {
+      const onAStep = d.related_object === 'work_steps' && stepNameById.has(d.related_id)
+      return {
+        ...d,
+        _document_type_label: documentTypeLabel(d.document_type, labels),
+        _work_step_name: onAStep ? stepNameById.get(d.related_id) : null,
+        _work_step_position: onAStep
+          ? (stepPosById.get(d.related_id) ?? STEP_POSITION_LAST)
+          : STEP_POSITION_WORK_ORDER,
+      }
+    })
+    .sort((a, b) =>
+      (a._work_step_position - b._work_step_position) ||
+      String(a.created_at || '').localeCompare(String(b.created_at || '')))
+}
+
 /** List non-deleted documents attached to a record, newest first. */
 export async function listDocuments(relatedObject, relatedId) {
   if (!relatedObject || !relatedId) return []
@@ -891,7 +963,49 @@ export async function listDocuments(relatedObject, relatedId) {
     .eq('is_deleted', false)
     .order('created_at', { ascending: false })
   if (error) throw new Error(`documents list failed: ${error.message}`)
-  return data || []
+  const rows = data || []
+  const labels = await resolveDocumentTypeLabels(rows.map(d => d.document_type))
+  return rows.map(d => ({
+    ...d,
+    _document_type_label: documentTypeLabel(d.document_type, labels),
+  }))
+}
+
+/**
+ * document_type → the label a person reads.
+ *
+ * The column stores an internal slug stamped by whichever document SLOT a file
+ * was uploaded into, or by the generator that produced it. Until 2026-08-27
+ * every screen printed the slug: a column headed "Type" reading
+ * `reservation_customer_report`. Labels live in `picklist_values` under
+ * (documents, document_type) — a value-keyed picklist, exactly like
+ * photos.photo_type — so an admin renames one in Setup with no deploy.
+ *
+ * A miss is not an error: documentTypeLabel humanizes an unregistered slug
+ * rather than falling back to the raw text, so a type nobody has labelled still
+ * reads as words. Failure of the lookup itself is survivable for the same
+ * reason — labels are a nicety, an unrenderable gallery is not.
+ */
+async function resolveDocumentTypeLabels(types) {
+  const wanted = Array.from(new Set(
+    (types || [])
+      .map(t => String(t || '').trim())
+      .filter(t => t && t !== CATCH_ALL_DOCUMENT_TYPE)
+  ))
+  if (wanted.length === 0) return new Map()
+
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('picklist_value, picklist_label')
+    .eq('picklist_object', 'documents')
+    .eq('picklist_field', 'document_type')
+    .in('picklist_value', wanted)
+
+  const map = new Map()
+  for (const row of error ? [] : (data || [])) {
+    if (row.picklist_label) map.set(row.picklist_value, row.picklist_label)
+  }
+  return map
 }
 
 /** Soft-delete a document. See softDeletePhoto for rationale. */
@@ -1125,7 +1239,8 @@ export async function uploadDocumentTemplateAsset(documentTemplateId, file) {
     throw new Error(`Only .docx files are supported (got .${ext || 'unknown'})`)
   }
 
-  const path = `document_templates/${documentTemplateId}/${Date.now()}-${safeName(file.name)}`
+  const path = assertStorageKey(
+    `document_templates/${documentTemplateId}/${Date.now()}-${storageSafeFileName(file.name)}`, file.name)
   const { error: uploadError } = await supabase.storage
     .from(DOCX_TEMPLATE_BUCKET)
     .upload(path, file, {

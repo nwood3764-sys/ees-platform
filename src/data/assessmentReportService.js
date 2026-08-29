@@ -20,8 +20,10 @@
 
 import { supabase } from '../lib/supabase'
 import {
-  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl, listDocuments,
+  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl,
+  listWorkOrderAndStepDocuments,
 } from './storageService'
+import { proxiedStorageUrl, shortFileLink } from '../lib/reportFileLinks'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildAssessmentReportPdf } from './paperworkModel'
 import { encodeImageForPdf, renderPdfFirstPageForPdf } from '../lib/pdfImages'
@@ -194,17 +196,27 @@ export async function loadAssessmentReportContext(workOrderId) {
   })
 
   // ── Documents attached to this assessment ───────────────────────────────
-  // Exactly the work order's Documents related list — the same listDocuments
-  // call the card on the record makes, so what the user sees on the work order
-  // is what they are offered here. Nothing is included until they pick it.
-  const documentRows = await listDocuments('work_orders', workOrderId)
+  // The work order's own Documents card AND every one of its work steps'.
+  // Until 2026-08-27 this read the work order alone, so a file captured where
+  // the work happened could not be put in the report it is evidence for — which
+  // is precisely where a video lands, recorded standing on the step it
+  // documents. Ordered the way the steps run, and each one says which step it
+  // came from. Nothing is included until the user picks it.
+  const documentRows = await listWorkOrderAndStepDocuments(workOrderId)
   const documents = documentRows.map(row => ({
     id: row.id,
     name: row.name || row.document_number || 'Document',
+    // The step is part of the file's identity in a report that is organised by
+    // step — "Roof / Ceiling" is what tells a reader which video this is.
+    step: row._work_step_name || null,
     typeLabel: documentTypeLabel(row.mime_type, row.name),
     size: formatFileSize(row.file_size_bytes),
     date: fmtDate(row.created_at),
     previewKind: documentPreviewKind(row.mime_type, row.name),
+    // The curation flag from the Documents card. A document marked for the
+    // final report is pre-selected here, so the set is decided ONCE on the
+    // record instead of re-picked on every generation (Nicholas, 2026-08-27).
+    inFinalReport: row.include_in_final_report === true,
     _row: row,
   }))
 
@@ -309,6 +321,31 @@ export async function loadAssessmentReportContext(workOrderId) {
  * Done as its own step so the modal can show progress — a report with 40
  * flagged photos is a real wait, and a HEIC capture has to be decoded first.
  */
+/**
+ * Mint a short, revocable link for one stored file.
+ *
+ * Falls back to the long proxied signed URL if minting fails, so a database
+ * hiccup degrades a link's APPEARANCE rather than removing evidence from a
+ * report. Returns null only when neither route produces anything.
+ */
+async function mintFileLink({ bucket, path, displayName, ttlSeconds, photoId = null, documentId = null, workOrderId = null }) {
+  if (!bucket || !path) return null
+  try {
+    const { data, error } = await supabase.rpc('mint_report_file_link', {
+      p_bucket: bucket,
+      p_path: path,
+      p_display_name: displayName || null,
+      p_ttl_seconds: ttlSeconds,
+      p_photo_id: photoId,
+      p_document_id: documentId,
+      p_work_order_id: workOrderId,
+    })
+    if (!error && data) return shortFileLink(data)
+  } catch { /* fall through to the long form */ }
+  const signed = await signedUrl(bucket, path, ttlSeconds, displayName || null)
+  return signed ? proxiedStorageUrl(signed) : null
+}
+
 export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const list = model.photos || []
   if (!list.length) return model
@@ -316,10 +353,21 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const hydrated = await hydratePhotoUrls(rows)
   const urlById = new Map(hydrated.map(h => [h.id, h._thumbUrl || h._originalUrl || null]))
 
-  // A separate, long-lived link to the ORIGINAL capture, so the PDF's reader
-  // can open or save the full-resolution photo with its EXIF intact. Signed
-  // object URLs are read-only: they expose that one photo and nothing else —
-  // no record, no edit, no delete.
+  // A separate, long-lived link to the WATERMARKED copy — the same file the
+  // Photos card hands over on download, and for the same reason: it carries
+  // the visible tag (step · property·building·unit · date · GPS) that the
+  // incentive programs require in order to accept a photo, AND the original
+  // camera EXIF, which process-photo copies back in verbatim after re-encoding.
+  //
+  // Linking the untouched original (which this did until 2026-08-27) meant the
+  // PDF showed a tagged photo while the file behind it was untagged, so a
+  // reviewer who saved one got the copy their own program will not take. The
+  // watermarked variant is capped at 2400px on its long edge; a tagged,
+  // submittable photo beats a larger unusable one. The pristine original is
+  // still the archival source and is never modified.
+  //
+  // Signed object URLs are read-only: they expose that one photo and nothing
+  // else — no record, no edit, no delete.
   //
   // Signed ONE AT A TIME rather than in a batch, because each carries its own
   // download filename — the batch API can only set one for the whole call. The
@@ -328,11 +376,23 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const buildingLabel = model.building?.label || model.building?.name || null
   const linkById = new Map()
   for (const r of rows) {
-    if (!r.storage_bucket || !r.storage_path_original) continue
-    const url = await signedUrl(
-      r.storage_bucket, r.storage_path_original, PHOTO_LINK_TTL_SECONDS,
-      photoDownloadName(r, buildingLabel))
-    if (url) linkById.set(r.id, url)
+    // Fall back to the original only when no watermarked copy exists, so a
+    // photo that never rendered still reaches the reader rather than losing
+    // its link entirely.
+    const linkPath = r.storage_path_watermarked || r.storage_path_original
+    if (!r.storage_bucket || !linkPath) continue
+    // A SHORT link on LEAP's own domain. The long signed URL is what made
+    // Gmail's redirect page and Acrobat's prompt look like phishing; this is
+    // one readable line, and unlike a signed URL it can be revoked.
+    const link = await mintFileLink({
+      bucket: r.storage_bucket,
+      path: linkPath,
+      displayName: photoDownloadName(r, buildingLabel),
+      ttlSeconds: PHOTO_LINK_TTL_SECONDS,
+      photoId: r.id,
+      workOrderId: r.work_order_id || model.workOrder?.id || null,
+    })
+    if (link) linkById.set(r.id, link)
   }
   let done = 0
   for (const p of list) {
@@ -367,9 +427,13 @@ export async function attachAssessmentDocuments(model, chosen, { onProgress } = 
     const src = list[i], out = model.documents[i], row = src._row || {}
     try {
       if (row.storage_bucket && row.storage_path) {
-        out.linkUrl = await signedUrl(
-          row.storage_bucket, row.storage_path, DOCUMENT_LINK_TTL_SECONDS,
-          documentDownloadName(src, buildingLabel))
+        out.linkUrl = await mintFileLink({
+          bucket: row.storage_bucket,
+          path: row.storage_path,
+          displayName: documentDownloadName(src, buildingLabel),
+          ttlSeconds: DOCUMENT_LINK_TTL_SECONDS,
+          documentId: row.id,
+        })
       }
       if (out.linkUrl && src.previewKind === 'image') {
         const img = await encodeImageForPdf(out.linkUrl)

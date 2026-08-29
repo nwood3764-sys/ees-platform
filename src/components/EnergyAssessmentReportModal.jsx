@@ -35,8 +35,10 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
   const [result, setResult] = useState(null)     // { url, fileName, blob }
   const [saving, setSaving] = useState(false)
   const [savedName, setSavedName] = useState(null)
-  // Documents are opt-in: nothing from the work order's Documents list goes
-  // into the report until it is chosen here.
+  // Documents marked "Include in final report" on the work order's Documents
+  // card arrive already chosen. That flag exists precisely so the set is
+  // decided once on the record rather than re-picked on every generation
+  // (Nicholas, 2026-08-27); anything not flagged is still opt-in here.
   const [chosenDocs, setChosenDocs] = useState(() => new Set())
 
   useEffect(() => {
@@ -44,7 +46,9 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
     ;(async () => {
       try {
         const c = await loadAssessmentReportContext(workOrderId)
-        if (alive) setCtx(c)
+        if (!alive) return
+        setCtx(c)
+        setChosenDocs(new Set((c.documents || []).filter(d => d.inFinalReport).map(d => d.id)))
       } catch (e) { if (alive) setLoadErr(e.message || String(e)) }
     })()
     return () => { alive = false }
@@ -83,8 +87,13 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
     try {
       await saveAssessmentReportToWorkOrder(workOrderId, result.blob, result.fileName)
       setSavedName(result.fileName)
-      toast.success('Report saved to this work order’s Documents.')
+      toast.success(`Saved to this work order’s Documents: ${result.fileName}`)
       if (onSaved) onSaved()
+      // Saving is the end of the job. Leaving the dialog open put the person
+      // back on a screen offering to generate the report they just filed, and
+      // the record reload behind it reset that screen to its initial state —
+      // which read as the dialog popping back up (Nicholas, 2026-08-27).
+      if (onClose) onClose()
     } catch (e) {
       toast.error(`Could not save the report: ${e.message || e}`)
     } finally { setSaving(false) }
@@ -219,15 +228,24 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
                           })} />
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{docItem.name}</span>
                       </span>
-                      <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: 'nowrap', marginLeft: 10 }}>
-                        {[docItem.typeLabel, docItem.size,
+                      <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: 'nowrap', marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {/* Say WHY a box is already ticked, so a pre-selection
+                            never looks like the dialog choosing for you. */}
+                        {docItem.inFinalReport && (
+                          <span style={{
+                            background: '#e8f8f2', color: C.emeraldMid,
+                            fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                            padding: '1px 6px', borderRadius: 9,
+                          }}>IN REPORT</span>
+                        )}
+                        {[docItem.step, docItem.typeLabel, docItem.size,
                           docItem.previewKind === 'none' ? 'link only' : 'preview'].filter(Boolean).join('  ·  ')}
                       </span>
                     </label>
                   ))}
                   {!(ctx.documents || []).length && (
                     <div style={{ ...sectionRow, color: C.textMuted }}>
-                      No documents on this work order. Anything added to its Documents card can be included here.
+                      No documents on this work order or its work steps. Anything added to a Documents card — a video recorded on a step included — can be included here, and a file flagged there arrives ticked.
                     </div>
                   )}
                 </div>

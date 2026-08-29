@@ -1,6 +1,6 @@
 import { supabase, fetchAllPaged } from '../lib/supabase'
 import { isSystemAuditColumn } from '../lib/systemAuditFields'
-import { resolveSoftDeleteColumn } from '../lib/softDeleteColumn'
+import { softDeleteColumnFor } from '../lib/softDeleteColumn'
 
 // =====================================================================
 // fieldMetadataService
@@ -208,7 +208,7 @@ export async function searchLookupOptions(tableName, query, { nameColumn = null,
   let softDel = null
   try {
     const fields = await getEditableFieldsForTable(tableName)
-    softDel = resolveSoftDeleteColumn((fields || []).map(f => f.columnName))
+    softDel = softDeleteColumnFor((fields || []).map(f => f.columnName))
   } catch { softDel = null }
 
   let q = supabase

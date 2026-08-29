@@ -50,6 +50,9 @@
 // report each one gets, is declared once in the pure registry — never as a
 // string comparison here.
 import { hasAssessmentReport } from '../lib/assessmentReport'
+// Which objects can produce a record of what they filed — declared in the pure
+// registry, never as a string comparison here.
+import { hasSubmittedEnrollment } from '../lib/submittedEnrollment'
 
 export const ACTION_KEYS = Object.freeze({
   EDIT:                    'edit',
@@ -64,6 +67,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL: 'generate_final_payment_request_submittal',
   GENERATE_QUALITY_INSTALL_TOOL:            'generate_quality_install_tool',
   GENERATE_ENERGY_ASSESSMENT_REPORT:        'generate_energy_assessment_report',
+  GENERATE_SUBMITTED_ENROLLMENT:               'generate_submitted_enrollment',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
@@ -383,6 +387,24 @@ export const ACTION_REGISTRY = Object.freeze({
   // Gated on the work order's record type VALUE, because which report this is
   // follows what was assessed (a whole multifamily building vs a single-family
   // home), and each shape has its own document key and its own template.
+  // Submitted Enrollment — what this enrollment filed with the program, and the
+  // attachments that went with it. Offered on every enrollment, because every
+  // enrollment IS a filing; which objects qualify is the registry's call, not
+  // a table-name test here.
+  generate_submitted_enrollment: {
+    key:                 ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT,
+    label:               'Generate Submitted Enrollment',
+    icon:                'M9 12h6 M9 16h6 M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'menu',
+    defaultSortOrder:    46,
+    // Gated on a SAVED record: there is nothing to report on a draft that has
+    // not been filed yet.
+    isAvailable: ({ tableName, editing, record }) =>
+      !editing && !!record?.id && hasSubmittedEnrollment(tableName),
+  },
+
   generate_energy_assessment_report: {
     key:                 ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT,
     label:               'Generate Energy Assessment Report',

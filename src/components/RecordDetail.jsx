@@ -29,6 +29,7 @@ const ManageSharedRecordsModal             = lazy(() => import('./ManageSharedRe
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
+const SubmittedEnrollmentModal      = lazy(() => import('./SubmittedEnrollmentModal'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -40,6 +41,7 @@ import { formatUsPhoneDisplay } from '../lib/fieldLinks'
 import { holdAppReload } from '../lib/appUpdate'
 import { contractorContactPairsFor, resolveContractorContact } from '../lib/contractorContact'
 import FieldValueLink from './FieldValueLink'
+import DeletedRecordBanner from './DeletedRecordBanner'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
 import { objectNavFor, humanizeObjectLabel } from '../lib/objectNav'
@@ -69,7 +71,8 @@ import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
 import { resolveLookupLabel, getEditableFieldsForTable } from '../data/fieldMetadataService'
 import { isSystemAuditField, isSystemAuditColumn, fieldRenderKey } from '../lib/systemAuditFields'
-import { slotTypesOnLayout, missingRequiredDocuments } from '../lib/documentSlots'
+import { slotTypesOnSurface, missingRequiredDocuments } from '../lib/documentSlots'
+import { CARD_WIDGET_TYPES } from '../lib/layoutCards.js'
 import {
   uploadDocumentTemplateAsset,
   signedDocumentTemplateAssetUrl,
@@ -1762,6 +1765,10 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             state: programState,
             parentObject: parent?.parentObject || null,
             parentRecordTypeId: parent?.parentRecordTypeId || null,
+            // ...and the same building scoping: a building runs each program
+            // once, so a quick-created opportunity is not offered one the
+            // building already has.
+            takenOnBuildingId: table === 'opportunities' ? (effectiveSeed.building_id || null) : null,
           }).catch(() => [])
         }
         // First option page for each required-FK lookup field. Scoped fields
@@ -1910,10 +1917,24 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                 <>
                   <SearchableLookup
                     value={draft[f.name] || ''}
-                    options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
+                    options={recordTypes.filter(rt => !rt.taken)
+                      .map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
                     onChange={(val) => setVal(f.name, val || null)}
                     placeholder="— Select —"
                   />
+                  {/* A dropdown cannot show a disabled row with a reason the
+                      way the record-type picker can, so a program the building
+                      already runs is left out of the list and NAMED here
+                      instead — an option that just wasn't there would read as
+                      a missing configuration. */}
+                  {recordTypes.some(rt => rt.taken) && (
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                      Already on this building, so not listed:{' '}
+                      {recordTypes.filter(rt => rt.taken)
+                        .map(rt => `${rt.label}${rt.takenBy ? ` (${rt.takenBy})` : ''}`)
+                        .join(', ')}. A building runs each program once.
+                    </div>
+                  )}
                   {recordTypesNoneInState && (
                     <div style={{ marginTop: 6, fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
                       No record type runs in{' '}
@@ -6581,8 +6602,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   const allSuppressed = allSectionWidgets.length > 0 && hiddenWidgetTypes &&
     allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
   if (sectionWidgets.length === 0 && allSuppressed) return null
-  const cardCount = allSectionWidgets.filter(w =>
-    ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'report', 'prtsn_history', 'work_plan'].includes(w.widget_type)).length
+  const cardCount = allSectionWidgets.filter(w => CARD_WIDGET_TYPES.has(w.widget_type)).length
   // An empty field group (zero fields) renders nothing — FieldGroupWidget
   // returns null for it — yet the canvas editor auto-adds a "Fields" group to
   // every section. On a card-only section (e.g. the Buildings / Units related
@@ -6878,6 +6898,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
+  const [showSubmittedEnrollmentModal, setShowSubmittedEnrollmentModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -7020,6 +7041,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // unconstrained, which is the case for most objects.
   const prefillParentObject       = prefill?.__parentObject || null
   const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
+  // A building runs each program once, so a new opportunity started from a
+  // building (or from anything that seeded one) must not be OFFERED a program
+  // that building already runs — the database refuses it on save. Only
+  // opportunities are keyed this way; every other object ignores it.
+  const prefillTakenOnBuildingId =
+    tableName === 'opportunities' ? (prefill?.building_id || null) : null
   useEffect(() => {
     if (!isCreate) { setPickerEvaluated(true); return }
     let cancelled = false
@@ -7041,9 +7068,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       state: prefillState,
       parentObject: prefillParentObject,
       parentRecordTypeId: prefillParentRecordTypeId,
+      takenOnBuildingId: prefillTakenOnBuildingId,
     })
       .then(rts => {
         if (cancelled) return
+        // Record types the building already runs cannot be saved, so they are
+        // not choices — the show/skip decision counts only the open ones, and
+        // must agree with the picker's own (see RecordTypePicker).
+        const selectable = rts.filter(rt => !rt.taken)
         if (rts._noneInState) {
           // No record type runs in this record's state. Leave the decision
           // unresolved so the picker renders and says so — skipping it here
@@ -7051,10 +7083,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           // falls back to, which is the failure this whole rule exists to stop.
         } else if (rts.length === 0) {
           setPickedRecordType(false)
-        } else if (rts.length === 1) {
-          setPickedRecordType(rts[0])
+        } else if (selectable.length === 1) {
+          setPickedRecordType(selectable[0])
         }
-        // else: leave null so picker renders
+        // else: leave null so the picker renders — including the case where
+        // every program is already taken, which it explains rather than
+        // waving the create through with no record type.
         setPickerEvaluated(true)
       })
       .catch(err => {
@@ -7064,7 +7098,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         setPickerEvaluated(true)
       })
     return () => { cancelled = true }
-  }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject, prefillParentRecordTypeId])
+  }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject,
+      prefillParentRecordTypeId, prefillTakenOnBuildingId])
 
   // ── Load required-field set ────────────────────────────────────────────
   // Fetch the table's NOT NULL columns once per mount; render the red
@@ -8764,18 +8799,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }
 
-  // Every document type a file-gallery SLOT on this layout claims. A catch-all
-  // gallery leaves those files to their own slot instead of listing them a
-  // second time on the same page. See src/lib/documentSlots.js.
-  //
-  // Declared HERE, above every conditional return below, because a hook must
-  // run on every render. Reading `data?.sections` keeps it safe on the first
-  // render, when the record is still loading and `data` is null.
-  const claimedSlotTypes = useMemo(
-    () => slotTypesOnLayout((data?.sections || []).flatMap(sec => sec.widgets || [])),
-    [data],
-  )
-
   // Show the record-type picker before loading the layout. Gates create mode.
   if (isCreate && pickerEvaluated && pickedRecordType === null) {
     const objectLabel = TABLE_META[tableName]?.label || humanizeObjectLabel(tableName)
@@ -8786,6 +8809,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         state={prefillState}
         parentObject={prefillParentObject}
         parentRecordTypeId={prefillParentRecordTypeId}
+        takenOnBuildingId={prefillTakenOnBuildingId}
         onPick={(rt) => {
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.
@@ -9181,6 +9205,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
+    [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
@@ -9221,6 +9246,121 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RESTORE]:              statusChanging,
   }
 
+  // ── One card renderer, for every surface ───────────────────────────────────
+  // A card renders identically wherever its section is placed — in the main
+  // flow on a tab, or in the always-visible right rail. Before 2026-08-27 the
+  // two surfaces each had their own copy of this dispatch, and they had already
+  // drifted: the rail drew no work plan and no publish history at all, and its
+  // related lists carried neither the template lifecycle lock nor the refresh
+  // callback. So "put this card in the sidebar too" could quietly change what
+  // the card did. One function, called from both, is what makes placement a
+  // placement rather than a different card.
+  //
+  // `claimedTypes` is surface-scoped: a catch-all documents gallery leaves out
+  // the files that a document SLOT on the same screen already lists, so nothing
+  // appears twice on one tab — but a slot on the Details tab does not empty the
+  // Documents card on the Related tab.
+  const renderRecordCard = (w, claimedTypes) => {
+    if (w.widget_type === 'related_list') {
+      // Opportunity line items render as the Salesforce-style inline-editable
+      // Opportunity Products table instead of the read-only related list,
+      // wherever that list is placed.
+      if (w.widget_config?.table === 'opportunity_line_items' && tableName === 'opportunities') {
+        return (
+          <OpportunityProductsWidget
+            key={w.id}
+            widget={w}
+            opportunityId={recordId}
+            onNavigateToRecord={onNavigateToRecord}
+          />
+        )
+      }
+      // Lock child related_lists when the parent template is Active or
+      // Archived. We match the widget's table against the lifecycle's
+      // childrenTable (e.g. project_report_template_sections for PRT). Sibling
+      // related_lists stay editable. We force editable=false on the widget copy
+      // so the Add button + drag handles + remove buttons all disappear; the
+      // trigger is the ultimate enforcement layer.
+      const isLockedChildrenList = lifecycleIsLocked
+        && lifecycle?.childrenTable
+        && w.widget_config?.table === lifecycle.childrenTable
+      const effectiveWidget = isLockedChildrenList
+        ? { ...w, widget_config: { ...w.widget_config, editable: false } }
+        : w
+      return (
+        <RelatedListWidget
+          key={w.id}
+          widget={effectiveWidget}
+          picklists={picklists}
+          onNavigateToRecord={onNavigateToRecord}
+          parentRecordId={recordId}
+          parentTable={tableName}
+          parentRecord={data?.record}
+          parentRecordName={displayName}
+          onRefreshRelated={async () => {
+            try {
+              const rows = await fetchRelatedRecords(w.widget_config, recordId)
+              // Mutate the widget's cached data in place, then nudge React with
+              // a top-level data clone so the widget re-reads.
+              w._relatedData = rows
+              setData(prev => ({ ...prev }))
+            } catch (err) {
+              // Non-fatal — widget keeps its previous rows.
+              // eslint-disable-next-line no-console
+              console.error('Related list refresh failed', err)
+            }
+          }}
+        />
+      )
+    }
+    if (w.widget_type === 'file_gallery') {
+      return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId}
+                claimedSlotTypes={claimedTypes} />
+    }
+    if (w.widget_type === 'work_plan') {
+      return (
+        <WorkPlanCard
+          key={w.id}
+          widget={w}
+          workOrderId={recordId}
+          onChanged={() => setReloadTick(t => t + 1)}
+        />
+      )
+    }
+    if (w.widget_type === 'conversation_panel') {
+      return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} parentTable={tableName} />
+    }
+    if (w.widget_type === 'conversation_messages') {
+      return <ConversationMessagesWidget key={w.id} widget={w} parentRecordId={recordId} />
+    }
+    if (w.widget_type === 'conversation_list') {
+      return <ConversationListWidget key={w.id} widget={w} parentRecordId={recordId} />
+    }
+    if (w.widget_type === 'prtsn_history') {
+      return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />
+    }
+    if (w.widget_type === 'report') {
+      return <ReportWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} onOpenRecord={onNavigateToRecord} />
+    }
+    return null
+  }
+
+  // The document types claimed by slots that render on the surface a given
+  // card sits on: this tab's own sections, plus the right rail, which is
+  // visible on every tab.
+  // Every document type a file-gallery SLOT claims on the surface a card sits
+  // on: this tab's own sections plus the right rail, which is visible on every
+  // tab. A catch-all gallery leaves those files to their own slot so nothing is
+  // listed twice on one screen — but a slot on the Details tab no longer empties
+  // the Documents card on the Related tab (Nicholas, 2026-08-27: "I still need
+  // to be able to download these and upload more documents outside of this in
+  // the regular documents tab related list section"). Scoping this per LAYOUT,
+  // as it was, made the two mutually exclusive.
+  // The main flow shows the active tab; the rail shows on every tab, so both
+  // see the same set — the tab being viewed, plus the rail itself.
+  const mainClaimedSlotTypes = slotTypesOnSurface(data?.sections, activeTab)
+  const railClaimedSlotTypes = mainClaimedSlotTypes
+
   return (
     <div style={{
       flex: 1,
@@ -9228,6 +9368,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       overflow: 'hidden',
       minHeight: 0,
     }}>
+      {/* A soft-deleted record renders in full — a recycle bin exists so the
+          record can still be read — but it says what it is, on every object.
+          Self-suppresses on a live record. `accounts` never reaches here: a
+          merged-away account returns its own notice above. */}
+      {!isCreate && (
+        <DeletedRecordBanner
+          tableName={tableName}
+          recordId={recordId}
+          record={record}
+          objectLabel={singularizeLabel(objectLabel)}
+          onRestored={() => setReloadTick(t => t + 1)}
+        />
+      )}
+
       {/* Sticky mobile header bar — back button + record number + icon actions.
           Replaces desktop breadcrumbs and the large header card's action row. */}
       {isMobile && (
@@ -9585,8 +9739,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 hiddenWidgetTypes = new Set(['merge_field_reference'])
               }
             }
-            const cards = isInsertMode ? [] : (sec.widgets || []).filter(w =>
-              ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'prtsn_history', 'report', 'work_plan'].includes(w.widget_type))
+            const cards = isInsertMode ? [] : (sec.widgets || []).filter(w => CARD_WIDGET_TYPES.has(w.widget_type))
             return (
               <div key={sec.id}>
                 <Section section={sec} record={record} picklists={picklists} lookups={lookups}
@@ -9597,93 +9750,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   onNavigateToRecord={onNavigateToRecord}
                   requiredFields={requiredFields} activeTab={activeTab}
                   createRelatedValues={createRelatedValues} />
-                {cards.map(w => {
-                  if (w.widget_type === 'related_list') {
-                    // Opportunity line items render as the Salesforce-style
-                    // inline-editable Opportunity Products table instead of the
-                    // read-only related list, wherever that list is placed.
-                    if (w.widget_config?.table === 'opportunity_line_items' && tableName === 'opportunities') {
-                      return (
-                        <OpportunityProductsWidget
-                          key={w.id}
-                          widget={w}
-                          opportunityId={recordId}
-                          onNavigateToRecord={onNavigateToRecord}
-                        />
-                      )
-                    }
-                    // Lock child related_lists when the parent template is
-                    // Active or Archived. We match the widget's table against
-                    // the lifecycle's childrenTable (e.g.
-                    // project_report_template_sections for PRT). Sibling
-                    // related_lists stay editable. We force editable=false on
-                    // the widget copy so the Add button + drag handles +
-                    // remove buttons all disappear; the trigger is the
-                    // ultimate enforcement layer.
-                    const isLockedChildrenList = lifecycleIsLocked
-                      && lifecycle?.childrenTable
-                      && w.widget_config?.table === lifecycle.childrenTable
-                    const effectiveWidget = isLockedChildrenList
-                      ? { ...w, widget_config: { ...w.widget_config, editable: false } }
-                      : w
-                    return (
-                      <RelatedListWidget
-                        key={w.id}
-                        widget={effectiveWidget}
-                        picklists={picklists}
-                        onNavigateToRecord={onNavigateToRecord}
-                        parentRecordId={recordId}
-                        parentTable={tableName}
-                        parentRecord={data?.record}
-                        parentRecordName={displayName}
-                        onRefreshRelated={async () => {
-                          try {
-                            const rows = await fetchRelatedRecords(w.widget_config, recordId)
-                            // Mutate the widget's cached data in place, then
-                            // nudge React with a top-level data clone so the
-                            // widget re-reads.
-                            w._relatedData = rows
-                            setData(prev => ({ ...prev }))
-                          } catch (err) {
-                            // Non-fatal — widget keeps its previous rows.
-                            // eslint-disable-next-line no-console
-                            console.error('Related list refresh failed', err)
-                          }
-                        }}
-                      />
-                    )
-                  }
-                  if (w.widget_type === 'file_gallery') {
-                    return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId}
-                              claimedSlotTypes={claimedSlotTypes} />
-                  }
-                  if (w.widget_type === 'work_plan') {
-                    return (
-                      <WorkPlanCard
-                        key={w.id}
-                        widget={w}
-                        workOrderId={recordId}
-                        onChanged={() => setReloadTick(t => t + 1)}
-                      />
-                    )
-                  }
-                  if (w.widget_type === 'conversation_panel') {
-                    return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} parentTable={tableName} />
-                  }
-                  if (w.widget_type === 'conversation_messages') {
-                    return <ConversationMessagesWidget key={w.id} widget={w} parentRecordId={recordId} />
-                  }
-                  if (w.widget_type === 'conversation_list') {
-                    return <ConversationListWidget key={w.id} widget={w} parentRecordId={recordId} />
-                  }
-                  if (w.widget_type === 'prtsn_history') {
-                    return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />
-                  }
-                  if (w.widget_type === 'report') {
-                    return <ReportWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} onOpenRecord={onNavigateToRecord} />
-                  }
-                  return null
-                })}
+                {cards.map(w => renderRecordCard(w, mainClaimedSlotTypes))}
               </div>
             )
           })}
@@ -9767,78 +9834,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                         />
                       )}
                       {(sec.widgets || [])
-                        .filter(w => w.widget_type === 'related_list')
-                        .map(w => (
-                          w.widget_config?.table === 'opportunity_line_items' && tableName === 'opportunities' ? (
-                            <OpportunityProductsWidget
-                              key={w.id}
-                              widget={w}
-                              opportunityId={recordId}
-                              onNavigateToRecord={onNavigateToRecord}
-                            />
-                          ) : (
-                            <RelatedListWidget
-                              key={w.id}
-                              widget={w}
-                              picklists={picklists}
-                              onNavigateToRecord={onNavigateToRecord}
-                              parentRecordId={recordId}
-                              parentTable={tableName}
-                              parentRecord={data?.record}
-                              parentRecordName={displayName}
-                            />
-                          )
-                        ))}
-                      {(sec.widgets || [])
-                        .filter(w => w.widget_type === 'conversation_panel')
-                        .map(w => (
-                          <ConversationPanelWidget
-                            key={w.id}
-                            widget={w}
-                            parentRecordId={recordId}
-                            parentTable={tableName}
-                          />
-                        ))}
-                      {(sec.widgets || [])
-                        .filter(w => w.widget_type === 'conversation_messages')
-                        .map(w => (
-                          <ConversationMessagesWidget
-                            key={w.id}
-                            widget={w}
-                            parentRecordId={recordId}
-                          />
-                        ))}
-                      {(sec.widgets || [])
-                        .filter(w => w.widget_type === 'conversation_list')
-                        .map(w => (
-                          <ConversationListWidget
-                            key={w.id}
-                            widget={w}
-                            parentRecordId={recordId}
-                          />
-                        ))}
-                      {(sec.widgets || [])
-                        .filter(w => w.widget_type === 'file_gallery')
-                        .map(w => (
-                          <FileGalleryWidget
-                            key={w.id}
-                            widget={w}
-                            parentTable={tableName}
-                            parentRecordId={recordId}
-                            claimedSlotTypes={claimedSlotTypes}
-                          />
-                        ))}
-                      {(sec.widgets || [])
-                        .filter(w => w.widget_type === 'report')
-                        .map(w => (
-                          <ReportWidget
-                            key={w.id}
-                            widget={w}
-                            parentTable={tableName}
-                            parentRecordId={recordId}
-                            onOpenRecord={onNavigateToRecord}
-                          />
-                        ))}
+                        .filter(w => CARD_WIDGET_TYPES.has(w.widget_type))
+                        .map(w => renderRecordCard(w, railClaimedSlotTypes))}
                     </div>
                   )
                 })}
@@ -10041,6 +10038,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             workOrderId={recordId}
             workOrder={record}
             onClose={() => setShowAssessmentReportModal(false)}
+            onSaved={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* Submitted Enrollment — what this enrollment filed with the program,
+            and the attachments that went with it (enrollments only). */}
+        {showSubmittedEnrollmentModal && tableName === 'enrollments' && (
+          <SubmittedEnrollmentModal
+            enrollmentId={recordId}
+            onClose={() => setShowSubmittedEnrollmentModal(false)}
             onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { storageSafeFileName } from '../lib/storageKey'
 
 // ---------------------------------------------------------------------------
 // knowledgeBaseService — the company Knowledge Base (semantic search).
@@ -11,9 +12,6 @@ import { supabase } from '../lib/supabase'
 
 const BUCKET = 'knowledge-base'
 
-function safeName(name) {
-  return (name || 'file').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120)
-}
 function fileExt(name) {
   const m = /\.([a-z0-9]+)$/i.exec(name || '')
   return m ? m[1].toLowerCase() : ''
@@ -141,7 +139,7 @@ export async function uploadKnowledgeFile({ file, title, description, state, pro
   if (insErr) throw insErr
 
   // 2) Upload the original file.
-  const path = `${row.id}/${Date.now()}-${safeName(file.name)}`
+  const path = `${row.id}/${Date.now()}-${storageSafeFileName(file.name)}`
   const { error: upErr } = await supabase.storage
     .from(BUCKET)
     .upload(path, file, { contentType: file.type || undefined, upsert: false })

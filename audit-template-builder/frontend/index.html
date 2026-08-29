@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated <!--STAMP-->2026-08-13 · dev<!--/STAMP--> — systems now translate from the Asset Score (heat pump with COP, no phantom boiler); owner reads from the Audit Template XML; exports are blocked when the systems or owner don't match</div>
+    Last updated <!--STAMP-->2026-08-13 · dev<!--/STAMP--> — owner, unit count, and invoice numbers auto-fill from the uploaded reports; NC proposal/invoice measures are stacked with a Quantity / Labor / Material / Total sub-grid and a Total Cost / Rebates / Deposits / Due summary</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -142,7 +142,11 @@
       <input id="occBedsTotal" type="number" min="0" placeholder="mixed units" style="width:96px;margin-left:4px"></label>
     <span class="copyhint" id="occCalc"></span>
   </div>
-  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and either bedrooms per unit (uniform) or total bedrooms (mixed unit types) to enable exports.</div>
+  <div id="occErr" style="margin:4px 0 8px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and either bedrooms per unit (uniform) or total bedrooms (mixed unit types) to enable exports.</div>
+  <div style="margin:2px 0 14px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+    <button class="btn" id="verifyBtn" type="button" style="white-space:nowrap">Verify &amp; sync fields from files</button>
+    <div id="verifyPanel" style="flex:1;min-width:280px;font-size:12.5px"></div>
+  </div>
 
   <div id="rateRow" style="margin-top:2px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
     <strong>Utility rates</strong>
@@ -181,6 +185,10 @@
       <div class="hint">Results report (.html) for the improved model — or the raw .osm model if the EnergyPlus runner is configured</div>
       <div class="got"></div>
       <input type="file" accept=".html,.htm,.osm"></div>
+  </div>
+  <div style="margin:8px 2px 0;font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button type="button" id="clearSessionBtn" style="background:#fff;border:1px solid #d0d8e8;color:#4a5e7a;border-radius:6px;padding:4px 10px;cursor:pointer">Clear saved session</button>
+    <span style="color:#8fa0b8">Your files &amp; project details are remembered on this device across reloads (and new builds). Clear to start a different building.</span>
   </div>
 
   <div class="review" id="review">
@@ -267,6 +275,16 @@
     </div>
   </div>
 
+  <div id="hearRow" style="margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
+    <strong style="font-size:13.5px">HEAR — Home Electrification &amp; Appliance Rebates (mechanical)</strong>
+    <span class="copyhint">— the electrification scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
+    <div style="font-size:12px;color:var(--mut);margin-top:6px">Low-income (&le;80% AMI): the program pays <b>100% of the project cost</b>, up to the ENERGY STAR product-category caps (Heat Pump for Space Heating/Cooling $8,000 · Heat Pump Water Heater $1,750 · Heat Pump Clothes Dryer $840 · Electric Cooking Appliance $840 · Insulation, Air Sealing, and Ventilation $1,600 · Electrical Panel $4,000 · Electric Wiring $2,500) and <b>$14,000 maximum per dwelling unit</b>. Same in North Carolina and Wisconsin.</div>
+    <div id="hearBody" style="margin-top:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button type="button" id="hearAdd" style="padding:7px 13px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;font-weight:600">+ Add equipment</button>
+    </div>
+  </div>
+
   <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Uploaded documents</div>
   <div style="font-size:12px;color:var(--mut);margin-top:3px">The Asset Score reports drive the paperwork math; the Audit Template reports and XMLs are the exact files that went to DOE — nothing is ever regenerated on this tab. The <b>Audit Invoice</b> unlocks with the baseline Audit Template report + XML; <b>Project Reservation</b> and <b>Project Payment</b> paperwork need all of them.</div>
   <div class="slots" style="margin-top:10px">
@@ -338,6 +356,14 @@
   <div class="bar" style="margin-left:12px">
     <button class="btn ghost" data-act="sealedInv" disabled>Sealed Invoice (PDF)</button>
   </div>
+  </div>
+
+  <div class="expSect sectHear">
+  <div class="expHdr">HEAR — Home Electrification Deliverables</div>
+  <div class="bar">
+    <button class="btn ghost" data-act="hearProp" disabled>HEAR Proposal (PDF)</button>
+  </div>
+  <div style="font-size:11.5px;color:var(--mut);margin-left:2px;margin-top:4px">Enabled once a building is loaded and at least one item is added in the HEAR section above.</div>
   </div>
 
 
@@ -803,15 +829,28 @@ function fuelScaleFactor(os,fuel){
 
 /* ---------- file wiring ---------- */
 // Optional DOE Audit Template documents (no parsing — deliverable pass-through)
-const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null};
+const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null,baseUnits:null,impUnits:null,baseBldg:null,impBldg:null};
 document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   const key=slot.dataset.atkey, inp=slot.querySelector('input');
   slot.onclick=()=>inp.click();
   ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
   ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
   const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();
-    if(key==='baseXml'||key==='impXml'){const ok2=key==='baseXml'?'baseOwner':'impOwner';atDocs[ok2]=null;
-      _parseOwnerFile(f).then(o=>{atDocs[ok2]=o;if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();});}};
+    if(key==='baseXml'||key==='impXml'){
+      const oK=key==='baseXml'?'baseOwner':'impOwner', uK=key==='baseXml'?'baseUnits':'impUnits',
+            bK=key==='baseXml'?'baseBldg':'impBldg';
+      atDocs[oK]=null; atDocs[uK]=null; atDocs[bK]=null;
+      // The Audit Template XML already carries the owner contact, the unit count,
+      // and the building's own address/state — pull all three so the user doesn't
+      // retype them (and Verify can flag a wrong-state file). Fills empty form
+      // fields only; never clobbers edits.
+      _parseOwnerFile(f).then(o=>{atDocs[oK]=o; if(typeof prefillFromAuditTemplate==='function')prefillFromAuditTemplate();
+        if(typeof scheduleAutoChecks==='function')scheduleAutoChecks(); saveSession();});
+      _parseUnitsFile(f).then(u=>{atDocs[uK]=u; if(typeof prefillFromAuditTemplate==='function')prefillFromAuditTemplate();
+        if(typeof scheduleAutoChecks==='function')scheduleAutoChecks(); saveSession();});
+      _parseAuditBuildingFile(f).then(bg=>{atDocs[bK]=bg; if(typeof paintVerifyPanel==='function')paintVerifyPanel(); saveSession();});
+    }
+    saveSession();};
   slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
   inp.addEventListener('change',()=>{if(inp.files[0])take(inp.files[0]);});
 });
@@ -872,12 +911,81 @@ document.querySelectorAll('.slot[data-key]').forEach(slot=>{
       });
       setStatus('');
       refresh();
+      saveSession();   // persist so a reload (e.g. after a new build) restores it
     }catch(err){
       setStatus('Could not read '+file.name+': '+err.message,'err');
       slot.classList.remove('ok');
     }
   }
 });
+
+/* ---------- Session memory ----------------------------------------------------
+   Persist the uploaded files + parsed data in IndexedDB so a page reload — e.g.
+   after a new build deploys — restores everything: no re-uploading, no re-running
+   the EnergyPlus runner. (Project details — owner, dates, rates, occupancy —
+   already persist per property in localStorage; restoring `data` brings them
+   back because refresh() re-runs pjLoadAndPrefill.) All wrapped in try/catch so a
+   private window or a storage-blocked browser degrades to the old behavior. */
+const ATB_DB='atb_session', ATB_STORE='session', ATB_KEY='current';
+function _idbOpen(){return new Promise((res,rej)=>{let r;
+  try{r=indexedDB.open(ATB_DB,1);}catch(e){return rej(e);}
+  r.onupgradeneeded=()=>{try{r.result.createObjectStore(ATB_STORE);}catch(e){}};
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);});}
+function _idbPut(v){return _idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(ATB_STORE,'readwrite'); tx.objectStore(ATB_STORE).put(v,ATB_KEY);
+  tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);}));}
+function _idbGet(){return _idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(ATB_STORE,'readonly'); const g=tx.objectStore(ATB_STORE).get(ATB_KEY);
+  g.onsuccess=()=>res(g.result||null); g.onerror=()=>rej(g.error);}));}
+function _idbDel(){return _idbOpen().then(db=>new Promise(res=>{
+  const tx=db.transaction(ATB_STORE,'readwrite'); tx.objectStore(ATB_STORE).delete(ATB_KEY);
+  tx.oncomplete=res; tx.onerror=res;})).catch(()=>{});}
+let _saveT=null, _restoring=false;
+function saveSession(){
+  if(_restoring) return;
+  clearTimeout(_saveT);
+  _saveT=setTimeout(()=>{
+    try{
+      const any=Object.values(files).some(Boolean)||['basePdf','impPdf','baseXml','impXml'].some(k=>atDocs[k]);
+      if(!any){ _idbDel(); return; }
+      _idbPut({ v:1,
+        data:JSON.parse(JSON.stringify(data)),
+        rawDocs:JSON.parse(JSON.stringify(rawDocs)),
+        files:{asBase:files.asBase,asImp:files.asImp,osBase:files.osBase,osImp:files.osImp},
+        atDocs:{basePdf:atDocs.basePdf,impPdf:atDocs.impPdf,baseXml:atDocs.baseXml,impXml:atDocs.impXml,
+                baseOwner:atDocs.baseOwner,impOwner:atDocs.impOwner,baseUnits:atDocs.baseUnits,impUnits:atDocs.impUnits,
+                baseBldg:atDocs.baseBldg,impBldg:atDocs.impBldg}
+      }).catch(()=>{});
+    }catch(e){/* storage full/unavailable — skip */}
+  },600);
+}
+async function restoreSession(){
+  let rec=null; try{ rec=await _idbGet(); }catch(e){ return; }
+  if(!rec||rec.v!==1) return;
+  _restoring=true;
+  try{
+    if(rec.data)    Object.assign(data, rec.data);
+    if(rec.rawDocs) Object.assign(rawDocs, rec.rawDocs);
+    if(rec.files)   Object.assign(files, rec.files);
+    if(rec.atDocs)  Object.assign(atDocs, rec.atDocs);
+    const mark=(sel,f)=>{ if(!f)return; document.querySelectorAll(sel).forEach(sl=>{
+      sl.classList.add('ok'); const g=sl.querySelector('.got'); if(g)g.textContent='✓ '+(f.name||'restored'); }); };
+    ['asBase','asImp','osBase','osImp'].forEach(k=>mark('.slot[data-key="'+k+'"]', files[k]));
+    ['basePdf','impPdf','baseXml','impXml'].forEach(k=>mark('.slot[data-atkey="'+k+'"]', atDocs[k]));
+    setStatus('Restored your previous session — files and details are back. Upload a new file to replace, or press “Clear saved session”.','ok');
+  }catch(e){}
+  _restoring=false;
+  try{ refresh(); if(typeof scheduleAutoChecks==='function') scheduleAutoChecks(); }catch(e){}
+}
+function clearSession(){
+  _idbDel();
+  ['asBase','asImp','osBase','osImp'].forEach(k=>{files[k]=null;data[k]=null;rawDocs[k]=null;});
+  ['basePdf','impPdf','baseXml','impXml','baseOwner','impOwner','baseUnits','impUnits','baseBldg','impBldg'].forEach(k=>atDocs[k]=null);
+  document.querySelectorAll('.slot').forEach(sl=>{sl.classList.remove('ok'); const g=sl.querySelector('.got'); if(g)g.textContent='';});
+  setStatus('Cleared saved session.','');
+  try{ refresh(); }catch(e){}
+}
+window.clearSession=clearSession;
 function setStatus(msg,cls){const s=document.getElementById('status');s.textContent=msg||'';s.className='status'+(cls?' '+cls:'');}
 function fmt(n,d=0){return (n||0).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});}
 function copyText(text,btn){
@@ -960,20 +1068,27 @@ function refresh(){
   const atAudit=!!(atDocs.basePdf&&atDocs.baseXml);
   const atAll=!!(atDocs.basePdf&&atDocs.impPdf&&atDocs.baseXml&&atDocs.impXml);
   const AUDIT_ACTS=['auditDoc'];
-  const FULL_ACTS=['propDoc','invDoc','workbook','sealedProp','sealedInv'];
+  // Paperwork (proposal / invoice / workbook / Sealed) is generated from the two
+  // Asset Score reports + the unit count via invoiceModel() — it does NOT read the
+  // uploaded DOE Audit Template documents, and a PROPOSAL is written before those
+  // documents even exist. So gate paperwork on paperReady only; requiring all four
+  // audit-template uploads (atAll) was wrong and silently blocked every proposal.
+  const PAPER_ACTS=['propDoc','invDoc','workbook','sealedProp','sealedInv'];
   for(const e of document.querySelectorAll('button[data-act]')){
     const a=e.dataset.act;
     if(AUDIT_ACTS.indexOf(a)>=0) e.disabled=!(paperReady&&atAudit);
-    else if(FULL_ACTS.indexOf(a)>=0) e.disabled=!(paperReady&&atAll);
+    else if(PAPER_ACTS.indexOf(a)>=0) e.disabled=!paperReady;
     else if(a==='reportBase') e.disabled=!(files.asBase||atDocs.basePdf);
     else if(a==='reportImp') e.disabled=!(files.asImp||atDocs.impPdf);
     else if(a==='dlvXmlBase') e.disabled=!atDocs.baseXml;
     else if(a==='dlvXmlImp') e.disabled=!atDocs.impXml;
+    else if(a==='hearProp') e.disabled=!(typeof hearHasRows==='function'&&hearHasRows()&&(data.asBase||data.asImp));
     else e.disabled=!canExport;
   }
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
   document.getElementById('aiExtract').disabled=!filesReady;
   if(data.asBase||data.asImp)pjLoadAndPrefill();
+  if(typeof paintVerifyPanel==='function')paintVerifyPanel();
   const occErr=document.getElementById('occErr'); if(occErr) occErr.style.display=occOk?'none':'';
   if(!filesReady){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
@@ -1050,39 +1165,10 @@ function refresh(){
   rows.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
   h+='</table></div>';
 
-  // Copyable Metered Energy Year Start Date (yyyy-mm-dd) for the utility import.
-  const startDate=startDateFor(asB);
-  h+=`<div class="sect"><h3>Metered Energy Year Start Date</h3>
-    <div class="copyrow">
-      <code id="startDateVal">${startDate}</code>
-      <button class="copybtn" onclick="copyStart()">Copy</button>
-      <span class="copyhint">Paste into the required “Metered Energy Year Start Date” field (yyyy-mm-dd) on the import screen. Same for baseline and improved. The 12-month window ends two full calendar months before the current month, so the newest reading is never an implausibly-recent bill.</span>
-    </div></div>`;
-
-  // ---- Benchmarking screen, copyable fields (two sections: baseline + improved) ----
-  function benchFields(label, e, g){
-    const kbtu=e*KWH_KBTU+g*THERM_KBTU;
-    const cost=e*RATE_ELEC+g*RATE_GAS;
-    const eui=(kbtu/asB.gfa).toFixed(1);
-    const costInt=(cost/asB.gfa).toFixed(1);
-    const fields=[
-      ['Benchmarking Source','Other'],
-      ['Benchmarking Source (Other)','Energy Modeling'],
-      ['Year Benchmarked', String(asB.scoreDate?asB.scoreDate.year:new Date().getFullYear())],
-      ['Site Energy Use Intensity (kBtu/ft²)', eui],
-      ['Site Energy Cost Intensity ($/ft²)', costInt],
-    ];
-    let s=`<div class="sect"><h3>Benchmarking — ${label}</h3>`;
-    s+=`<div class="cardgrid">`;
-    fields.forEach(f=>{
-      s+=`<div class="fcard"><div class="flabel">${f[0]}</div>
-        <div class="copyrow"><code>${f[1]}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>`;
-    });
-    s+=`</div><div class="copyhint" style="margin-top:6px">Total site energy for reference: ${fmt(kbtu)} kBtu · annual cost $${fmt(cost)}. The field is labeled “Intensity” (per ft²); some submittals enter the total instead — match your reviewer.</div></div>`;
-    return s;
-  }
-  h+=benchFields('Baseline (benchmark / current)', b.e, b.g);
-  h+=benchFields('Improved (target)', i.e, i.g);
+  // (Metered Energy Year Start Date and the Benchmarking copy-fields were removed
+  // 2026-08-27 — the generated 50121 XML carries all of them (TimeSeries start,
+  // Scenario benchmark/target SiteEnergyUseIntensity), so the manual-paste helpers
+  // were redundant once the XML import replaced hand entry.)
 
   // Whole-building reported energy savings — its own copyable field
   h+=`<div class="sect"><h3>Whole Building Reported Energy Savings</h3>
@@ -1094,38 +1180,11 @@ function refresh(){
     </div>
     <div class="copyhint" style="margin-top:6px">The 50121 qualification field. Asset Score stated value is the headline; OpenStudio monthly is from the metered grid.</div></div>`;
 
-  // ---- Building Characteristics (Audit Template screen) ----
-  // Readable straight from the Asset Score PDF: GFA, floors above/below grade, HVAC assignment.
-  // NOT printed on the report: Conditioned Floor Area Heated/Cooled, and General Building Shape — confirm-prompts.
-  {
-    const fa = asB.floorsAbove, fb = asB.floorsBelow;
-    const totFloors = (fa!=null?fa:0) + (fb!=null?fb:0);
-    const card=(label,val,hint)=>`<div class="fcard"><div class="flabel">${label}</div>
-      <div class="copyrow"><code>${val}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div>
-      ${hint?`<div class="copyhint" style="margin-top:4px">${hint}</div>`:''}</div>`;
-    const prompt=(label,val,hint)=>`<div class="fcard" style="border-style:dashed">
-      <div class="flabel">${label} <span style="color:var(--gold)">— confirm</span></div>
-      <div class="copyrow"><code>${val}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div>
-      <div class="copyhint" style="margin-top:4px">${hint}</div></div>`;
-    let s='<div class="sect"><h3>Building Characteristics</h3><div class="cardgrid">';
-    s+=card('Gross Floor Area (ft²)', fmt(asB.gfa), 'Page-1 value from the Asset Score Report.');
-    s+=card('Floors Above-grade, Conditioned', fa!=null?fa:'—', 'Asset Score block detail.');
-    s+=card('Floors Below-grade, Conditioned', fb!=null?fb:'—', 'Asset Score block detail.');
-    s+=card('Number of Floors, Conditioned', totFloors||'—', 'Above + below grade.');
-    s+=prompt('Conditioned Floor Area, Heated and Cooled (ft²)', fmt(asB.gfa),
-      'NOT printed on the Asset Score Report — this is your entry. Start from Gross Floor Area and subtract any unconditioned space (e.g. an excluded basement), to match what you set in Asset Score.');
-    s+=prompt('General Building Shape', 'Rectangle',
-      'NOT printed as a shape on the report (it gives footprint/perimeter geometry). Select the shape you used in Asset Score: Rectangle, L, T, H, or U.');
-    s+='</div>';
-    // HVAC assignment — read from the block detail
-    s+='<div class="copyhint" style="margin-top:10px"><strong>Heating/cooling system assignment</strong> (Asset Score block detail): ';
-    const hv=[];
-    if(asB.coolTons!=null||asB.coolCop!=null) hv.push(`Primary — Through-the-Wall AC / Terminal DX${asB.coolCop!=null?' · '+asB.coolCop+' COP':''}${asB.coolTons!=null?' · '+asB.coolTons+' tons':''}`);
-    if(asB.heatCap!=null) hv.push(`Secondary — Convective Baseboard: Electric · ${asB.heatCap} kBtu/hr`);
-    s+= hv.length? hv.join(' &nbsp;|&nbsp; ') : 'see Envelope &amp; systems below';
-    s+='</div></div>';
-    h+=s;
-  }
+  // (The Building Characteristics copy-field section was removed 2026-08-27 — GFA,
+  // conditioned floor area, floors above/below, and building shape are all written
+  // into the generated 50121 XML (FloorAreas, ConditionedFloorsAboveGrade,
+  // FootprintShape), so the manual-paste section had no purpose after XML import.
+  // The Envelope & systems table below still shows the real building detail.)
 
   h+='<div class="sect"><h3>Envelope &amp; systems</h3><table class="kv">';
   const env=[['Roof',(asB.roofType||'?')+' · R: '+(asB.roofRs&&asB.roofRs.length?asB.roofRs.join(' / '):asB.roofR)+' → '+((asI&&asI.roofRs&&asI.roofRs.length)?asI.roofRs.join(' / '):(asI?asI.roofR:asB.roofR))],
@@ -1558,6 +1617,44 @@ async function _parseOwnerFile(f){
     return (o.name||o.company)?o:null;   // only trust it if it actually names someone
   }catch(e){ return null; }
 }
+// Parse the dwelling-unit count out of an Audit Template XML. BuildingSync
+// records it as a SpatialUnit whose SpatialUnitType names apartment/dwelling
+// units (e.g. "Apartment units") with a NumberOfUnits — that is the real unit
+// count, so the user shouldn't retype it and the occupants math stops being off.
+// Prefer the dwelling-typed unit; fall back to any NumberOfUnits > 0. Never a guess.
+async function _parseUnitsFile(f){
+  if(!f) return null;
+  try{
+    const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
+    if(doc.querySelector('parsererror')) return null;
+    let fallback=null;
+    for(const su of doc.getElementsByTagNameNS(NS_AUC,'SpatialUnit')){
+      const tEl=su.getElementsByTagNameNS(NS_AUC,'SpatialUnitType')[0];
+      const nEl=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0];
+      const n=nEl?parseInt((nEl.textContent||'').trim(),10):NaN;
+      if(!Number.isFinite(n)||n<1) continue;
+      const type=(tEl?tEl.textContent:'')||'';
+      if(/apartment|dwelling|unit/i.test(type)) return n;   // authoritative match
+      if(fallback==null) fallback=n;
+    }
+    return fallback;
+  }catch(e){ return null; }
+}
+// Parse the BUILDING's own identity (name + address + state) from an Audit
+// Template XML. In BuildingSync the Site/Building address is the first address
+// block in the file; the contact addresses (auditor, owner) come later in
+// document order — so the first StreetAddress/State/etc. is the building's.
+// Verify uses the state to flag a wrong-building/wrong-state upload.
+async function _parseAuditBuildingFile(f){
+  if(!f) return null;
+  try{
+    const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
+    if(doc.querySelector('parsererror')) return null;
+    const g=tag=>{const e=doc.getElementsByTagNameNS(NS_AUC,tag)[0];return e?(e.textContent||'').trim():'';};
+    const o={name:g('PremisesName'),street:g('StreetAddress'),city:g('City'),state:g('State'),zip:g('PostalCode')};
+    return (o.name||o.street||o.state)?o:null;
+  }catch(e){ return null; }
+}
 // The resolved owner for a given side: the cached uploaded-XML owner first
 // (parsed once on upload), then the Project-details owner fields, else null.
 // NEVER the built-in template default.
@@ -1890,6 +1987,12 @@ async function build50121XML(which){
   }
 
   // ---- Deep building-science fields (Asset Score PDF is authoritative) ----
+  // Enclosure air-tightness: ALWAYS the leakiest ("Very Leaky") — an EES rule.
+  // A leaky baseline is what gives air-sealing measures their modeled savings, so
+  // we hard-code it rather than let the model assume a tight enclosure. This is
+  // the whole-building AirInfiltrationSystem/Tightness (a valid BuildingSync enum:
+  // Very Tight / Tight / Average / Leaky / Very Leaky; "Very Leaky" is level 1).
+  _setFirst(doc,'Tightness','Very Leaky');
   // Envelope assemblies
   _setFirst(doc,'WallInsulationRValue', as.wallR);
   // Roofs: the report can list MULTIPLE roof systems (e.g. an R-0 kneewall attic
@@ -2111,9 +2214,29 @@ async function build50121XML(which){
     const hs0=_q(doc,'HeatingSource')[0];
     let keepSys=hs0; while(keepSys && keepSys.localName!=='HVACSystem') keepSys=keepSys.parentNode;
     if(keepSys){
+      // The kept HeatingSource/CoolingSource may reference a HeatingPlant/CoolingPlant
+      // that the 50121 template puts in a SEPARATE HVACSystem (the boiler plant lives
+      // in its own system, linked by SourceHeatingPlantID). Those plant-holder systems
+      // must ALSO be kept — otherwise the collapse deletes the boiler, the plant
+      // reference dangles, and a real gas furnace ends up as an empty heating source
+      // that imports as all-electric. (Only bites non-electric buildings, because the
+      // electric-conversion path below rebuilds the source; a gas furnace does not.)
+      const keepSystems=new Set([keepSys]);
+      const plantRefs=new Set();
+      for(const r of [...keepSys.getElementsByTagNameNS(NS_AUC,'SourceHeatingPlantID'),
+                      ...keepSys.getElementsByTagNameNS(NS_AUC,'SourceCoolingPlantID')]){
+        const id=r.getAttribute('IDref'); if(id) plantRefs.add(id);
+      }
+      if(plantRefs.size) for(const sys of [..._q(doc,'HVACSystem')]){
+        for(const plant of [...sys.getElementsByTagNameNS(NS_AUC,'HeatingPlant'),
+                            ...sys.getElementsByTagNameNS(NS_AUC,'CoolingPlant'),
+                            ...sys.getElementsByTagNameNS(NS_AUC,'CondenserPlant')]){
+          if(plantRefs.has(plant.getAttribute('ID'))) keepSystems.add(sys);
+        }
+      }
       const removedSrc=new Set();
       for(const sys of [..._q(doc,'HVACSystem')]){
-        if(sys===keepSys) continue;
+        if(keepSystems.has(sys)) continue;
         for(const s of [...sys.getElementsByTagNameNS(NS_AUC,'HeatingSource'),
                         ...sys.getElementsByTagNameNS(NS_AUC,'CoolingSource')]){
           const id=s.getAttribute('ID'); if(id) removedSrc.add(id);
@@ -3134,7 +3257,8 @@ function buildMappedForReview(){
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
 const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
   'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd',
-  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas'];
+  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas',
+  'occUnits','occBeds','occBedsTotal'];   // occupancy persists per property too
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
@@ -3162,7 +3286,7 @@ function pjLoadAndPrefill(){
   set('pjInstallAddr',(asB||as).street);
   set('pjCsz',(asB||as).cityStateZip);
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
-  set('pjInvNo','INV-'+(buildingState()||'WI')+'-');
+  prefillFromAuditTemplate();   // owner + unit count + invoice numbers, before the qty cascade
   // Quantity fields show the live report-derived numbers until the user edits
   // one — an edited field takes over permanently (dataset.auto cleared below).
   const qd=pjQtyDefaults();
@@ -3176,14 +3300,245 @@ function pjLoadAndPrefill(){
   // is left untouched.
   {const rr=STATE_UTILITY_RATES[buildingState()]||STATE_UTILITY_RATES.US;
    set('rateElec',String(rr.elec)); set('rateGas',String(rr.gas));}
+  if(typeof hearLoadAndRender==='function')hearLoadAndRender();
+}
+/* ================= HEAR — Home Electrification & Appliance Rebates =================
+   The electrification scope + proposal, SEPARATE from the HOMES proposal. Low-income
+   (<=80% AMI) only: the program pays 100% of project cost, up to the federal per-measure
+   caps and $14,000 per dwelling unit. Same schedule in NC and WI (confirmed 2026-08-28). */
+// Each measure declares its own MODEL-NUMBER fields and EFFICIENCY metrics — never
+// one combined box. A split heat pump has two model numbers (outdoor condenser +
+// indoor air handler/coil); its ratings (HSPF2 / SEER2 / EER2) each get their own input.
+// Official North Carolina HEAR "Upgrade Type" names + the program's product-category
+// rebate caps (Nicholas, 2026-08-29). Order mirrors the program's measure list. Keys
+// stay stable so saved scopes are unaffected by the display-name change.
+const M1=[{key:'model',label:'Make / Model #',short:''}];   // single-unit default
+const HEAR_MEASURES=[
+  {key:'panel',label:'Electrical Panel',cap:4000,models:M1,metrics:['Amps'],
+   types:['200A Service','150A Service','100A Service','Subpanel']},
+  {key:'cooking',label:'Electric Cooking Appliance',cap:840,models:M1,metrics:[],
+   types:['Induction Range','Induction Cooktop','Electric Cooktop','Electric Range / Stove','Electric Oven']},
+  {key:'wiring',label:'Electric Wiring',cap:2500,models:[],metrics:[],
+   types:['Branch Circuit','Service Upgrade','Whole-Unit Rewire']},
+  {key:'dryer',label:'Heat Pump Clothes Dryer',cap:840,models:M1,metrics:['CEF'],
+   types:['Ventless Heat Pump Dryer','Combo Washer/Dryer']},
+  {key:'heat_pump',label:'Heat Pump for Space Heating/Cooling',cap:8000,
+   models:[{key:'outdoor',label:'Outdoor Unit (Heat Pump) Model #',short:'Outdoor'},
+           {key:'indoor', label:'Indoor Unit (Air Handler / Coil) Model #',short:'Indoor'}],
+   metrics:['HSPF2','SEER2','EER2'],
+   types:['Ducted Central Heat Pump','Ductless Mini-Split','Multi-Zone Mini-Split','Packaged Terminal (PTHP)','Ground-Source (Geothermal)','Air-to-Water Heat Pump']},
+  {key:'hpwh',label:'Heat Pump Water Heater',cap:1750,models:M1,metrics:['UEF'],
+   types:['50 gallon','65 gallon','80 gallon','Split-System']},
+  {key:'weatherization',label:'Insulation, Air Sealing, and Ventilation',cap:1600,models:[],metrics:[],
+   types:['Attic Insulation','Wall Insulation','Air Sealing','Mechanical Ventilation']},
+];
+const HEAR_BY_KEY=Object.fromEntries(HEAR_MEASURES.map(m=>[m.key,m]));
+var hearState=null, _hearLastKey=null;   // var (not let): pjLoadAndPrefill can run before this line at init — avoid a temporal-dead-zone ReferenceError
+function hearKey(){const k=pjStorageKey();return k?k+'_hear':null;}
+function hearBlankRow(){return {measure:'heat_pump',systemType:'',models:{},effs:{},qty:'1',cost:'',desc:'',descAuto:false};}
+// Some measures carry a suggested description. Mechanical ventilation must tell the
+// reviewer that a companion air-sealing project accompanies it (that pairing is what
+// makes the $1,600 ventilation incentive eligible). Pre-filled but fully editable.
+function hearDefaultDesc(measureKey,systemType){
+  if(systemType==='Mechanical Ventilation')
+    return 'ENERGY STAR mechanical ventilation installed in combination with a whole-home air sealing project on this dwelling. The accompanying air sealing has been (or will be) completed as part of this project’s scope of work, satisfying the program requirement that mechanical ventilation be paired with air sealing. Noted here so the program reviewer can confirm the companion air-sealing project supporting the $1,600 ventilation incentive.';
+  return '';
+}
+function maybeSetDefaultDesc(rw){
+  const def=hearDefaultDesc(rw.measure,rw.systemType);
+  if(def){ if(!rw.desc||rw.descAuto){rw.desc=def; rw.descAuto=true;} }   // fill when empty or still auto
+  else if(rw.descAuto){ rw.desc=''; rw.descAuto=false; }                 // previous auto note no longer applies
+}
+function hearHasRows(){return Array.isArray(hearState)&&hearState.some(r=>r&&(r.cost||r.systemType||(r.models&&Object.values(r.models).some(v=>v))));}
+function hearSave(){const k=hearKey();if(!k)return;try{localStorage.setItem(k,JSON.stringify(hearState||[]));}catch(e){}}
+function hearLoad(){
+  const k=hearKey();
+  if(_hearLastKey&&k!==_hearLastKey)hearState=null;      // switched buildings -> drop prior scope
+  _hearLastKey=k;
+  if(hearState==null){let s=[];try{s=JSON.parse(localStorage.getItem(k)||'[]');}catch(e){}
+    hearState=Array.isArray(s)?s:[];}
+}
+function hearLoadAndRender(){hearLoad();renderHear();hearUpdateGate();}
+function hearUpdateGate(){const b=document.querySelector('button[data-act="hearProp"]');
+  if(b)b.disabled=!(hearHasRows()&&(data.asBase||data.asImp));}
+function renderHear(){
+  const body=document.getElementById('hearBody');if(!body)return;
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const inp='padding:7px 8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;width:100%;font:inherit';
+  if(!hearState||!hearState.length){
+    body.innerHTML='<div style="font-size:12px;color:var(--mut);padding:6px 0">No equipment yet — click <b>+ Add equipment</b> to add a heat pump, water heater, panel, etc.</div>';
+    return;}
+  let h='';
+  hearState.forEach((r,i)=>{
+    const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
+    const opts=HEAR_MEASURES.map(m=>`<option value="${m.key}"${m.key===r.measure?' selected':''}>${esc(m.label)}</option>`).join('');
+    const typeOpts=['<option value="">— system type —</option>'].concat(meas.types.map(tp=>`<option value="${esc(tp)}"${tp===r.systemType?' selected':''}>${esc(tp)}</option>`)).join('');
+    h+=`<div data-hrow="${i}" style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px;background:#f7f9fc">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <select data-hf="measure" style="${inp};flex:2;font-weight:600">${opts}</select>
+        <button type="button" data-delhear="${i}" title="Remove this item" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">✕</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 10px">
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:1 1 160px;min-width:150px">System type<select data-hf="systemType" style="${inp}">${typeOpts}</select></label>
+        ${(meas.models||[]).map(md=>`<label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:1 1 190px;min-width:170px">${esc(md.label)}<input data-hf="model" data-mkey="${esc(md.key)}" value="${esc((r.models||{})[md.key]||'')}" placeholder="e.g. Mitsubishi MXZ-…" style="${inp}"></label>`).join('')}
+        ${(meas.metrics||[]).map(mtr=>`<label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 92px">${esc(mtr)}<input data-hf="eff" data-emetric="${esc(mtr)}" value="${esc((r.effs||{})[mtr]||'')}" placeholder="${esc(mtr)}" style="${inp}"></label>`).join('')}
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 62px">Qty<input data-hf="qty" inputmode="numeric" value="${esc(r.qty)}" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 110px">Cost $<input data-hf="cost" inputmode="numeric" value="${esc(r.cost)}" placeholder="project cost" style="${inp}"></label>
+      </div>
+      <label style="display:flex;flex-direction:column;gap:3px;margin-top:8px;font-size:11px;color:var(--mut)">Description <span style="font-weight:400">— prints on the proposal; edit freely</span><textarea data-hf="desc" rows="2" placeholder="Describe this measure for the proposal…" style="${inp};resize:vertical;min-height:40px;line-height:1.4">${esc(r.desc||'')}</textarea></label>
+      <div style="font-size:11px;color:var(--mut);margin-top:8px">Program cap $${meas.cap.toLocaleString('en-US')} per unit · low-income pays 100% up to the cap</div>
+    </div>`;
+  });
+  body.innerHTML=h;
+}
+// HEAR row edit / add / remove — delegated so it survives re-render
+document.addEventListener('input',e=>{
+  const t=e.target;if(!t||!t.matches||!t.matches('[data-hf]'))return;
+  const row=t.closest('[data-hrow]');if(!row)return;
+  const i=+row.dataset.hrow,f=t.dataset.hf;
+  if(!hearState||!hearState[i])return;
+  const rw=hearState[i];
+  if(f==='model'){if(!rw.models)rw.models={}; rw.models[t.dataset.mkey]=t.value;}
+  else if(f==='eff'){if(!rw.effs)rw.effs={}; rw.effs[t.dataset.emetric]=t.value;}
+  else if(f==='desc'){rw.desc=t.value; rw.descAuto=false;}   // hand-edited -> stop auto-managing it
+  else rw[f]=t.value;
+  if(f==='measure'){rw.systemType=''; maybeSetDefaultDesc(rw); renderHear();}   // refresh fields + suggested note
+  else if(f==='systemType'){maybeSetDefaultDesc(rw); renderHear();}             // Mechanical Ventilation -> prefill the air-sealing note
+  hearSave();hearUpdateGate();
+});
+document.addEventListener('click',e=>{
+  const b=e.target&&e.target.closest?e.target.closest('button'):null;if(!b)return;
+  if(b.id==='hearAdd'){if(!hearState)hearState=[];hearState.push(hearBlankRow());renderHear();hearSave();hearUpdateGate();return;}
+  if(b.dataset&&b.dataset.delhear!=null){const i=+b.dataset.delhear;if(hearState){hearState.splice(i,1);renderHear();hearSave();hearUpdateGate();}return;}
+});
+try{renderHear();}catch(e){}      // paint the empty-state immediately, before any report loads
+// Compose the invoice/quote number from what the reports already tell us:
+//   <STATE>-<doc code>-<building number>-<first letter of the street name>
+//   assessment (audit) -> A ; project -> P     e.g. NC-A-15008-S / NC-P-15008-S
+// The building number is the leading number of the install address (a range like
+// "101-111" contributes 101); the street letter is the first letter of the street
+// NAME (the first alpha token after the house number). Empty unless we have the
+// state AND at least one identifier — never a half-baked stub.
+function composeInvoiceNo(code){
+  const st=buildingState()||'';
+  const addr=(pj('pjInstallAddr')||((data.asBase||data.asImp||{}).street)||'').trim();
+  const name=(pj('pjPropName')||((data.asBase||data.asImp||{}).name)||'').trim();
+  const num=((addr.match(/\d+/)||[])[0])||((name.match(/\d+/)||[])[0])||'';
+  const afterNum=addr.replace(/^[^A-Za-z]*/,'');           // drop the house number/range
+  const letter=((afterNum.match(/[A-Za-z]/)||[])[0]||'').toUpperCase();
+  if(!st || !(num||letter)) return '';
+  return [st,code,num,letter].filter(Boolean).join('-');
+}
+// Pull everything the uploaded Audit Template XML already knows into the empty
+// Project-details fields, so the user retypes as little as possible (fewer typos):
+//   · the Owner contact  -> Property Owner / Contact / Email / Phone / address
+//   · the dwelling-unit count -> Occupancy "Units"  (fixes the occupants math)
+//   · the composed number -> both the audit and the project invoice fields
+// Every write is fill-when-empty — a value the user has typed is never overwritten.
+function prefillFromAuditTemplate(){
+  // Fill an empty field, OR refresh a field WE auto-filled earlier (dataset.auto)
+  // so correcting a wrong upload actually updates the screen and the export. A
+  // field the user typed into has its auto flag cleared (see the input listener)
+  // and is never overwritten. A blank incoming value never wipes an existing one.
+  const set=(id,v)=>{const e=document.getElementById(id);
+    if(!e||v==null||String(v)==='')return;
+    if(e.value===''||e.dataset.auto==='1'){e.value=String(v); e.dataset.auto='1';}};
+  const ow=atDocs.baseOwner||atDocs.impOwner;
+  if(ow){
+    set('pjOwner', ow.company||ow.name);      // Property Owner = the organization
+    set('pjContact', ow.name);
+    set('pjEmail', ow.email);
+    set('pjPhone', ow.phone);
+    set('pjOwnerAddr', ow.street);
+    const stZip=[ow.state,ow.zip].filter(Boolean).join(' ');
+    set('pjOwnerCsz', [ow.city,stZip].filter(Boolean).join(', '));
+  }
+  const un=atDocs.baseUnits||atDocs.impUnits;
+  if(un!=null)set('occUnits', un);
+  set('pjInvNo', composeInvoiceNo('A'));      // A = assessment (audit)
+  set('pjProjInvNo', composeInvoiceNo('P'));  // P = project
+  try{pjSave();}catch(e){}
+}
+// One click: force every attachment-derived field to match the CURRENT uploads,
+// then report readiness. Replaces "delete all the fields by hand, then refresh".
+// Manual-only fields (IQ number, the date fields) are left untouched.
+function verifyAndSyncFields(){
+  const as=data.asImp||data.asBase, asB=data.asBase;
+  // Force each field to the value the FILES provide. Crucially, if the files DON'T
+  // provide a value for a field (e.g. no audit-template XML → no owner/units), leave
+  // whatever is already there — NEVER blank a field the files can't refill. (Clearing
+  // then refilling used to wipe a hand-typed unit count when there was no XML, which
+  // then silently disabled the proposal.)
+  const force=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null&&String(v)!==''){e.value=String(v); e.dataset.auto='1';}};
+  if(as){const strip=n=>cleanName(n||'').replace(/\s*-\s*(Baseline|Improved)\s*$/i,'');
+    force('pjPropName', strip((asB||as).name));
+    force('pjInstallAddr',(asB||as).street);
+    force('pjCsz',(asB||as).cityStateZip);}
+  const ow=atDocs.baseOwner||atDocs.impOwner;
+  if(ow){
+    force('pjOwner', ow.company||ow.name); force('pjContact', ow.name);
+    force('pjEmail', ow.email); force('pjPhone', ow.phone); force('pjOwnerAddr', ow.street);
+    const stZip=[ow.state,ow.zip].filter(Boolean).join(' ');
+    force('pjOwnerCsz', [ow.city,stZip].filter(Boolean).join(', '));
+  }
+  const un=atDocs.baseUnits||atDocs.impUnits; if(un!=null) force('occUnits', un);
+  force('pjInvNo', composeInvoiceNo('A')); force('pjProjInvNo', composeInvoiceNo('P'));
+  const qd=pjQtyDefaults();                     // aerator counts read the (now current) occUnits
+  for(const [id,v] of Object.entries(qd)) if(v!=null) force(id,v);
+  try{pjSave();}catch(e){}
+  if(typeof refresh==='function')refresh();     // re-evaluate button gating with the synced values
+  paintVerifyPanel(true);
+}
+// Readiness rows for the Verify panel.
+function verifyReport(){
+  const rows=[]; const ck=(label,ok,detail,required)=>rows.push({label,ok:!!ok,detail:detail||'',required:required!==false});
+  const asB=data.asBase, asI=data.asImp;
+  ck('Baseline Asset Score report', !!asB, asB?(asB.name||'loaded'):'not uploaded');
+  ck('Improved Asset Score report', !!asI, asI?(asI.name||'loaded'):'not uploaded');
+  const u=parseInt((document.getElementById('occUnits')||{}).value,10);
+  ck('Dwelling-unit count', Number.isFinite(u)&&u>=1, (Number.isFinite(u)&&u>=1)?(u+' units'):'enter Occupancy → Dwelling units');
+  const owName=pj('pjOwner')||pj('pjContact');
+  ck('Property owner (bill-to)', !!owName, owName||'upload the audit template XML, or type it', false);
+  const haveXml=!!(atDocs.baseXml||atDocs.impXml);
+  ck('Audit Template XML (auto-fills owner + units)', haveXml, haveXml?'loaded':'not uploaded — optional', false);
+  const asState=(asB&&asB.state)||(asI&&asI.state)||'';
+  const atState=(atDocs.baseBldg&&atDocs.baseBldg.state)||(atDocs.impBldg&&atDocs.impBldg.state)||'';
+  if(asState&&atState) ck('Asset Score & Audit Template are the same state', asState===atState,
+    'Asset Score: '+asState+' · Audit Template: '+atState+(asState!==atState?' — these files look like DIFFERENT buildings':''));
+  return rows;
+}
+function paintVerifyPanel(fromSync){
+  const el=document.getElementById('verifyPanel'); if(!el)return;
+  const rows=verifyReport();
+  const missing=rows.filter(r=>!r.ok&&r.required);
+  const uEl=document.getElementById('occUnits');
+  if(uEl){const uMiss=rows.some(r=>/unit count/i.test(r.label)&&!r.ok);
+    uEl.style.outline=uMiss?'2px solid #7eb3e8':''; uEl.style.borderRadius=uMiss?'4px':'';}
+  const line=r=>`<div style="padding:3px 0;border-top:1px solid var(--line)"><span style="color:${r.ok?'#2aab72':(r.required?'#2a4a6a':'#8fa0b8')};font-weight:700">${r.ok?'✓':'✕'}</span> <strong>${r.label}</strong>${r.detail?` — <span style="color:#4a5e7a">${r.detail}</span>`:''}</div>`;
+  const head=!missing.length
+    ? `<div style="color:#2aab72;font-weight:700">✓ Ready — everything the proposal needs is present${fromSync?' (fields re-synced from your files)':''}.</div>`
+    : `<div style="color:#2a4a6a;font-weight:700">⚠ Still needed before the paperwork: ${missing.map(m=>m.label).join(', ')}.</div>`;
+  el.innerHTML=head+rows.map(line).join('');
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
-    if(/^pjQty/.test(f)){delete e.dataset.auto;
+    delete e.dataset.auto;   // the moment the user types, it's THEIRS — never auto-overwrite it again
+    if(f==='occUnits'){ if(typeof refresh==='function')refresh(); }  // unit count gates the paperwork buttons — refresh, don't just repaint
+    else if(typeof paintVerifyPanel==='function')paintVerifyPanel();
+    if(/^pjQty/.test(f)){
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}
     if(/^rate(Elec|Gas)$/.test(f)){   // rate edit → re-render every $ figure + re-check
       if(typeof refresh==='function')refresh();
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}});}})();
+
+// Restore a saved session on load (files + parsed data from IndexedDB; project
+// details — owner, dates, rates, occupancy — follow from localStorage once
+// `data` is set and refresh() re-runs pjLoadAndPrefill). Runs after every helper
+// above is defined.
+{const _csb=document.getElementById('clearSessionBtn'); if(_csb)_csb.onclick=clearSession;}
+{const _vb=document.getElementById('verifyBtn'); if(_vb)_vb.onclick=verifyAndSyncFields;}
+if(typeof paintVerifyPanel==='function')paintVerifyPanel();
+restoreSession();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
 const BANK={
@@ -3195,12 +3550,11 @@ const BANK={
 `Custom build and install insulated attic access hatches including insulation damming, insulated access covers, and weatherstripping to minimize thermal bypass and air leakage.`,
 `All insulation materials and installation methods will comply with applicable code requirements, manufacturer specifications, and accepted energy efficiency best practices.`].join('\n\n'),
   airSeal:b=>[
-`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-${b} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
-`Scope of work includes identification and sealing of accessible air leakage pathways including, but not limited to:`,
-`Plumbing penetrations\nElectrical penetrations\nTop plates\nMechanical and duct penetrations\nSoffits and open chases\nAttic access openings\nMiscellaneous bypasses and framing gaps\nFabricated isolation boxes for exhaust fans and recessed lights`,
-`Approved sealants, foam products, sheet materials, and weatherstripping will be utilized as appropriate for each application to improve building envelope tightness, reduce heating and cooling loads, and improve overall occupant comfort and building durability.`].join('\n\n'),
+`Removal and disposal of existing attic insulation and debris. Insulation materials and debris will prepare the attic space for proper air sealing.`,
+`Air sealing of accessible air leakage pathways includes, but is not limited to:`,
+`Dropped soffits and open chases or bypasses\nWall top plates and framing\nExposed framing`].join('\n\n'),
   bath:'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
-  kitchen:'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  kitchen:'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 1.0 GPM Aerator N3210N',
   shower:'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH'
 };
 
@@ -3447,68 +3801,46 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'\u2014';
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
-  /* ---- header ---- */
-  tc(C.navy); font(10.5,'bold'); t(M,st.y+15,'ENERGY EFFICIENCY SERVICES of '+stateFullName(m.state).toUpperCase());
-  if(isAudit||isInv){
-    tc([150,160,174]); font(10.5,'bold'); t(W-M,st.y+15,'INVOICE',{align:'right'});
-    st.y+=21;
-  }else{
-    st.y+=21;
-    tc([104,116,132]); font(10.5,'bold');
-    t(W/2,st.y+11,stateFullName(m.state)+' Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
-    st.y+=16;
-  }
-  stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
-  /* ---- meta: one line ---- */
-  const noLbl=(isAudit||isInv)?'Invoice No.:':'Proposal No.:';
-  const dateLbl=(isAudit||isInv)?'Invoice Date:':'Date:';
-  const termLbl=(isAudit||isInv)?'Due Date:':'Valid for:';
-  const docNo=isAudit?(F.pjInvNo||'INV-WI-'):(isInv?(F.pjProjInvNo||''):'');
-  /* number / date / due stacked top-right, then PROPERTY and BILL TO side by
-     side on the same line. No "Valid for" anywhere. */
-  const metaRows=[]; 
-  if(isAudit||isInv) metaRows.push([noLbl,pv(docNo)]);
-  metaRows.push([dateLbl,pv(F.pjInvDate)]);
-  if(isAudit) metaRows.push([termLbl,'N/A']);
-  else if(isInv) metaRows.push([termLbl,'Net 30']);
-  if(!isAudit){
-    const sD=isInv?F.pjStart:F.pjEstStart, eD=isInv?F.pjEnd:F.pjEstEnd;
-    if(sD) metaRows.push([isInv?'Start Date:':'Est. Start:',sD]);
-    if(eD) metaRows.push([isInv?'Completion Date:':'Est. Completion:',eD]);
-  }
-  /* three top-justified columns: PROPERTY (left), BILL TO (center), meta (right) */
-  const topY=st.y;
-  /* meta block (right): a fixed right-hand column. Values WRAP inside their own
-     width so an over-long value (e.g. an address pasted into a date field) can
-     never bleed left across its label or into the BILL TO column — that overlap
-     is what was showing in the header. */
-  const metaValW=92, metaLabX=W-M-metaValW-6;
-  let my=topY;
-  for(const [lb,v] of metaRows){
-    const vlines=wrap(String(v),metaValW), rowH=Math.max(13,vlines.length*11);
-    font(8.5,'bold'); tc([60,76,94]); t(metaLabX,my+9,lb,{align:'right'});
-    tc(C.ink); font(9.5); vlines.forEach((ln,k)=>t(W-M,my+9+k*11,ln,{align:'right'}));
-    my+=rowH;}
-  /* property block: skip the property name when it just repeats the street address */
+  /* ================= refined brand palette (deep navy + a single emerald
+     accent, cool neutrals; no red/orange, per house style) ================= */
+  const NAVY=[20,44,71], EM=[120,130,144], EMd=[20,44,71], EMlt=[120,130,144],
+        PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
+  const _state=stateFullName(m.state);
+  /* ---- letterhead: company (left) + document title/meta (right) over a thin
+     rule with a short emerald tab. A formal business header — no color band, no
+     logo badge, no bubbly meta panel. ---- */
+  const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
+  const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
+  tc(NAVY); font(15,'bold');    t(M,st.y+13,'Energy Efficiency Services');
+  tc(INKM); font(9.5,'normal'); t(M,st.y+27,'of '+_state);
+  tc(NAVY); font(16,'bold');    t(W-M,st.y+13,_dt,{align:'right'});
+  tc(INKM); font(8,'normal');   t(W-M,st.y+25,'Inflation Reduction Act  ·  HOMES Program',{align:'right'});
+  {const meta=[]; if((isAudit||isInv)&&docNo) meta.push((isAudit?'Audit Invoice No. ':'Invoice No. ')+docNo);
+   meta.push('Date: '+pv(F.pjInvDate)); if(isInv) meta.push('Terms: Net 30');
+   tc(INKM); font(8,'normal'); t(W-M,st.y+35,meta.join('      '),{align:'right'});}
+  st.y+=43;
+  stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  st.y+=16;
+  /* ---- party blocks: PROPERTY (left) and BILL TO (right), accent labels ---- */
   const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
   const _pn=String(F.pjPropName||'').trim();
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
-  const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Property Type: Multifamily',
+  const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,
+    'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,F.pjOwnerAddr,F.pjOwnerCsz,F.pjContact,F.pjEmail,F.pjPhone]
+  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
-  // BILL TO is the middle column: center it on the page center, between the
-  // left PROPERTY block and the right meta block (header + lines centered).
-  const BILLTO_CX=Math.round((M+(W-M))/2);   // page content center
-  tc(C.navy); font(8.5,'bold');
-  t(M,topY+9,'PROPERTY / INSTALLATION'); t(BILLTO_CX,topY+9,'BILL TO',{align:'center'});
-  let ly=topY+22, ry=topY+22; tc(C.ink); font(9);
-  for(const v of lLines) for(const ln of wrap(v,185)){t(M,ly,ln); ly+=11;}
-  for(const v of rLines) for(const ln of wrap(v,150)){t(BILLTO_CX,ry,ln,{align:'center'}); ry+=11;}
-  st.y=Math.max(my,ly,ry)+4;
-  /* ---- section heading ---- */
-  const head=(txt,gap)=>{need(24); st.y+=(gap!=null?gap:10); tc([104,116,132]); font(8.5,'bold');
-    t(M,st.y+8,txt.toUpperCase()); st.y+=12;};
+  {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
+   tc(EMd); font(8,'bold'); t(M,pT+8,'BUILDING / PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
+   stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
+   let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
+   for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
+   for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
+   st.y=Math.max(ly,ry)+6;}
+  /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+    d.line(M,st.y,W-M,st.y); st.y+=5;};
   /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader=(cols)=>{ // cols: [{x0,x1,lbl,align}]
     const h=16; need(h+4);
@@ -3535,8 +3867,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       ['2','Per-Unit Blower Door and Diagnostic Testing','','Unit','','Included'],
       ['3','Common Area and Building Envelope Assessment','1','Lump Sum','','Included'],
       ['4','Mechanical Systems Survey','1','Lump Sum','','Included']];
-    rows.forEach(r=>{const h=16;
+    rows.forEach((r,i)=>{const h=16;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}
+      if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
       gridBorders(CA,h);
       tc(C.mut); font(8.5); t(M+5,st.y+11,r[0]);
       tc(C.ink); t(M+27,st.y+11,r[1]);
@@ -3546,44 +3879,72 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       t(AMT,st.y+11,r[5],{align:'right'});
       st.y+=h;});
   }else{
-    /* size QTY / UNIT / AMOUNT to their widest contents (plus padding). NC
-       proposals & invoices add LABOR and MATERIAL columns (50% each) ahead of
-       the line total — every other state keeps the original 4-column layout. */
+    /* Clean Sealed-style line-item table (Nicholas: "make it look a lot more like
+       the sealed proposal template"): a blue rule, right-aligned amount columns,
+       the numbered measure name + its dollar columns on one line and the
+       description flowing below in the wide left column, zebra striping and a
+       hairline between measures — NO boxed sub-grids or empty cells. NC keeps its
+       Quantity / Labor / Material / Total split (the HOMES cost-documentation
+       requirement); every other state shows Quantity / Unit / Amount. */
     const isNC=m.state==='NC';
-    font(9); const qw=Math.max(24,...m.rows.map(r=>d.getTextWidth(_qty(r.qty))))+14;
-    const uw=Math.max(24,...m.rows.map(r=>d.getTextWidth(String(r.unit||''))))+14;
-    font(9.5,'bold'); const aw=Math.max(46,...m.rows.map(r=>d.getTextWidth(_money(r.cost))))+16;
-    let lw=0,mw=0;
-    if(isNC){const lwM=Math.max(...m.rows.map(r=>d.getTextWidth(_money(r.labor))));
-      const mwM=Math.max(...m.rows.map(r=>d.getTextWidth(_money(r.material))));
-      font(7.5,'bold');
-      lw=Math.max(lwM,d.getTextWidth('LABOR'))+16; mw=Math.max(mwM,d.getTextWidth('MATERIAL'))+16;}
-    const AX0=W-M-aw, MX0=AX0-mw, LX0=MX0-lw, UX0=LX0-uw, DX=UX0-qw;
-    const CM=[{x0:M+22,x1:DX,lbl:'MEASURE LINE ITEM'},{x0:DX,x1:UX0,lbl:'QTY',align:'right'},
-      {x0:UX0,x1:LX0,lbl:'UNIT'}];
-    if(isNC)CM.push({x0:LX0,x1:MX0,lbl:'LABOR',align:'right'},{x0:MX0,x1:AX0,lbl:'MATERIAL',align:'right'});
-    CM.push({x0:AX0,x1:W-M,lbl:isNC?'TOTAL':'AMOUNT',align:'right'});
-    gridHeader(CM);
-    tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
-    const descW=DX-(M+28)-10;
-    const contHeader=()=>{gridHeader(CM); tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');};
+    // Each column: [label, value(row), width]. Values are right-aligned at the
+    // column's right edge; the description column takes whatever is left.
+    const _qtyU=r=>{const q=_qty(r.qty); let u=r.unit||''; if(u==='Unit'&&Number(r.qty)!==1)u='Units'; return q+(u?(' '+u):'');};
+    const numCols=isNC
+      ?[['QUANTITY',_qtyU,84],
+        ['LABOR',   r=>_money(r.labor),64],
+        ['MATERIAL',r=>_money(r.material),68],
+        ['TOTAL',   r=>_money(r.cost),72]]
+      :[['QUANTITY',r=>_qty(r.qty),82],
+        ['UNIT',    r=>String(r.unit||''),70],
+        ['AMOUNT',  r=>_money(r.cost),80]];
+    const numTotW=numCols.reduce((a,c)=>a+c[2],0);
+    const descW=CW-numTotW;                       // wide left column for name + description
+    // Precompute each column's right edge (rightmost first, walking left from W-M).
+    let _rx=W-M; for(let c=numCols.length-1;c>=0;c--){numCols[c][3]=_rx; _rx-=numCols[c][2];}
+    // vertical grid: a line at each column boundary so the numbers read as real
+    // columns instead of floating in space.
+    const colXs=[M].concat(numCols.map(c=>c[3]-c[2])).concat([W-M]);
+    const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
+    // header row — repeats at the top of every page the table spills onto.
+    const headH=20;
+    const tableHeader=()=>{
+      need(headH+8);
+      fill(PANEL); d.rect(M,st.y,CW,headH,'F');
+      stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+      tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
+      numCols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+      colRules(st.y,st.y+headH);
+      stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
+      st.y+=headH;
+    };
+    tableHeader();
+    const nameLH=12.5, descLH=10.5, padT=8, gapND=5, padB=9;
     m.rows.forEach((r,i)=>{
-      font(9,'bold'); const nameLines=wrap(r.name,descW);
-      font(8); const dl=wrap(r.desc,descW);
-      const h=5+nameLines.length*11+(dl.length?dl.length*9+4:0)+5;
-      if(st.y+h>H-M-20){d.addPage();st.y=M;contHeader();}  // rows never split; header repeats
-      gridBorders(CM,h);
-      const vc=st.y+h/2+3;      // vertically centered baseline for the cell values
-      tc(C.mut); font(8.5); t(M+5,vc,String(i+1));
-      tc(C.ink); font(9,'bold'); nameLines.forEach((ln,k)=>t(M+28,st.y+12+k*11,ln));
-      font(8.5); t(UX0-5,vc,_qty(r.qty),{align:'right'});
-      t(UX0+6,vc,r.unit);
-      if(isNC){tc(C.ink); font(9); t(MX0-5,vc,_money(r.labor),{align:'right'}); t(AX0-5,vc,_money(r.material),{align:'right'});}
-      tc(C.ink); font(9,'bold'); t(AMT,vc,_money(r.cost),{align:'right'});
-      font(8); tc([57,67,77]);
-      const dy=st.y+12+nameLines.length*11+1;
-      dl.forEach((ln,k)=>t(M+28,dy+k*9,ln));
-      st.y+=h;
+      font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.name,descW-10);
+      font(8.5);       const dl=wrap(r.desc,descW-10);
+      const nameH=nameLines.length*nameLH, descH=dl.length?dl.length*descLH:0;
+      const h=padT+nameH+(descH?gapND+descH:0)+padB;
+      // page break BEFORE drawing the row, then repeat the header. A measure block
+      // never splits across pages.
+      if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
+      const y0=st.y;
+      if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}   // subtle zebra for scanning
+      // measure name (numbered) + description, left column
+      tc(C.ink); font(10,'bold');
+      nameLines.forEach((ln,k)=>t(M+5,y0+padT+k*nameLH+9,ln));
+      if(dl.length){const dy=y0+padT+nameH+gapND; font(8.5); tc([70,82,98]);
+        dl.forEach((ln,k)=>t(M+5,dy+k*descLH+8,ln));}
+      // quantity / dollar columns — top-aligned on the measure's first line so
+      // they sit in a clear grid cell, not stranded in the middle of the row.
+      const numY=y0+padT+9;
+      numCols.forEach(([lbl,fn,w,rx],c)=>{
+        font(9.5,c===numCols.length-1?'bold':'normal');
+        tc(c===numCols.length-1?NAVY:[64,78,96]);
+        t(rx-4,numY,fn(r),{align:'right'});});
+      st.y=y0+h;
+      colRules(y0,st.y);                                        // vertical separators
+      stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); // row bottom
     });
   }
   /* ---- rebates as credit lines in a gridded table ---- */
@@ -3594,40 +3955,47 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
     if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+' ('+m.tier.note+')',iraAmt]);
   }
-  head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',10);
-  {font(8.5,'bold');
-   const pw=Math.max(60,...credits.map(c=>d.getTextWidth(c[0])))+12;
-   font(9,'bold');
-   const aw2=Math.max(50,...credits.map(c=>d.getTextWidth('('+_money(c[2])+')')))+16;
-   const PX=Math.min(M+pw,M+240), AX=W-M-aw2;
-   const CR=[{x0:PX,x1:AX,lbl:'INCENTIVE DESCRIPTION'},{x0:AX,x1:W-M,lbl:'AMOUNT',align:'right'}];
-   gridHeader(CR);
-   tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'PROGRAM');
+  // clean rebate rows (matching the line-item table), heading kept with the
+  // column header and first credit line so a title is never orphaned.
+  need(96);
+  head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',12);
+  {stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+   tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
+   st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
    credits.forEach(([nm,desc,amt])=>{
-     font(8.5,'bold'); const nl=wrap(nm,PX-M-12);
-     font(8.5);        const dl=wrap(desc,AX-PX-12);
-     const h=Math.max(nl.length,dl.length)*9.5+8;
-     if(st.y+h>H-M-20){d.addPage();st.y=M;}
-     gridBorders(CR,h);
-     tc(C.ink); font(8.5,'bold'); nl.forEach((ln,k)=>t(M+5,st.y+11+k*9.5,ln));
-     font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(PX+5,st.y+11+k*9.5,ln));
-     tc(C.ink); font(9,'bold'); t(AMT,st.y+h/2+3.2,'('+_money(amt)+')',{align:'right'});
-     st.y+=h;});}
-  /* ---- totals: bordered box, same money edge ---- */
-  const reb=foeAmt+iraAmt, due=gross-reb;
-  {const rows=[['Subtotal',_money(gross),0],['Total Rebates','('+_money(reb)+')',0],
-     ['TOTAL DUE',_money(Math.abs(due)<0.005?0:due),1]];
-   const TX=W-M-250, TW=250, hh=[16,16,18];
-   const boxH=hh.reduce((a,b)=>a+b,0);
-   need(boxH+14); st.y+=8;
-   let yy=st.y;
-   rows.forEach(([lbl,val,strong],i)=>{const h=hh[i];
-     if(strong){fill(HB); d.rect(TX,yy,TW,h,'F');}
-     stroke(GL); d.setLineWidth(.6); d.rect(TX,yy,TW,h);
-     tc(strong?C.ink:[60,76,94]); font(strong?9:8.5,'bold'); t(TX+8,yy+h-5,lbl);
-     tc(C.ink); font(strong?9:8.5,strong?'bold':'normal'); t(AMT,yy+h-5,val,{align:'right'});
-     yy+=h;});
-   st.y=yy;}
+     font(9.5,'bold'); const nl=wrap(nm,CW-160);
+     font(8.5);        const dl=wrap(desc,CW-160);
+     const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
+     if(st.y+h>H-M-24){d.addPage();st.y=M;}
+     const y0=st.y;
+     tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
+     if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2;
+       dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
+     tc(EMd); font(10,'bold'); t(W-M,y0+h/2+3,'('+_money(amt)+')',{align:'right'});
+     st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;});}
+  /* ---- totals: a right-aligned summary anchored by a hero Total Due panel.
+     Deposits + Due make it explicit that the incentives cover the job and nothing
+     else funds it — no deposit, no balance owed by the owner. ---- */
+  const reb=foeAmt+iraAmt, deposits=0, due=Math.round((gross-reb-deposits)*100)/100;
+  const dueVal=Math.abs(due)<0.005?0:due;
+  need(112); st.y+=16;
+  {const SUMW=248, x0=W-M-SUMW;
+   // note beside the summary
+   tc(INKM); font(8.5,'italic');
+   const note=wrap('All eligible program incentives are applied as an instant discount at the point of service. No deposit is required and no balance is due from the property owner.',x0-M-16);
+   note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
+   // plain right-aligned totals (no color block)
+   let sy=st.y;
+   const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
+     tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
+   trow('Total Cost',_money(gross));
+   trow('Rebates & Incentives Applied','('+_money(reb)+')');
+   trow('Total Deposits',_money(deposits));
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
+   tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
+   st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* ---- deliverables (audit only) ---- */
   if(isAudit){
     head('Deliverables',10);
@@ -3636,26 +4004,180 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
       need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
   }
-  /* ---- acknowledgment + signature ---- */
-  head('Acknowledgment & Acceptance',10);
-  const _ees='EES-'+(m.state||'WI');
-  const ack=(isAudit||isInv)
-    ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.'
-    :'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes '+_ees+' to submit the project for rebate/incentive program preapproval and to begin project planning activities.';
-  {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
-   al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
-  need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
-  d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
-  tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
-  t(W-M-150,st.y+10,'Date');
-  /* ---- footer pinned to the bottom of the last page ---- */
-  const fy=H-44;
-  if(st.y>fy-10) d.addPage();
-  stroke(C.line); d.setLineWidth(.5); d.line(M,fy,W-M,fy);
-  tc(C.mut); font(8.5);
-  t(W/2,fy+12,'Energy Efficiency Services of '+stateFullName(m.state)+'  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
-  const _eesContact=m.state==='NC'?'ncira@ees-nc.org  |  (704) 990-5614':'ira@ees-wi.org  |  608-460-7419';
-  font(8,'italic'); t(W/2,fy+23,_eesContact,{align:'center'});
+  /* ---- acknowledgment + signature: INVOICES ONLY. Proposals carry no
+     acknowledgment/signature block (Nicholas). ---- */
+  if(isAudit||isInv){
+    head('Acknowledgment & Acceptance',10);
+    const _ees='EES-'+(m.state||'WI');
+    const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
+    {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
+     al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
+    need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
+    d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
+    tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
+    t(W-M-150,st.y+10,'Date');
+  }
+  _stampEesFooters(P,m.state);
+  return d.output('blob');
+}
+/* Footer on EVERY page + "Page X of Y" on multi-page documents, so shuffled
+   proposal pages can be identified. Runs after all content is laid out. */
+function _stampEesFooters(P,state){
+  const {d,W,H,M,font,t,stroke,tc}=P;
+  const fy=H-40, N=d.getNumberOfPages();
+  const line1='Energy Efficiency Services of '+stateFullName(state)+'    |    112 Owen Rd. PO Box 6141, Monona, WI 53716';
+  const line2=state==='NC'?'ncira@ees-nc.org    |    (704) 990-5614':'ira@ees-wi.org    |    608-460-7419';
+  for(let p=1;p<=N;p++){
+    d.setPage(p);
+    stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
+    tc([122,135,152]); font(8,'normal');   t(W/2,fy+12,line1,{align:'center'});
+    tc([122,135,152]); font(7.5,'italic');  t(W/2,fy+22,line2,{align:'center'});
+    if(N>1){tc([122,135,152]); font(8,'normal'); t(W-M,fy+12,'Page '+p+' of '+N,{align:'right'});}
+  }
+}
+
+/* ===== HEAR model + proposal ================================================
+   Low-income (<=80% AMI): 100% of project cost, up to the federal per-measure
+   caps and $14,000 per dwelling unit (same schedule NC & WI). */
+function hearModel(){
+  const units=parseInt((document.getElementById('occUnits')||{}).value,10)||1;
+  const state=buildingState();
+  const _num=v=>{const n=parseFloat(String(v==null?'':v).replace(/[^0-9.]/g,''));return Number.isFinite(n)?n:0;};
+  const rows=(typeof hearState!=='undefined'&&Array.isArray(hearState)?hearState:[])
+    .filter(r=>r&&(r.systemType||r.cost||(r.desc&&r.desc.trim())||(r.models&&Object.values(r.models).some(v=>v))||(r.effs&&Object.values(r.effs).some(v=>v))))
+    .map(r=>{
+      const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
+      const qty=Math.max(1,parseInt(r.qty,10)||1);
+      const unitCost=Math.max(0,_num(r.cost));            // the Cost field is PER UNIT
+      const cost=Math.round(unitCost*qty*100)/100;        // total = per-unit x quantity
+      const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x units
+      // NC documents split each line 50/50 into labor + material (material takes the
+      // clean floored half; labor carries any odd cent so the two sum to the total).
+      const material=Math.floor(cost*50)/100, labor=Math.round((cost-material)*100)/100;
+      const models=r.models||{}, effs=r.effs||{};
+      const modelStr=(meas.models||[]).map(md=>{const v=(models[md.key]||'').trim();
+        return v?((md.short?md.short+' ':'')+v):'';}).filter(Boolean).join('  ·  ');
+      const effStr=(meas.metrics||[]).map(mtr=>{const v=(effs[mtr]||'').trim();
+        return v?(v+' '+mtr):'';}).filter(Boolean).join('  ·  ');
+      return {key:meas.key,label:meas.label,cap:meas.cap,systemType:r.systemType||'',
+        modelStr,effStr,desc:(r.desc||'').trim(),qty,unitCost,cost,labor,material,
+        rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
+    });
+  const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
+  const rawRebate=Math.round(rows.reduce((a,r)=>a+r.rebate,0)*100)/100;
+  const programMax=14000*units;
+  const totalRebate=Math.min(rawRebate,programMax);
+  const capped=rawRebate>programMax+0.005;
+  const totalDue=Math.round((totalCost-totalRebate)*100)/100;
+  return {units,state,rows,totalCost,rawRebate,programMax,totalRebate,capped,totalDue,
+    fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
+}
+function buildHearPdfBlob(){
+  const m=hearModel(), F=m.fields;
+  const P=_pdfNew(34); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
+  const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _state=stateFullName(m.state);
+  const NAVY=[20,44,71], EM=[120,130,144], EMd=[20,44,71], EMlt=[120,130,144],
+        PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
+  /* letterhead — matches the HOMES proposal: company (left) + document title/meta
+     (right) over a thin rule with a short emerald tab. No band, no logo, no panel. */
+  tc(NAVY); font(15,'bold');    t(M,st.y+13,'Energy Efficiency Services');
+  tc(INKM); font(9.5,'normal'); t(M,st.y+27,'of '+_state);
+  tc(NAVY); font(16,'bold');    t(W-M,st.y+13,'PROPOSAL',{align:'right'});
+  tc(INKM); font(8,'normal');   t(W-M,st.y+25,'Inflation Reduction Act  ·  HEAR Program',{align:'right'});
+  tc(INKM); font(8,'normal');   t(W-M,st.y+35,'Date: '+pv(F.pjInvDate),{align:'right'});
+  st.y+=43;
+  stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  st.y+=16;
+  /* party blocks */
+  const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
+  const _pn=String(F.pjPropName||'').trim();
+  const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
+  const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
+    F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
+  {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
+   tc(EMd); font(8,'bold'); t(M,pT+8,'BUILDING / PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
+   stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
+   let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
+   for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
+   for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
+   st.y=Math.max(ly,ry)+6;}
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+    d.line(M,st.y,W-M,st.y); st.y+=5;};
+  /* scope table: measure/system/model/eff/description (left) + numbers (right).
+     NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
+  head('Electrification Scope — HEAR Program',12);
+  const isNC=m.state==='NC';
+  const cols=isNC
+    ?[['QTY',r=>String(r.qty),34],['LABOR',r=>_money(r.labor),62],['MATERIAL',r=>_money(r.material),66],
+      ['TOTAL',r=>_money(r.cost),66],['REBATE',r=>_money(r.rebate),66]]
+    :[['QTY',r=>String(r.qty),40],['COST',r=>_money(r.cost),80],['REBATE',r=>_money(r.rebate),80]];
+  let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
+  const descW=CW-cols.reduce((a,c)=>a+c[2],0);
+  const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
+  const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
+  const headH=20;
+  const tableHeader=()=>{need(headH+8);
+    fill(PANEL); d.rect(M,st.y,CW,headH,'F');
+    stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
+    cols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+    colRules(st.y,st.y+headH);
+    stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
+    st.y+=headH;};
+  tableHeader();
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
+  m.rows.forEach((r,i)=>{
+    const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
+    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-10);
+    font(8.5); const dl=sub?wrap(sub,descW-10):[];
+    font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];        // free-text description
+    const capNote='Cap '+_money(r.cap)+'/unit × '+r.qty+' unit'+(r.qty>1?'s':'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
+    const dl2=wrap(capNote,descW-10);
+    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0, capH=dl2.length*9.5;
+    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+4+capH+9;
+    if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
+    const y0=st.y;
+    if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
+    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+5,y0+8+k*12.5+9,ln));
+    let dy=y0+8+nameH;
+    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=subH;}
+    if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=descH;}
+    dy+=4; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+5,dy+k*9.5+7,ln));
+    const numY=y0+8+9;                        // top-aligned on the measure's first line
+    cols.forEach(([lbl,fn,w,rx],c)=>{
+      const isTot=(lbl==='TOTAL'||lbl==='COST'), isReb=(lbl==='REBATE');
+      font(9.5,(isTot||isReb)?'bold':'normal');
+      tc(isReb?EMd:(isTot?NAVY:[64,78,96]));
+      t(rx-4,numY,fn(r),{align:'right'});});
+    st.y=y0+h; colRules(y0,st.y);
+    stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
+  });
+  /* totals: hero Total Due, right-aligned summary */
+  need(132); st.y+=18;
+  {const SUMW=252, x0=W-M-SUMW;
+   tc(INKM); font(8.5,'italic');
+   const note=wrap('Home Electrification & Appliance Rebates (HEAR) is an income-qualified program. For low-income households (at or below 80% of area median income) the program pays 100% of the project cost, up to the federal per-measure caps and $14,000 total per dwelling unit - applied here as an instant discount at the point of service.',x0-M-16);
+   note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
+   const srows=[['Total Project Cost',_money(m.totalCost)],
+     ['HEAR Incentive (100%)','('+_money(m.totalRebate)+')']];
+   if(m.capped) srows.push(['Program Maximum ($14,000 × '+m.units+')',_money(m.programMax)]);
+   let sy=st.y;
+   for(const [lb,v] of srows){
+     tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
+     tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;}
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
+   tc(NAVY); font(11,'bold');
+   t(x0,sy+11,m.totalDue>0.005?'Balance Due':'Total Due');
+   t(W-M,sy+11,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
+   st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
+  /* no acknowledgment/signature block on the proposal (Nicholas) */
+  _stampEesFooters(P,m.state);
   return d.output('blob');
 }
 
@@ -3672,7 +4194,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   bh(isInv?'Invoice Details:':'Project Details:',RX,st.y);
   const det=isInv
     ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :['Date: '+(F.pjInvDate||''),'Valid for: 30 days','IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
+    :['Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
   let yB=lines9(det,RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
   bh('Bill To:',M,st.y);
@@ -3740,6 +4262,7 @@ async function makeDocPdfBlob(which){
   if(typeof window.jspdf==='undefined')throw new Error('PDF engine not loaded');
   if(which==='sealedProposal')return buildSealedPdfBlob('proposal');
   if(which==='sealedInvoice')return buildSealedPdfBlob('invoice');
+  if(which==='hearProposal')return buildHearPdfBlob();
   return buildEesPdfBlob(which);
 }
 async function downloadDoc(which,pdfName){
@@ -3806,6 +4329,7 @@ document.addEventListener('click',e=>{
     invDoc:()=>downloadDoc('invoice',_docBase()+'_HOMES_Project_Invoice.pdf'),
     sealedProp:()=>downloadDoc('sealedProposal',_docBase()+'_Sealed_Proposal.pdf'),
     sealedInv:()=>downloadDoc('sealedInvoice',_docBase()+'_Sealed_Invoice.pdf'),
+    hearProp:()=>downloadDoc('hearProposal',_docBase()+'_HEAR_Proposal.pdf'),
     reportBase:()=>downloadSourceReport('asBase'), reportImp:()=>downloadSourceReport('asImp')};
   if(A[b.dataset.act])A[b.dataset.act]();
 });

@@ -26,7 +26,8 @@ import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
-  fetchActiveUsers, fetchAccountContactsForWorkOrder,
+  fetchActiveUsers, fetchAccountContactsForWorkOrder, fetchVehiclesForInspection,
+  saveWorkStepVehicle,
 } from './fieldMobileService'
 import { uploadPhoto, setPhotoReportInclusion } from '../data/storageService'
 import {
@@ -764,7 +765,12 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
   const legRef         = useRef('general')  // synchronous — no state race with the picker
   // {done, total} while photos upload, null when idle — see UploadProgress.
   const [batch, setBatch] = useState(null)
-  const uploading = !!batch
+  // A video is one file and can be very large, so it says so in words rather
+  // than counting a batch down. Tracked separately from `batch` because any
+  // step can now take a video, so "is a video going up" is no longer the same
+  // question as "is this a Video step".
+  const [videoUploading, setVideoUploading] = useState(false)
+  const uploading = !!batch || videoUploading
 
   const done = isStepDone(step)
   const corrections = isStepCorrections(step)
@@ -849,14 +855,14 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
     const file = e.target.files && e.target.files[0]
     e.target.value = '' // allow re-selecting the same file
     if (!file) return
-    setBatch({ done: 0, total: 1 })
+    setVideoUploading(true)
     try {
       await captureStepVideo({ file, workStepId: step.work_step_id, stepName: step.name })
       onPhotoUploaded(`Video attached · ${step.name}`)
     } catch (err) {
       onPhotoError(err.message || 'Video upload failed.')
     } finally {
-      setBatch(null)
+      setVideoUploading(false)
     }
   }
 
@@ -910,6 +916,65 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
         <VideoStrip videos={step.videos} />
       )}
 
+      {/* A video can be added to ANY step, at any time — including a step that
+          is finished, and one further down an ordered plan that has not come
+          up yet (Nicholas, 2026-08-27: "the user can upload videos anywhere.
+          You can't restrict this").
+
+          The photo controls stay behind the work-plan's ordering gate, because
+          a photo is the evidence a step is JUDGED on and the plan says when it
+          is taken. A video is a record of the building — somebody walks past an
+          open riser and films it — and refusing that has no upside: the
+          alternative is not a tidier work order, it is footage that never gets
+          filed. The inputs live outside the gate for the same reason.
+
+          On the actionable step the prominent Record Video button below is the
+          one to use, so this compact control is only for the rest. */}
+      <input
+        ref={videoRef} type="file" accept="video/*" capture="environment"
+        onChange={onVideoFile} style={{ display: 'none' }}
+      />
+      <input
+        ref={folderVideoRef} type="file" accept="video/*"
+        onChange={onVideoFile} style={{ display: 'none' }}
+      />
+      {!isActionable && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <button
+            onClick={() => videoRef.current?.click()}
+            disabled={videoUploading}
+            style={{
+              appearance: 'none', cursor: videoUploading ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'transparent', color: C.textSecondary,
+              border: `1px dashed ${C.borderDark}`, borderRadius: 8,
+              padding: '7px 11px', minHeight: 36,
+              fontFamily: FONT, fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <VideoIcon /> Add video
+          </button>
+          <button
+            onClick={() => folderVideoRef.current?.click()}
+            disabled={videoUploading}
+            aria-label="Upload a saved video from a folder"
+            title="Upload a saved video — recorded offline or on another device"
+            style={{
+              appearance: 'none', cursor: videoUploading ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center',
+              background: 'transparent', color: C.textSecondary,
+              border: `1px dashed ${C.borderDark}`, borderRadius: 8,
+              padding: '7px 10px', minHeight: 36,
+            }}
+          >
+            <FolderIcon />
+          </button>
+          {videoUploading && (
+            <span style={{ fontSize: 12, color: C.textMuted }}>Uploading video…</span>
+          )}
+        </div>
+      )}
+
       {/* Measurement / field values. Editable on the actionable step; saved
           values shown read-only once the step is closed. */}
       {Array.isArray(step.fields) && step.fields.length > 0 && (
@@ -957,6 +1022,15 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
                 onSaved={onPhotoUploaded}
                 onError={onPhotoError}
               />
+            ) : f.type === 'vehicle' ? (
+              <StepVehicleField
+                key={f.field_id}
+                field={f}
+                stepId={step.work_step_id}
+                disabled={busy || uploading}
+                onSaved={onPhotoUploaded}
+                onError={onPhotoError}
+              />
             ) : (
               <StepFieldInput
                 key={f.field_id}
@@ -992,12 +1066,14 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
       )}
 
       {/* Evidence requirements summary */}
-      {!done && (reqCount > 0 || needsBefore || needsAfter || isVideoStep || step.evidence_type === 'Document Upload') && (
+      {!done && (reqCount > 0 || needsBefore || needsAfter || isVideoStep || videoCount > 0 || step.evidence_type === 'Document Upload') && (
         <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>
           {reqCount > 0 && <span>Photos: {step.photo_count}/{reqCount}  </span>}
           {needsBefore && <span style={{ color: step.before_count > 0 ? C.emeraldMid : C.amber }}>Before {step.before_count > 0 ? '✓' : '—'}  </span>}
           {needsAfter && <span style={{ color: step.after_count > 0 ? C.emeraldMid : C.amber }}>After {step.after_count > 0 ? '✓' : '—'}</span>}
-          {isVideoStep && <span style={{ color: videoCount > 0 ? C.emeraldMid : C.amber }}>Video {videoCount > 0 ? '✓' : 'required'}</span>}
+          {isVideoStep
+            ? <span style={{ color: videoCount > 0 ? C.emeraldMid : C.amber }}>Video {videoCount > 0 ? '✓' : 'required'}</span>
+            : videoCount > 0 && <span style={{ color: C.emeraldMid }}>Videos: {videoCount}  </span>}
           {step.evidence_type === 'Document Upload' && <span>Document upload required</span>}
         </div>
       )}
@@ -1014,14 +1090,6 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
           <input
             ref={folderRef} type="file" accept="image/*" multiple
             onChange={onFile} style={{ display: 'none' }}
-          />
-          <input
-            ref={videoRef} type="file" accept="video/*" capture="environment"
-            onChange={onVideoFile} style={{ display: 'none' }}
-          />
-          <input
-            ref={folderVideoRef} type="file" accept="video/*"
-            onChange={onVideoFile} style={{ display: 'none' }}
           />
           {step.reference_photo_url && (
             <button
@@ -1045,27 +1113,37 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
               </span>
             </button>
           )}
+          {/* EVERY step can take a video, not only a step whose evidence type
+              IS Video.
+              A Video step still leads with Record Video, because that is the
+              evidence it is waiting on. But a Photo step used to offer nothing
+              but `accept="image/*"`, so an assessor with a 360 pan of a roof
+              had no route at all — which is exactly how two videos came to be
+              filed by hand onto "Roof / Ceiling" while the work order's own
+              "Building 360 Video" step sat empty (2026-08-27). What a step
+              REQUIRES is still what the gate reads; being able to record more
+              than that is not the same question. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: gap ? 8 : 0, flexWrap: 'wrap' }}>
-            {isVideoStep ? (
+            {isVideoStep && (
               <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
-            ) : (
-              <>
-                {needsBefore && (
-                  <CaptureBtn label="Before" onClick={() => triggerCapture('before')} onFolder={() => triggerFolder('before')} disabled={uploading || busy} done={step.before_count > 0} />
-                )}
-                {needsAfter && (
-                  <CaptureBtn label="After" onClick={() => triggerCapture('after')} onFolder={() => triggerFolder('after')} disabled={uploading || busy} done={step.after_count > 0} />
-                )}
-                {/* General capture when the step needs a count but no specific leg,
-                    or to add beyond before/after toward the required count. */}
-                {(reqCount > 0 || (!needsBefore && !needsAfter)) && (
-                  <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} onFolder={() => triggerFolder('general')} disabled={uploading || busy} />
-                )}
-              </>
+            )}
+            {needsBefore && (
+              <CaptureBtn label="Before" onClick={() => triggerCapture('before')} onFolder={() => triggerFolder('before')} disabled={uploading || busy} done={step.before_count > 0} />
+            )}
+            {needsAfter && (
+              <CaptureBtn label="After" onClick={() => triggerCapture('after')} onFolder={() => triggerFolder('after')} disabled={uploading || busy} done={step.after_count > 0} />
+            )}
+            {/* General capture when the step needs a count but no specific leg,
+                or to add beyond before/after toward the required count. */}
+            {!isVideoStep && (reqCount > 0 || (!needsBefore && !needsAfter)) && (
+              <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} onFolder={() => triggerFolder('general')} disabled={uploading || busy} />
+            )}
+            {!isVideoStep && (
+              <CaptureBtn label="Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
             )}
           </div>
 
-          {isVideoStep && uploading
+          {videoUploading
             ? <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Uploading video…</div>
             : <UploadProgress batch={batch} />}
 
@@ -1230,6 +1308,127 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedd
           {saving ? 'Saving…' : 'Save'}
         </button>
       )}
+    </div>
+  )
+}
+
+// ─── StepVehicleField ────────────────────────────────────────────────────────
+// The 'vehicle' field type ("Vehicle Inspected" on the monthly vehicle
+// equipment and documents check). Built like key_source: a picker over REAL
+// records. It sends the vehicle's ID; the SERVER composes the readable value it
+// stores and stamps work_orders.vehicle_id from that same row, so the text a
+// person reads and the foreign key a report joins on cannot disagree.
+//
+// The option label mirrors what the server stores, but it is presentation only
+// — never the value that gets saved.
+function vehicleOptionLabel(v) {
+  const plate = v.vehicle_license_plate ? ` (${v.vehicle_license_plate})` : ''
+  return `${v.vehicle_record_number} · ${v.vehicle_name}${plate}`
+}
+
+// The saved value leads with the vehicle's record number, which is how a stored
+// answer is matched back to a row without re-deriving the server's formatting.
+function vehicleIdForSavedText(vehicles, savedText) {
+  const rec = String(savedText || '').split(' · ')[0].trim()
+  if (!rec) return ''
+  const hit = (vehicles || []).find((v) => v.vehicle_record_number === rec)
+  return hit ? hit.id : ''
+}
+
+function StepVehicleField({ field, stepId, disabled, onSaved, onError, embedded = false, onValue }) {
+  const savedText = field.text_value ?? ''
+  const [vehicles, setVehicles] = useState(null)   // null = loading
+  const [value, setValue] = useState('')           // the selected vehicle's id
+  const [touched, setTouched] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const hasSaved = savedText !== '' && savedText != null
+
+  useEffect(() => { if (embedded && onValue) onValue(value) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false
+    fetchVehiclesForInspection()
+      .then((rows) => {
+        if (cancelled) return
+        setVehicles(rows)
+        // Show what was already answered, resolved back to its row.
+        if (!touched) setValue(vehicleIdForSavedText(rows, savedText))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setVehicles([])
+        onError(`Could not load the vehicle list for "${field.label}".`)
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const options = vehicles || []
+  // A vehicle retired since the answer was given is no longer offered, but the
+  // answer still has to be readable rather than resetting the field to blank.
+  const savedGone = hasSaved && vehicles !== null && !vehicleIdForSavedText(options, savedText)
+  const dirty = !!value && value !== vehicleIdForSavedText(options, savedText)
+
+  const save = async () => {
+    if (!value) { onError(`Pick the vehicle for "${field.label}".`); return }
+    setSaving(true)
+    try {
+      const res = await saveWorkStepVehicle(stepId, field.field_id, value)
+      onSaved(res.message || `${field.label} saved`)
+    } catch (e) {
+      onError(e.message || 'Could not save the vehicle.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: embedded ? 0 : 10 }}>
+      {!embedded && (
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+          {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+          {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+        </div>
+      )}
+      {savedGone && (
+        <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 6 }}>
+          Recorded as <strong>{savedText}</strong>, which is no longer in service. Pick a vehicle to change it.
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <select
+          value={value}
+          onChange={(e) => { setTouched(true); setValue(e.target.value) }}
+          disabled={disabled || saving || vehicles === null}
+          style={{
+            flex: 1, minWidth: 0, boxSizing: 'border-box', minHeight: 48,
+            fontFamily: FONT, fontSize: 16,
+            border: `1px solid ${hasSaved && !dirty ? C.emerald : C.borderDark}`,
+            borderRadius: 8, padding: '10px 12px',
+            color: value ? C.textPrimary : C.textMuted, background: C.card,
+          }}
+        >
+          <option value="">
+            {vehicles === null ? 'Loading vehicles…'
+              : options.length === 0 ? 'No vehicles available'
+              : 'Select the vehicle…'}
+          </option>
+          {options.map((v) => (
+            <option key={v.id} value={v.id}>{vehicleOptionLabel(v)}</option>
+          ))}
+        </select>
+        {!embedded && (
+          <button
+            onClick={save}
+            disabled={disabled || saving || !dirty || !value}
+            style={(disabled || saving || !dirty || !value)
+              ? { ...btnDisabled, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }
+              : { ...btnPrimary, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -1924,7 +2123,8 @@ function fieldPrompt(field) {
     const subject = label.replace(/\s*photo$/i, '')
     return `Take a picture of the ${subject.toLowerCase()}.`
   }
-  const pick = field.type === 'select' || field.type === 'user_multiselect' || field.type === 'key_source'
+  const pick = field.type === 'select' || field.type === 'user_multiselect'
+    || field.type === 'key_source' || field.type === 'vehicle'
   // Keep the label as-authored so acronyms read right ("Enter the BTUs.").
   return `${pick ? 'Select' : 'Enter'} the ${label}.`
 }
@@ -2364,10 +2564,17 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
     const f = screen.field
     const cur = String(curPending ?? '').trim()
     if (!cur) { next(); return }
-    if (cur === String(fieldSavedString(f) ?? '').trim()) { next(); return }
+    // A vehicle field carries the vehicle's ID while the SAVED value is the
+    // readable text the server composed, so the two are never equal — skip the
+    // unchanged short-circuit and let the save be idempotent instead.
+    if (f.type !== 'vehicle' && cur === String(fieldSavedString(f) ?? '').trim()) { next(); return }
     setBusy(true)
     try {
-      await saveWorkStepFieldValue(live.work_step_id, f.field_id, cur)
+      if (f.type === 'vehicle') {
+        await saveWorkStepVehicle(live.work_step_id, f.field_id, cur)
+      } else {
+        await saveWorkStepFieldValue(live.work_step_id, f.field_id, cur)
+      }
       await refresh()
       next()
     } catch (e) {
@@ -2541,6 +2748,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               if (screen.field.type === 'user_multiselect') return <StepUserMultiselect {...common} />
               if (screen.field.type === 'key_source') return <StepKeySource {...common} woId={woId} />
               if (screen.field.type === 'select') return <StepSelectField {...common} />
+              if (screen.field.type === 'vehicle') return <StepVehicleField {...common} />
               return <StepFieldInput {...common} />
             })()}
           </div>
