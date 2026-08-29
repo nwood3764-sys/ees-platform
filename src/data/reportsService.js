@@ -408,7 +408,6 @@ export async function listPrimaryObjectOptions() {
     { table: 'work_steps',              label: 'Work Steps' },
     { table: 'work_plans',              label: 'Work Plans' },
     { table: 'incentive_applications',  label: 'Incentive Applications' },
-    { table: 'incentives',              label: 'Incentives' },
     { table: 'income_qualifications',   label: 'Income Qualifications' },
     { table: 'project_payment_requests',label: 'Project Payment Requests' },
     { table: 'payment_receipts',        label: 'Payment Receipts' },
