@@ -56,6 +56,19 @@ export function collectRelatedFields(view) {
   return collectViewFields(view).filter(isRelatedFieldName).sort()
 }
 
+// Union of EVERY field referenced across a set of view definitions. Seeds the
+// first fetch on a wide table, which is no longer fetched with `select *`: the
+// query has to name the own columns the saved views need, not just the related
+// ones, or a view opens with blank cells until something triggers a refetch.
+export function collectFieldsForViews(views) {
+  const seen = new Set()
+  for (const v of views || []) {
+    if (!v) continue
+    for (const f of collectViewFields(v)) seen.add(f)
+  }
+  return Array.from(seen).sort()
+}
+
 // Union across a set of view definitions — used to seed the first fetch so a
 // saved view whose filter rides a related field resolves on first paint,
 // whether or not that view also displays the column.
