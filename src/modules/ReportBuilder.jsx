@@ -4,6 +4,7 @@ import { Icon, LoadingState, ErrorState } from '../components/UI'
 import SearchableCombo from '../components/SearchableCombo'
 import AnchoredPopover from '../components/AnchoredPopover'
 import { describeSaveError } from '../lib/saveErrorMessage'
+import { classifyCalcFields, describeIncompleteCalcFields } from '../lib/reportCalcFields'
 import { guessPrefix } from '../data/fieldMetadataService'
 import {
   deriveReportColumnLabel,
@@ -336,10 +337,20 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
   const handleSave = async () => {
     if (!report.rpt_name) { alert('Report name is required.'); return }
     if (!report.rpt_primary_object) { alert('Primary object is required.'); return }
+    // A calculated-field row that was added and never filled in is not a field:
+    // saved, it becomes a nameless column of em dashes on every report run.
+    // One that is HALF filled in is someone's unfinished work, so it stops the
+    // save with a message instead of being thrown away.
+    const calc = classifyCalcFields(calculatedFields)
+    if (calc.incomplete.length > 0) {
+      setSaveError({ message: describeIncompleteCalcFields(calc.incomplete) })
+      return
+    }
+    if (calc.dropped.length > 0) setCalculatedFields(calc.keep)
     setSaving(true); setSaveError(null); setSaveDetailOpen(false)
     try {
       const newId = await saveReport({
-        id: reportId, report, filters, groupings, calculatedFields,
+        id: reportId, report, filters, groupings, calculatedFields: calc.keep,
       })
       setSavedAt(new Date())
       setPreviewNonce(n => n + 1)
@@ -362,11 +373,19 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     if (isNew) return
     if (!report.rpt_name) { alert('Report name is required.'); return }
     if (!report.rpt_primary_object) { alert('Primary object is required.'); return }
+    // Same rule as Save — a clone must not carry an empty calculated field
+    // into a brand-new report.
+    const calc = classifyCalcFields(calculatedFields)
+    if (calc.incomplete.length > 0) {
+      setSaveError({ message: describeIncompleteCalcFields(calc.incomplete) })
+      return
+    }
+    if (calc.dropped.length > 0) setCalculatedFields(calc.keep)
     setSaving(true); setSaveError(null); setSaveDetailOpen(false)
     try {
       // Step 1 — persist current edits to the source. saveReport handles
       // both insert and update; for an existing record it updates in place.
-      await saveReport({ id: reportId, report, filters, groupings, calculatedFields })
+      await saveReport({ id: reportId, report, filters, groupings, calculatedFields: calc.keep })
       // Step 2 — clone the now-up-to-date source.
       const newId = await cloneReport(reportId)
       setSavedAt(new Date())
