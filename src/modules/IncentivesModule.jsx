@@ -8,6 +8,7 @@ import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import NavLink from '../components/NavLink'
 import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
+import ModuleHomeByline from '../components/ModuleHomeByline'
 
 const CODE_SECTIONS = [
   { id:'home',     label:'Home'                       },
@@ -112,7 +113,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
         <div style={{ marginBottom:20 }}>
           <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Incentives / Home</div>
           <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Incentives Dashboard</h1>
-          <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · Program Manager · Sunday, April 12, 2026</div>
+          <ModuleHomeByline />
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>

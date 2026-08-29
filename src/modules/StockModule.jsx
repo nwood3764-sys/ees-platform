@@ -13,6 +13,7 @@ import {
   fetchMaterialsRequests,
   fetchEquipment,
 } from '../data/stockService'
+import ModuleHomeByline from '../components/ModuleHomeByline'
 
 // ---------------------------------------------------------------------------
 // Section & column definitions
@@ -120,7 +121,7 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
       <div style={{ marginBottom:20 }}>
         <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Stock</div>
         <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Inventory & Materials Dashboard</h1>
-        <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · Shop Steward · Today</div>
+        <ModuleHomeByline />
       </div>
 
       {/* KPI row */}

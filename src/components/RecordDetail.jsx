@@ -104,9 +104,12 @@ import {
   getRecordTypeColumn,
   fetchAvailableRecordTypes,
   fetchConstrainingParentForCreate,
+  fetchConstrainingParentCandidates,
+  fetchOpportunityInheritedFields,
   fetchProgramStateForCreate,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
+import { resolveParentChoice } from '../lib/constrainingParentChoice'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
@@ -907,6 +910,51 @@ async function resolveInheritedParents(targetTable, known, { maxHops = 6 } = {})
     }
   }
   return resolved
+}
+
+// ---------------------------------------------------------------------------
+// The parent that decides which record types this child may carry
+// ---------------------------------------------------------------------------
+// An opportunity record type IS the program, so it governs which incentive
+// application forms and which assessment record types are even offered
+// (record_type_eligibility holds the edges). Created FROM an opportunity that
+// is settled. Created from a BUILDING it is not: a building runs several
+// programs side by side, and the code used to pick "the most recent live
+// opportunity" — which then narrowed the record-type picker to that one
+// program, making every other program's form unreachable from the building
+// (Nicholas, 2026-08-29). Where the opportunities were created in one
+// transaction the timestamps tie and the guess was arbitrary.
+//
+// So: derive when there is exactly one, ASK when there is more than one. The
+// question is carried to RecordTypePicker as __parentChoices and answered
+// there, before any record type is offered.
+//
+// Mutates prefillObj (seeds the FK, or records the outstanding question) and
+// returns the resolved parent id, or null when it is still owed / none exists.
+async function seedConstrainingParent(childTable, prefillObj) {
+  try {
+    const candidates = await fetchConstrainingParentCandidates(childTable, prefillObj)
+    if (!candidates) return null
+    const choice = resolveParentChoice({
+      seededId: prefillObj[candidates.fkColumn] || null,
+      candidates: candidates.options,
+    })
+    if (choice.autoId) {
+      prefillObj[candidates.fkColumn] = choice.autoId
+      return choice.autoId
+    }
+    if (choice.needsChoice) {
+      prefillObj.__parentChoices = {
+        parentObject: candidates.parentObject,
+        fkColumn: candidates.fkColumn,
+        options: choice.options,
+      }
+    }
+    return null
+  } catch (err) {
+    console.warn('seedConstrainingParent: resolve failed', err)
+    return null
+  }
 }
 
 // Compose a derived record name as "<base> - <record type label>", without
@@ -5149,22 +5197,18 @@ function RelatedListWidget({
         const bldId = prefillObj.building_id || null
         let propId  = prefillObj.property_id || null
 
-        // No opportunity carried (created from a building/property): resolve the
-        // building's — else the property's — most recent live opportunity. It is
-        // a default the user can repoint; a building in a program has one.
+        // No opportunity carried (created from a building/property): the
+        // opportunity IS the program, and the program decides which application
+        // form this may be — so it is derived only when the ancestry gives ONE
+        // answer, and asked for in the record-type picker when it gives several.
+        // Never guessed: a guess here does not merely mis-default a field, it
+        // hides every other program's form (Nicholas, 2026-08-29).
         if (!oppId && (bldId || propId)) {
-          let q = supabase.from('opportunities')
-            .select('id, property_id')
-            .eq('opportunity_is_deleted', false)
-            .order('opportunity_created_at', { ascending: false })
-            .limit(1)
-          q = bldId ? q.eq('building_id', bldId) : q.eq('property_id', propId)
-          const { data: oppRows } = await q
-          const found = Array.isArray(oppRows) ? oppRows[0] : oppRows
-          if (found?.id) {
-            oppId = found.id
-            fill('opportunity_id', found.id)
-            if (!propId && found.property_id) propId = found.property_id
+          oppId = await seedConstrainingParent('incentive_applications', prefillObj)
+          if (oppId && !propId) {
+            const { data: oppProp } = await supabase.from('opportunities')
+              .select('property_id').eq('id', oppId).maybeSingle()
+            if (oppProp?.property_id) propId = oppProp.property_id
           }
         }
 
@@ -5195,14 +5239,13 @@ function RelatedListWidget({
         const b   = buildingRes?.data
         const p   = propertyRes?.data
 
-        // Program fields — from the opportunity.
-        if (opp) {
-          fill('ia_program_name',                    opp.opportunity_program)
-          fill('ia_program_year',                    opp.opportunity_program_year)
-          fill('ia_income_qualified_confirmation_code',
-            opp.opportunity_income_qualified_confirmation_code || opp.opportunity_ira_income_code)
-          fill('ia_electric_account_number',         opp.opportunity_electric_account_number)
-          fill('ia_natural_gas_account_number',      opp.opportunity_gas_account_number)
+        // Program fields — from the opportunity. Same definition the picker's
+        // parent selector uses when the opportunity is chosen a moment later,
+        // so a form opened from the building carries the same program facts as
+        // one opened from the opportunity.
+        if (oppId) {
+          const inh = await fetchOpportunityInheritedFields('incentive_applications', oppId)
+          for (const [col, val] of Object.entries(inh.values)) fill(col, val)
         }
 
         // Building attributes. (ia_building_name is a bare uuid with no FK/lookup
@@ -5316,22 +5359,18 @@ function RelatedListWidget({
           || (parentTable === 'buildings' ? parentRecordId : null)
         let propId = prefillObj.property_id || (parentTable === 'properties' ? parentRecordId : null)
 
-        // No opportunity carried (created from a building/property): resolve the
-        // building's — else the property's — most recent live opportunity so the
-        // Opportunity field links up. A default the user can repoint.
+        // No opportunity carried (created from a building/property): the
+        // opportunity's record type governs which assessment record types are
+        // offered, so it is derived only when the ancestry gives ONE answer and
+        // asked for in the record-type picker when it gives several — the same
+        // rule incentive applications follow, and for the same reason.
         if (!oppId && (bldId || propId)) {
-          let q = supabase.from('opportunities')
-            .select('id, property_id, building_id')
-            .eq('opportunity_is_deleted', false)
-            .order('opportunity_created_at', { ascending: false })
-            .limit(1)
-          q = bldId ? q.eq('building_id', bldId) : q.eq('property_id', propId)
-          const { data: oppRows } = await q
-          const found = Array.isArray(oppRows) ? oppRows[0] : oppRows
-          if (found?.id) {
-            oppId = found.id
-            if (!bldId && found.building_id) bldId = found.building_id
-            if (!propId && found.property_id) propId = found.property_id
+          oppId = await seedConstrainingParent('assessments', prefillObj)
+          if (oppId) {
+            const { data: oppRow } = await supabase.from('opportunities')
+              .select('property_id, building_id').eq('id', oppId).maybeSingle()
+            if (!bldId && oppRow?.building_id) bldId = oppRow.building_id
+            if (!propId && oppRow?.property_id) propId = oppRow.property_id
           }
         }
 
@@ -7045,6 +7084,24 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // unconstrained, which is the case for most objects.
   const prefillParentObject       = prefill?.__parentObject || null
   const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
+  // The create came from a building/property running more than one program, so
+  // WHICH parent this belongs to is a question the picker asks before offering
+  // any record type (see seedConstrainingParent). Answering it also carries the
+  // program facts that a create launched from the opportunity would have had.
+  const prefillParentChoices      = prefill?.__parentChoices || null
+  const [parentPickPrefill, setParentPickPrefill] = useState(null)
+  // ...also held in a ref, because the show/skip gate below must NOT re-evaluate
+  // when the answer arrives: it resets pickedRecordType on every run, so a
+  // re-run after the pick would re-open the picker on top of the answered
+  // question, forever.
+  const parentPickRef = useRef(null)
+  // What the form is actually seeded with: the create prefill, plus whatever
+  // the answered parent question added. One object so every consumer of the
+  // prefill sees the chosen program, not the pre-choice draft.
+  const effectivePrefill = useMemo(
+    () => (parentPickPrefill ? { ...(prefill || {}), ...parentPickPrefill } : prefill),
+    [prefill, parentPickPrefill],
+  )
   // A building runs each program once, so a new opportunity started from a
   // building (or from anything that seeded one) must not be OFFERED a program
   // that building already runs — the database refuses it on save. Only
@@ -7059,6 +7116,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
     if (prefillRecordTypeValue) {
       setPickedRecordType(false)   // prefill already has it — no picker needed
+      setPickerEvaluated(true)
+      return
+    }
+
+    // The parent that decides which record types exist has not been chosen yet.
+    // Deciding show/skip here would mean fetching record types for a program
+    // nobody picked — exactly the guess this closes — so hand it straight to
+    // the picker, which asks the program question first.
+    if (prefillParentChoices && !parentPickRef.current) {
+      setPickedRecordType(null)
       setPickerEvaluated(true)
       return
     }
@@ -7103,7 +7170,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       })
     return () => { cancelled = true }
   }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject,
-      prefillParentRecordTypeId, prefillTakenOnBuildingId])
+      prefillParentRecordTypeId, prefillTakenOnBuildingId, prefillParentChoices,
+      parentPickPrefill])
 
   // ── Load required-field set ────────────────────────────────────────────
   // Fetch the table's NOT NULL columns once per mount; render the red
@@ -7319,13 +7387,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             lookups: new Map(),
             actionOverrides: layoutData?.actionOverrides || [],
           })
-          setDraft(seedDraft(prefill))
+          setDraft(seedDraft(effectivePrefill))
           setEditing(true)
           // Pre-load picklist + lookup options. Pass the seeded draft so
           // any dependent-lookup fields can resolve their dependencies on
           // the very first render rather than waiting for a draft change.
           if (layoutData?.sections) {
-            const initialDraft = seedDraft(prefill)
+            const initialDraft = seedDraft(effectivePrefill)
             loadAllEditOpts(layoutData.sections, initialDraft)
           }
           // Pre-select the Project-Reservation defaults on the create form so
@@ -8813,8 +8881,23 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         state={prefillState}
         parentObject={prefillParentObject}
         parentRecordTypeId={prefillParentRecordTypeId}
+        parentChoices={prefillParentChoices}
         takenOnBuildingId={prefillTakenOnBuildingId}
-        onPick={(rt) => {
+        onPick={async (rt, parentPick) => {
+          // The program question, when it was asked, is answered here — seed the
+          // FK and everything a create launched from that opportunity would
+          // have inherited, so both routes produce the same record.
+          if (parentPick?.parentId) {
+            const inh = await fetchOpportunityInheritedFields(tableName, parentPick.parentId)
+              .catch(() => ({ values: {}, nameBase: null }))
+            parentPickRef.current = parentPick.parentId
+            setParentPickPrefill({
+              [parentPick.fkColumn]: parentPick.parentId,
+              ...inh.values,
+              ...(inh.nameBase && !prefill?.__derivedNameBase
+                ? { __derivedNameBase: inh.nameBase } : {}),
+            })
+          }
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.
           setPickedRecordType(rt || false)

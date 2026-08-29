@@ -9,6 +9,7 @@ import ObjectListSection from '../components/ObjectListSection'
 import NavLink from '../components/NavLink'
 import { fetchPortalUsers, fetchPartnerOrganizations, fetchPropertyOwnerPortals } from '../data/portalService'
 import { getCurrentUserProfile } from '../data/layoutService'
+import ModuleHomeByline from '../components/ModuleHomeByline'
 
 const CODE_SECTIONS = [
   { id: 'home',     label: 'Home' },
@@ -86,7 +87,7 @@ function PortalHome({ setSec, users, partners }) {
       <div style={{ marginBottom:20 }}>
         <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Portal</div>
         <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>External Access Dashboard</h1>
-        <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · Admin · Portal user & partner management</div>
+        <ModuleHomeByline note="Portal user & partner management" />
       </div>
 
       {/* KPI row */}
