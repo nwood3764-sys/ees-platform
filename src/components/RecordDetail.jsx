@@ -1765,6 +1765,12 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           // ...and the same parent-program scoping: an incentive application
           // quick-created from an opportunity offers that program's forms only.
           const parent = await fetchConstrainingParentForCreate(table, effectiveSeed).catch(() => null)
+          // A property with a single building resolves its own constraining
+          // parent — take it, so the quick-create narrows exactly as the full
+          // pop-up does instead of offering every program in the state.
+          if (parent?.resolvedParentId && parent.fkColumn && !effectiveSeed[parent.fkColumn]) {
+            effectiveSeed[parent.fkColumn] = parent.resolvedParentId
+          }
           rts = await fetchAvailableRecordTypes(table, {
             state: programState,
             parentObject: parent?.parentObject || null,
@@ -5526,6 +5532,18 @@ function RelatedListWidget({
       if (constrainingParent) {
         prefillObj.__parentObject       = constrainingParent.parentObject
         prefillObj.__parentRecordTypeId = constrainingParent.parentRecordTypeId
+        // The seed didn't carry the parent and the scope holds exactly one —
+        // a property with a single building. Fill it in, so the picker narrows
+        // AND the form opens with the building already chosen.
+        if (constrainingParent.resolvedParentId && constrainingParent.fkColumn
+            && !prefillObj[constrainingParent.fkColumn]) {
+          prefillObj[constrainingParent.fkColumn] = constrainingParent.resolvedParentId
+        }
+        // Several candidates: the picker asks which one, because the answer is
+        // what decides the list of programs it is about to show.
+        if (constrainingParent.choices) {
+          prefillObj.__parentChoices = constrainingParent.choices
+        }
       }
     }
 
@@ -6865,6 +6883,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   //         or the prefill already supplied one)
   // object{id,value,label} = the user's picked record type
   const [pickedRecordType, setPickedRecordType] = useState(null)
+  // Columns the picker resolved on the user's behalf — today the constraining
+  // parent it had to ask for (the building). Merged into the create draft so
+  // the form opens with that answer already filled in, never asked twice.
+  const [pickedParentSeed, setPickedParentSeed] = useState(null)
   const [pickerEvaluated,  setPickerEvaluated]  = useState(false)
   // Required-field set for this table — used to render the red asterisk in
   // the field-group renderer. Populated once at mount via fetchTableMetadata
@@ -7045,6 +7067,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // unconstrained, which is the case for most objects.
   const prefillParentObject       = prefill?.__parentObject || null
   const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
+  // Set when the constraining parent is not known yet and more than one
+  // candidate is in scope (a New Opportunity from a property that holds several
+  // buildings). The picker asks for it before it lists anything.
+  const prefillParentChoices      = prefill?.__parentChoices || null
   // A building runs each program once, so a new opportunity started from a
   // building (or from anything that seeded one) must not be OFFERED a program
   // that building already runs — the database refuses it on save. Only
@@ -7056,6 +7082,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     let cancelled = false
     setPickerEvaluated(false)
     setPickedRecordType(null)
+    setPickedParentSeed(null)
+
+    // A parent choice is still owed, so nothing here can be decided yet: the
+    // list of record types depends on an answer the user has not given. Render
+    // the picker and let it ask — auto-picking now would pick from the
+    // unconstrained list, which is the defect this closes.
+    if (prefillParentChoices && !prefillRecordTypeValue) {
+      setPickerEvaluated(true)
+      return
+    }
 
     if (prefillRecordTypeValue) {
       setPickedRecordType(false)   // prefill already has it — no picker needed
@@ -7103,7 +7139,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       })
     return () => { cancelled = true }
   }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject,
-      prefillParentRecordTypeId, prefillTakenOnBuildingId])
+      prefillParentRecordTypeId, prefillTakenOnBuildingId, prefillParentChoices])
 
   // ── Load required-field set ────────────────────────────────────────────
   // Fetch the table's NOT NULL columns once per mount; render the red
@@ -7232,6 +7268,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         composeDerivedRecordName(base, rtObj ? (rtObj.label || rtObj.picklist_label || '') : '')
       const seedDraft = (pf) => {
         const d = pf ? { ...seededRT, ...pf } : { ...seededRT }
+        // What the picker answered on the way in (the building it asked for)
+        // wins over the prefill, which is precisely what was missing.
+        if (pickedParentSeed) Object.assign(d, pickedParentSeed)
         derivedNameBaseRef.current = null
         if (d.__derivedNameBase) {
           derivedNameBaseRef.current = d.__derivedNameBase
@@ -7345,7 +7384,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         .finally(() => { if (!cancelled) setLoading(false) })
     }
     return () => { cancelled = true }
-  }, [tableName, recordId, isCreate, reloadTick, pickerEvaluated, pickedRecordType])
+  }, [tableName, recordId, isCreate, reloadTick, pickerEvaluated, pickedRecordType, pickedParentSeed])
 
   // Merged-away accounts must not masquerade as live records. The Merge
   // Accounts tool soft-deletes the loser (account_is_deleted = true) — it's
@@ -8813,10 +8852,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         state={prefillState}
         parentObject={prefillParentObject}
         parentRecordTypeId={prefillParentRecordTypeId}
+        parentChoices={prefillParentChoices}
         takenOnBuildingId={prefillTakenOnBuildingId}
-        onPick={(rt) => {
+        onPick={(rt, parentSeed) => {
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.
+          if (parentSeed) setPickedParentSeed(parentSeed)
           setPickedRecordType(rt || false)
         }}
         onCancel={() => onBack()}
