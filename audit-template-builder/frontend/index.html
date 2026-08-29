@@ -4275,7 +4275,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     const dl=wrap(desc,270), h=Math.max(dl.length*9.5,19)+10; need(h);
     tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+12+k*9.5,ln));
     wrap(name,150).forEach((ln,k)=>t(M+300,st.y+12+k*9.5,ln));
-    tc(C.red); font(9,'bold'); t(W-M,st.y+12,_money(amt),{align:'right'});
+    tc(C.ink); font(9,'bold'); t(W-M,st.y+12,'('+_money(amt)+')',{align:'right'});
     st.y+=h; stroke([188,214,242]); d.line(M,st.y,W-M,st.y);};
   sect('IRA Rebates','Incentive Description: '+(m.tier?m.tier.desc:'')+'. Notes: '+(m.tier?m.tier.note:'')+'.',
     'IRA HOMES '+(isInv?'Incentive ':'')+'- Instant Discount',m.homesAmt);
@@ -4284,10 +4284,10 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // total of every rebate available toward the project cost
   {need(24); st.y+=8; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
    tc(C.ink); font(9,'bold'); t(M,st.y+13,'Total Rebates Available');
-   tc(C.red); t(W-M,st.y+13,_money(m.total),{align:'right'}); st.y+=18;}
+   tc(C.ink); t(W-M,st.y+13,'('+_money(m.total)+')',{align:'right'}); st.y+=18;}
   /* ===== Section 3: Project Summary ===== */
   need(96); st.y+=14; sh('Project Summary',st.y+9); st.y+=18;
-  const trows=[['Total Project Cost',_money(m.total),false],['Total Rebates',_money(m.total),false],
+  const trows=[['Total Project Cost',_money(m.total),false],['Total Rebates','('+_money(m.total)+')',false],
     ['Total Deposits','$0.00',false],[isInv?'Total Due':'Total Project Final Cost','$0.00',true]];
   for(const [lbl,val,strong] of trows){
     tc(C.ink); font(9,strong?'bold':'normal');
