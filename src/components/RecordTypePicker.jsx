@@ -15,6 +15,8 @@ import { Icon } from './UI'
 import { fetchAvailableRecordTypes } from '../data/layoutService'
 import { scopedToState, statesInRecordTypes, needsStateChoice as recordOwesState }
   from '../lib/programStateScope'
+import { parentChoiceOutstanding, describeParentOption }
+  from '../lib/constrainingParentChoice'
 
 export default function RecordTypePicker({
   tableName, objectLabel, state = null,
@@ -38,22 +40,34 @@ export default function RecordTypePicker({
   // The state the user picked here, when the record itself could not tell us
   // one. Never overrides a state the record already has.
   const [chosenState, setChosenState] = useState('')
-  // The constraining PARENT the user picked here, when the create seed could
-  // not name it — a New Opportunity started from a property that holds several
-  // buildings. Which building it is decides which programs run, so the list
-  // below cannot be drawn until this is answered (Nicholas, 2026-08-29).
-  const [chosenParentId, setChosenParentId] = useState('')
+  // The PARENT the user picked here, when the create came from a building or a
+  // property that has more than one. An opportunity record type is the program,
+  // and the program decides which forms exist — so this question comes first,
+  // and the record types below are the chosen program's own (Nicholas,
+  // 2026-08-29: the AUDIT application was unreachable from the building because
+  // the platform silently picked one of its two opportunities).
+  const [chosenParentId, setChosenParentId] = useState(null)
 
   const parentOptions = parentChoices?.options || []
-  // Owed only when nothing else already resolved the parent.
-  const needsParentChoice = !parentRecordTypeId && parentOptions.length > 0
+  const owesParent = parentChoiceOutstanding(parentChoices, chosenParentId)
   const chosenParent = parentOptions.find(o => o.id === chosenParentId) || null
-  const effectiveParentRecordTypeId = parentRecordTypeId || chosenParent?.recordTypeId || null
-  // The parent the user answered for here travels back with the pick, so the
-  // create form opens with it already filled in rather than asking again.
-  const parentSeed = (chosenParent && parentChoices?.fkColumn)
-    ? { [parentChoices.fkColumn]: chosenParent.id }
-    : null
+  // Once chosen, the parent's own record type is what narrows the list.
+  const effectiveParentObject = chosenParent
+    ? (parentChoices?.parentObject || parentObject)
+    : parentObject
+  const effectiveParentRecordTypeId = chosenParent
+    ? (chosenParent.recordTypeId || null)
+    : parentRecordTypeId
+  // "Opportunity" from the parent object name — the label the user recognises.
+  const parentLabel = (() => {
+    const t = String(parentChoices?.parentObject || '').replace(/_/g, ' ').trim()
+    if (!t) return 'Parent'
+    const singular = t.endsWith('ies') ? `${t.slice(0, -3)}y` : t.replace(/s$/, '')
+    return singular.replace(/\b\w/g, c => c.toUpperCase())
+  })()
+  const emitPick = (rt) => onPick(rt, chosenParent
+    ? { fkColumn: parentChoices.fkColumn, parentId: chosenParent.id }
+    : null)
 
   // Every state this object actually has programs configured for, read off the
   // record types themselves — never a hardcoded list of the states EES works in.
@@ -74,15 +88,16 @@ export default function RecordTypePicker({
     setChosenState('')
     setNoneInState(null)
     setStatesConfigured([])
-    // Hold entirely until the parent question is answered. Fetching now would
-    // draw the unconstrained list, and auto-pick could fire off it.
-    if (needsParentChoice && !effectiveParentRecordTypeId) {
-      setRecordTypes([])
-      setLoading(false)
-      return () => { cancelled = true }
-    }
+    // While the parent is still owed the question below is "which program?",
+    // not "which record type?" — so nothing is fetched, nothing auto-picks, and
+    // no record type is offered until it is answered.
+    if (owesParent) { setRecordTypes([]); setLoading(false); return () => { cancelled = true } }
     fetchAvailableRecordTypes(tableName, {
-      state, parentObject, parentRecordTypeId: effectiveParentRecordTypeId, takenOnBuildingId })
+      state,
+      parentObject: effectiveParentObject,
+      parentRecordTypeId: effectiveParentRecordTypeId,
+      takenOnBuildingId,
+    })
       .then(rts => {
         if (cancelled) return
         setRecordTypes(rts)
@@ -104,14 +119,14 @@ export default function RecordTypePicker({
         // would be refused on save.
         const selectable = rts.filter(rt => !rt.taken)
         if (selectable.length === 1) {
-          onPick(selectable[0], parentSeed)
+          emitPick(selectable[0])
           return
         }
         if (selectable.length === 0 && rts.length > 0) return  // render, and say why
         if (rts.length === 0) {
           // No record types — caller should skip the picker entirely. Signal
           // by picking null so the parent advances without a record type.
-          onPick(null, parentSeed)
+          emitPick(null)
         }
       })
       .catch(err => { if (!cancelled) setError(err.message || String(err)) })
@@ -122,7 +137,8 @@ export default function RecordTypePicker({
     // infinite fetch loop. We only want to refetch when the tableName
     // actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableName, state, parentObject, effectiveParentRecordTypeId, needsParentChoice, takenOnBuildingId])
+  }, [tableName, state, effectiveParentObject, effectiveParentRecordTypeId,
+      takenOnBuildingId, owesParent])
 
   // Cancel on Escape
   useEffect(() => {
@@ -136,7 +152,7 @@ export default function RecordTypePicker({
   // pending state choice is never an auto-pick, however few types are showing.
   const selectableCount = recordTypes.filter(rt => !rt.taken).length
   const allTaken = recordTypes.length > 0 && selectableCount === 0
-  if (!loading && !needsParentChoice && !needsStateChoice && !noneInState && !allTaken
+  if (!loading && !owesParent && !needsStateChoice && !noneInState && !allTaken
       && selectableCount <= 1 && !error) return null
 
   return (
@@ -170,8 +186,8 @@ export default function RecordTypePicker({
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
             {noneInState
               ? `Nothing is configured for ${noneInState}.`
-              : (needsParentChoice && !chosenParent)
-                ? `Choose the ${(parentChoices?.parentLabel || 'parent').toLowerCase()} this record is for — it decides which record types are available.`
+              : owesParent
+                ? `Choose the ${parentLabel.toLowerCase()} this belongs to, then its record type.`
                 : needsStateChoice
                   ? 'Choose the state this record is in, then its record type.'
                   : 'Choose a record type to continue.'}
@@ -189,7 +205,7 @@ export default function RecordTypePicker({
               <span style={{ fontWeight: 500 }}>— record types that run in this state</span>
             </div>
           )}
-          {needsParentChoice && (
+          {parentChoices && parentOptions.length > 1 && (
             <div style={{ marginTop: 12 }}>
               <label
                 htmlFor="record-type-picker-parent"
@@ -198,25 +214,21 @@ export default function RecordTypePicker({
                   textTransform: 'uppercase', color: C.textMuted, marginBottom: 5,
                 }}
               >
-                {parentChoices?.parentLabel || 'Parent record'}
+                {parentLabel}
               </label>
               <select
                 id="record-type-picker-parent"
-                value={chosenParentId}
-                onChange={e => { setChosenParentId(e.target.value); setChosenId(null) }}
+                value={chosenParentId || ''}
+                onChange={e => { setChosenParentId(e.target.value || null); setChosenId(null) }}
                 style={{
                   width: '100%', padding: '8px 10px', fontSize: 13,
                   border: `1px solid ${C.border}`, borderRadius: 5,
                   background: C.card, color: C.textPrimary, fontFamily: 'inherit',
                 }}
               >
-                <option value="">
-                  {`Select a ${(parentChoices?.parentLabel || 'record').toLowerCase()}…`}
-                </option>
+                <option value="">Select {/^[AEIOU]/i.test(parentLabel) ? 'an' : 'a'} {parentLabel.toLowerCase()}…</option>
                 {parentOptions.map(o => (
-                  <option key={o.id} value={o.id}>
-                    {o.recordNumber ? `${o.recordNumber} — ${o.label}` : o.label}
-                  </option>
+                  <option key={o.id} value={o.id}>{describeParentOption(o)}</option>
                 ))}
               </select>
             </div>
@@ -293,15 +305,16 @@ export default function RecordTypePicker({
               — open the existing one below, or delete it first if it is a duplicate.
             </div>
           )}
-          {!loading && !error && needsParentChoice && !chosenParent && (
+          {!loading && !error && owesParent && (
             <div style={{
               padding: 14, background: C.cardSecondary,
               border: `1px solid ${C.border}`, borderRadius: 6,
               color: C.textSecondary, fontSize: 12.5, lineHeight: 1.6,
             }}>
-              This {(objectLabel || tableName).toLowerCase()} belongs to a{' '}
-              {(parentChoices?.parentLabel || 'parent record').toLowerCase()}, and which one
-              it is decides which record types are available. Choose it above.
+              The {parentLabel.toLowerCase()} record type decides which record types exist
+              here, and there is more than one to choose from. Select one above and only
+              its record types are offered — the same list you would see creating this
+              from the {parentLabel.toLowerCase()} itself.
             </div>
           )}
           {!loading && !error && needsStateChoice && !chosenState && (
@@ -328,7 +341,7 @@ export default function RecordTypePicker({
                     disabled={taken}
                     title={taken ? `${rt.label} already runs on this building${rt.takenBy ? ` as ${rt.takenBy}` : ''}` : undefined}
                     onClick={() => { if (!taken) setChosenId(rt.id) }}
-                    onDoubleClick={() => { if (!taken) onPick(rt, parentSeed) }}
+                    onDoubleClick={() => { if (!taken) emitPick(rt) }}
                     style={{
                       textAlign: 'left',
                       padding: '12px 14px',
@@ -392,7 +405,7 @@ export default function RecordTypePicker({
           <button
             onClick={() => {
               const rt = visibleRecordTypes.find(r => r.id === chosenId)
-              if (rt) onPick(rt, parentSeed)
+              if (rt) emitPick(rt)
             }}
             disabled={!chosenId}
             style={{

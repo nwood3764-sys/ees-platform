@@ -251,6 +251,7 @@
       <label>Owner Address<input id="pjOwnerAddr" placeholder="street"></label>
       <label>Owner City, State Zip<input id="pjOwnerCsz" placeholder="City, ST 55555"></label>
       <label>Contact Name<input id="pjContact"></label>
+      <label>Contact Title<input id="pjContactTitle" placeholder="e.g. CEO, Asset Manager"></label>
       <label>Email<input id="pjEmail"></label>
       <label>Phone<input id="pjPhone"></label>
       <label>Property Name<input id="pjPropName"></label>
@@ -276,8 +277,8 @@
   </div>
 
   <div id="hearRow" style="margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
-    <strong style="font-size:13.5px">HEAR — Home Electrification &amp; Appliance Rebates (mechanical)</strong>
-    <span class="copyhint">— the electrification scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
+    <strong style="font-size:13.5px">HEAR — Appliance &amp; Equipment Rebates (mechanical)</strong>
+    <span class="copyhint">— the HEAR scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
     <div style="font-size:12px;color:var(--mut);margin-top:6px">Low-income (&le;80% AMI): the program pays <b>100% of the project cost</b>, up to the ENERGY STAR product-category caps (Heat Pump for Space Heating/Cooling $8,000 · Heat Pump Water Heater $1,750 · Heat Pump Clothes Dryer $840 · Electric Cooking Appliance $840 · Insulation, Air Sealing, and Ventilation $1,600 · Electrical Panel $4,000 · Electric Wiring $2,500) and <b>$14,000 maximum per dwelling unit</b>. Same in North Carolina and Wisconsin.</div>
     <div id="hearBody" style="margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -359,7 +360,7 @@
   </div>
 
   <div class="expSect sectHear">
-  <div class="expHdr">HEAR — Home Electrification Deliverables</div>
+  <div class="expHdr">HEAR Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="hearProp" disabled>HEAR Proposal (PDF)</button>
   </div>
@@ -3255,11 +3256,14 @@ function buildMappedForReview(){
    - Measure costs = breakout fractions × total rebate (attic ins .44, air seal .5483,
      bath aerators .0033, kitchen aerators .0035, showerheads .0049), largest row absorbs
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
-const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
+const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjContactTitle','pjEmail','pjPhone','pjPropName',
   'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd',
   'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas',
   'occUnits','occBeds','occBedsTotal'];   // occupancy persists per property too
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
+// Contacts are company representatives, so show "Name — Title" (e.g. "Kevin — CEO").
+function contactWithTitle(F){const n=(F.pjContact||'').trim(),tt=(F.pjContactTitle||'').trim();
+  return n?(tt?n+' — '+tt:n):'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
   try{localStorage.setItem(k,JSON.stringify(Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))));}catch(e){}}
@@ -3828,10 +3832,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,
     'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
+  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'BUILDING / PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
+   tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
    stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
@@ -3889,9 +3893,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const isNC=m.state==='NC';
     // Each column: [label, value(row), width]. Values are right-aligned at the
     // column's right edge; the description column takes whatever is left.
-    const _qtyU=r=>{const q=_qty(r.qty); let u=r.unit||''; if(u==='Unit'&&Number(r.qty)!==1)u='Units'; return q+(u?(' '+u):'');};
     const numCols=isNC
-      ?[['QUANTITY',_qtyU,84],
+      ?[['QUANTITY/UNITS',r=>_qty(r.qty),84],
         ['LABOR',   r=>_money(r.labor),64],
         ['MATERIAL',r=>_money(r.material),68],
         ['TOTAL',   r=>_money(r.cost),72]]
@@ -3953,7 +3956,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
   else{
     if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
-    if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+' ('+m.tier.note+')',iraAmt]);
+    if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+'  \u00b7  '+(m.units||0)+' units \u00d7 '+_money(m.tier.perUnit)+' per unit = '+_money(iraAmt),iraAmt]);
   }
   // clean rebate rows (matching the line-item table), heading kept with the
   // column header and first credit line so a title is never orphaned.
@@ -3991,7 +3994,6 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
    trow('Total Cost',_money(gross));
    trow('Rebates & Incentives Applied','('+_money(reb)+')');
-   trow('Total Deposits',_money(deposits));
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
    tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
@@ -4050,7 +4052,7 @@ function hearModel(){
       const qty=Math.max(1,parseInt(r.qty,10)||1);
       const unitCost=Math.max(0,_num(r.cost));            // the Cost field is PER UNIT
       const cost=Math.round(unitCost*qty*100)/100;        // total = per-unit x quantity
-      const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x units
+      const rebate=cost;                                  // HEAR covers 100% of the install cost
       // NC documents split each line 50/50 into labor + material (material takes the
       // clean floored half; labor carries any odd cent so the two sum to the total).
       const material=Math.floor(cost*50)/100, labor=Math.round((cost-material)*100)/100;
@@ -4064,12 +4066,9 @@ function hearModel(){
         rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
     });
   const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
-  const rawRebate=Math.round(rows.reduce((a,r)=>a+r.rebate,0)*100)/100;
-  const programMax=14000*units;
-  const totalRebate=Math.min(rawRebate,programMax);
-  const capped=rawRebate>programMax+0.005;
-  const totalDue=Math.round((totalCost-totalRebate)*100)/100;
-  return {units,state,rows,totalCost,rawRebate,programMax,totalRebate,capped,totalDue,
+  const totalRebate=totalCost;   // low-income HEAR: the rebate covers 100% of the install cost
+  const totalDue=0;              // therefore the balance due is always $0.00
+  return {units,state,rows,totalCost,totalRebate,totalDue,
     fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
 }
 function buildHearPdfBlob(){
@@ -4096,9 +4095,9 @@ function buildHearPdfBlob(){
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'BUILDING / PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
+   tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
    stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
@@ -4109,12 +4108,11 @@ function buildHearPdfBlob(){
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   /* scope table: measure/system/model/eff/description (left) + numbers (right).
      NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
-  head('Electrification Scope — HEAR Program',12);
+  head('Proposed Scope of Work — HEAR Program',12);
   const isNC=m.state==='NC';
   const cols=isNC
-    ?[['QTY',r=>String(r.qty),34],['LABOR',r=>_money(r.labor),62],['MATERIAL',r=>_money(r.material),66],
-      ['TOTAL',r=>_money(r.cost),66],['REBATE',r=>_money(r.rebate),66]]
-    :[['QTY',r=>String(r.qty),40],['COST',r=>_money(r.cost),80],['REBATE',r=>_money(r.rebate),80]];
+    ?[['QUANTITY/UNITS',r=>String(r.qty),96],['LABOR',r=>_money(r.labor),74],['MATERIAL',r=>_money(r.material),74],['TOTAL',r=>_money(r.cost),74]]
+    :[['QUANTITY/UNITS',r=>String(r.qty),120],['TOTAL',r=>_money(r.cost),84]];
   let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
   const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
@@ -4129,16 +4127,14 @@ function buildHearPdfBlob(){
     stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
     st.y+=headH;};
   tableHeader();
-  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No equipment entered yet.'); st.y+=26;}
   m.rows.forEach((r,i)=>{
     const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
     font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-10);
     font(8.5); const dl=sub?wrap(sub,descW-10):[];
     font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];        // free-text description
-    const capNote='Cap '+_money(r.cap)+'/unit × '+r.qty+' unit'+(r.qty>1?'s':'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
-    const dl2=wrap(capNote,descW-10);
-    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0, capH=dl2.length*9.5;
-    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+4+capH+9;
+    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0;
+    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+9;
     if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
     const y0=st.y;
     if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
@@ -4146,34 +4142,46 @@ function buildHearPdfBlob(){
     let dy=y0+8+nameH;
     if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=subH;}
     if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=descH;}
-    dy+=4; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+5,dy+k*9.5+7,ln));
     const numY=y0+8+9;                        // top-aligned on the measure's first line
     cols.forEach(([lbl,fn,w,rx],c)=>{
-      const isTot=(lbl==='TOTAL'||lbl==='COST'), isReb=(lbl==='REBATE');
-      font(9.5,(isTot||isReb)?'bold':'normal');
-      tc(isReb?EMd:(isTot?NAVY:[64,78,96]));
+      const isTot=(lbl==='TOTAL');
+      font(9.5,isTot?'bold':'normal'); tc(isTot?NAVY:[64,78,96]);
       t(rx-4,numY,fn(r),{align:'right'});});
     st.y=y0+h; colRules(y0,st.y);
     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
   });
-  /* totals: hero Total Due, right-aligned summary */
-  need(132); st.y+=18;
-  {const SUMW=252, x0=W-M-SUMW;
+  /* Applicable Rebates & Incentives — the IRA HEAR instant discount (mirrors HOMES) */
+  const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
+  need(90);
+  head('Applicable Rebates & Incentives',12);
+  {stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+   tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
+   st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
+   const nm='IRA HEAR — Instant Discount';
+   const perUnit=m.units?Math.round(incentive/m.units*100)/100:incentive;
+   const desc=stateFullName(m.state)+' HEAR — income-qualified instant discount  ·  '+m.units+' units × '+_money(perUnit)+' per unit = '+_money(incentive);
+   font(9.5,'bold'); const nl=wrap(nm,CW-160);
+   font(8.5);        const dl=wrap(desc,CW-160);
+   const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
+   const y0=st.y;
+   tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
+   if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2; dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
+   tc(NAVY); font(10,'bold'); t(W-M,y0+h/2+3,'('+_money(incentive)+')',{align:'right'});
+   st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;}
+  /* totals — same layout as the HOMES proposal */
+  need(100); st.y+=16;
+  {const SUMW=248, x0=W-M-SUMW;
    tc(INKM); font(8.5,'italic');
-   const note=wrap('Home Electrification & Appliance Rebates (HEAR) is an income-qualified program. For low-income households (at or below 80% of area median income) the program pays 100% of the project cost, up to the federal per-measure caps and $14,000 total per dwelling unit - applied here as an instant discount at the point of service.',x0-M-16);
+   const note=wrap('HEAR is an income-qualified program. For low-income households (at or below 80% of area median income) the rebate covers 100% of the project cost, up to the program caps and $14,000 per dwelling unit, applied as an instant discount.',x0-M-16);
    note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
-   const srows=[['Total Project Cost',_money(m.totalCost)],
-     ['HEAR Incentive (100%)','('+_money(m.totalRebate)+')']];
-   if(m.capped) srows.push(['Program Maximum ($14,000 × '+m.units+')',_money(m.programMax)]);
    let sy=st.y;
-   for(const [lb,v] of srows){
-     tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
+   const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
      tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
-     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;}
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
+   trow('Total Cost',_money(m.totalCost));
+   trow('Rebates & Incentives Applied','('+_money(incentive)+')');
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
-   tc(NAVY); font(11,'bold');
-   t(x0,sy+11,m.totalDue>0.005?'Balance Due':'Total Due');
-   t(W-M,sy+11,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
+   tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
    st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* no acknowledgment/signature block on the proposal (Nicholas) */
@@ -4198,7 +4206,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   let yB=lines9(det,RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
   bh('Bill To:',M,st.y);
-  yA=lines9([F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+15);
+  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+15);
   bh('Project Address:',RX,st.y);
   yB=lines9([F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily',isInv?'':F.pjIQ],RX,st.y+15);
   st.y=Math.max(yA,yB)+12;

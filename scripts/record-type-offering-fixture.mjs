@@ -62,38 +62,24 @@ ok(!/FIELD-OPERATIONS/.test(codeOnly(layoutService)),
 ok(!/FIELD-OPERATIONS/.test(codeOnly(picker)),
    'RecordTypePicker names no record type value in code')
 
-// ── A picker never lists before it can scope ─────────────────────────────────
-// An opportunity's programs are decided by its BUILDING. Started from a
-// property that holds several, the building is unknown — and fetching then
-// would draw the unconstrained list AND could auto-pick off it, which is the
-// original defect wearing a different hat.
-ok(/const needsParentChoice = !parentRecordTypeId && parentOptions\.length > 0/.test(picker),
-   'picker knows when a constraining parent is still owed')
-ok(/if \(needsParentChoice && !effectiveParentRecordTypeId\) \{[\s\S]{0,200}?setLoading\(false\)\s*\n\s*return/
-     .test(picker),
-   'picker holds the record-type fetch while the parent question is unanswered')
-ok(/!loading && !needsParentChoice && !needsStateChoice/.test(picker),
-   'picker never hides itself while a parent choice is owed')
+// ── An opportunity asks which building, like every other constrained child ───
+// A multifamily building offers the multifamily programs and nothing else.
+// Started from a PROPERTY the building is unknown, so the picker had nothing to
+// narrow by. It goes through the same shared resolver incentive applications
+// and assessments use — derive when there is one, ask when there are several —
+// rather than a second implementation of the same question.
+ok(/await seedConstrainingParent\('opportunities', prefillObj,\s*\n?\s*\{ propertyId: parentRecord\.id \}\)/
+     .test(recordDetail),
+   'a new opportunity from a property resolves its constraining building')
+ok((recordDetail.match(/seedConstrainingParent\('/g) || []).length >= 3,
+   'all three constrained children share the one resolver')
 
-// Whatever the picker had to ask for travels back with the pick, so the create
-// form opens with that answer filled in rather than asking a second time.
-for (const call of ['onPick(selectable[0], parentSeed)', 'onPick(null, parentSeed)',
-                    'onPick(rt, parentSeed)']) {
-  ok(picker.includes(call), `picker carries the parent seed: ${call}`)
-}
-ok(/const parentSeed = \(chosenParent && parentChoices\?\.fkColumn\)/.test(picker),
-   'the parent seed is keyed by the real FK column, not a hardcoded name')
-
-// ── The create form receives it ──────────────────────────────────────────────
-ok(/if \(pickedParentSeed\) Object\.assign\(d, pickedParentSeed\)/.test(recordDetail),
-   'RecordDetail merges the picker-resolved parent into the create draft')
-ok(/if \(parentSeed\) setPickedParentSeed\(parentSeed\)/.test(recordDetail),
-   'RecordDetail stores the parent seed the picker returns')
-ok(/prefillObj\.__parentChoices = constrainingParent\.choices/.test(recordDetail),
-   'the create prefill carries the candidate parents when there is a choice to make')
-// A single candidate is not a question — it is an answer, and it fills in.
-ok(/constrainingParent\.resolvedParentId && constrainingParent\.fkColumn/.test(recordDetail),
-   'a lone candidate parent is adopted rather than asked about')
+// The picker's parent prompt is written from the parent object, so it reads
+// correctly whichever child is asking — it used to name the building case only.
+ok(!/This building runs more than one program/.test(picker),
+   'the parent prompt is not worded for one caller')
+ok(/Choose the \$\{parentLabel\.toLowerCase\(\)\} this belongs to/.test(picker),
+   'the parent prompt names the parent object it is actually asking about')
 
 // ── The database is the guarantee, not this ──────────────────────────────────
 const migration = read('supabase/migrations/20260829194532_building_record_type_defaults_from_property.sql')

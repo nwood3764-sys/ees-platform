@@ -10,6 +10,66 @@ const daysSince = iso => {
   return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)))
 }
 
+
+// ---------------------------------------------------------------------------
+// Incentive applications
+// ---------------------------------------------------------------------------
+// The Incentives module home read project_payment_requests and payment_receipts
+// and nothing else, so with both tables empty every tile on it read 0 and $0
+// while ten real incentive applications sat one tab away (Nicholas,
+// 2026-08-29: "there are several incentives created… why is the inside
+// dashboard blank?"). An application IS the incentive being pursued, so the
+// module home reports on it.
+//
+// Purpose-built for that home screen: the counts and money it shows, resolved
+// to readable status and program labels. Not a list view — the Incentive
+// Applications tab is the list.
+
+export async function fetchIncentiveApplications() {
+  const { data, error } = await supabase
+    .from('incentive_applications')
+    .select(`
+      id, ia_record_number, ia_name, ia_status, ia_record_type,
+      ia_requested_incentive_amount, ia_approved_incentive_amount,
+      ia_rebate_amount, ia_submission_date, ia_created_at,
+      properties:property_id ( property_name, property_state )
+    `)
+    .eq('ia_is_deleted', false)
+    .order('ia_created_at', { ascending: false })
+  if (error) throw error
+  const rows = data || []
+
+  // ia_status and ia_record_type are uuid FKs to picklist_values; a uuid on a
+  // dashboard is not an answer, so both resolve to their labels here.
+  const ids = [...new Set(rows.flatMap(r => [r.ia_status, r.ia_record_type]).filter(Boolean))]
+  const labels = new Map()
+  if (ids.length) {
+    const { data: pv } = await supabase
+      .from('picklist_values')
+      .select('id, picklist_label, picklist_value')
+      .in('id', ids)
+    for (const v of pv || []) labels.set(v.id, v.picklist_label || v.picklist_value)
+  }
+
+  return rows.map(r => ({
+    id: r.ia_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    name: r.ia_name || '—',
+    property: r.properties?.property_name || '—',
+    state: r.properties?.property_state || '',
+    program: labels.get(r.ia_record_type) || '—',
+    status: labels.get(r.ia_status) || 'No status',
+    // Approved beats requested once it exists — the approved figure is the one
+    // the program has actually committed to.
+    amount: Number(r.ia_approved_incentive_amount ?? r.ia_requested_incentive_amount
+      ?? r.ia_rebate_amount) || 0,
+    requested: Number(r.ia_requested_incentive_amount) || 0,
+    approved: Number(r.ia_approved_incentive_amount) || 0,
+    submittedDate: r.ia_submission_date || null,
+    daysOpen: daysSince(r.ia_submission_date || r.ia_created_at),
+  }))
+}
+
 // ---------------------------------------------------------------------------
 // Project payment requests
 // ---------------------------------------------------------------------------

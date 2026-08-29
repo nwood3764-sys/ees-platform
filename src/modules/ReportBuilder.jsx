@@ -745,7 +745,8 @@ function FieldsTab({
           ) : (
             <>
               <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
-                Drag <strong>⠿</strong> to reorder columns · <strong>Σ</strong> shows a column total (Tabular)
+                Drag <strong>⠿</strong> to reorder columns · the <strong>Total</strong> dropdown totals the column — a
+                footer on a Tabular report, the subtotal and Grand Total rows on a Summary report
                 · <strong>◧</strong> formats the column · <strong>Remove</strong> takes the field off the report.
               </div>
               <SortableList
@@ -798,10 +799,10 @@ function SelectedFieldRow({ f, setNodeRef, style, dragHandleProps, onUpdate, onR
         <select
           value={f.summarize || ''}
           onChange={e => onUpdate({ summarize: e.target.value || undefined })}
-          title="Column summary (total row on Tabular)"
-          style={{ ...inputStyle(), width:78, fontSize:11, padding:'4px 6px' }}
+          title="Column total — shown on the Tabular footer and on Summary subtotal / Grand Total rows"
+          style={{ ...inputStyle(), width:104, fontSize:11, padding:'4px 6px' }}
         >
-          <option value="">Σ —</option>
+          <option value="">No total</option>
           <option value="count">Count</option>
           {numericish && <option value="sum">Sum</option>}
           {numericish && <option value="avg">Average</option>}

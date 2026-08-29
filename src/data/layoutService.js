@@ -426,68 +426,6 @@ async function applyRecordTypesTakenOnBuilding(recordTypes, objectName, building
  * database enforces the same rule on save, so a missed narrowing is a worse
  * prompt, never a bad record.
  */
-/**
- * How to list candidate parent records from a create seed, per parent object.
- *
- * Only needed when the seed does NOT already carry the parent — creating an
- * opportunity from a PROPERTY page, say, where the constraining parent is the
- * building and no building has been chosen yet. Without this the picker has
- * nothing to narrow by and offers every program in the state, which is the
- * hole Nicholas hit on 2026-08-29 ("on multifamily buildings, we shouldn't
- * have the single-family record types for opportunities available at all").
- *
- * Keyed by parent object, and it is a SCOPE rule, not a record-type rule —
- * which column the candidates hang off, never which types are allowed. What is
- * allowed stays entirely in record_type_eligibility.
- */
-const CONSTRAINING_PARENT_SCOPES = {
-  buildings: {
-    label:      'Building',
-    scopeColumn: 'property_id',
-    nameColumn:  'building_name',
-    deletedColumn: 'building_is_deleted',
-    recordTypeColumn: 'building_record_type',
-    numberColumn: 'building_record_number',
-  },
-}
-
-/**
- * The candidate parent records a new child could hang off, when the seed knows
- * the scope but not the parent itself.
- *
- * Returns { parentObject, parentLabel, fkColumn, options: [{id,label,recordTypeId}] }
- * or null when there is nothing to choose between. A parent whose own record
- * type is null is still offered — it just cannot narrow anything, exactly as
- * before.
- */
-export async function fetchConstrainingParentChoices(childTable, seed, parentObject) {
-  const scope = CONSTRAINING_PARENT_SCOPES[parentObject]
-  if (!scope || !seed) return null
-  const scopeId = seed[scope.scopeColumn]
-  if (!scopeId || !UUID_RE.test(String(scopeId))) return null
-  const { data, error } = await supabase
-    .from(parentObject)
-    .select(`id, ${scope.nameColumn}, ${scope.numberColumn}, ${scope.recordTypeColumn}`)
-    .eq(scope.scopeColumn, scopeId)
-    .eq(scope.deletedColumn, false)
-    .order(scope.numberColumn, { ascending: true })
-  if (error) throw error
-  const options = (data || []).map(r => ({
-    id: r.id,
-    label: r[scope.nameColumn] || r[scope.numberColumn] || r.id,
-    recordNumber: r[scope.numberColumn] || null,
-    recordTypeId: r[scope.recordTypeColumn] || null,
-  }))
-  if (options.length === 0) return null
-  const prefix = TABLE_COLUMN_PREFIX[parentObject]
-  return {
-    parentObject,
-    parentLabel: scope.label,
-    fkColumn: prefix ? `${prefix}_id` : null,
-    options,
-  }
-}
-
 export async function fetchConstrainingParentForCreate(childTable, seed) {
   if (!childTable || !seed || typeof seed !== 'object') return null
   try {
@@ -506,26 +444,7 @@ export async function fetchConstrainingParentForCreate(childTable, seed) {
       if (!prefix) continue
       const fkColumn = `${prefix}_id`
       const parentId = seed[fkColumn]
-      if (!parentId || !UUID_RE.test(String(parentId))) {
-        // The seed doesn't carry the parent — a New Opportunity started from a
-        // property or an account, where the building that decides which
-        // programs run has not been chosen. Offer the candidates in scope
-        // rather than falling through unconstrained: one candidate resolves
-        // itself, several are handed to the picker to ask about.
-        const choices = await fetchConstrainingParentChoices(childTable, seed, parentObject)
-          .catch(() => null)
-        if (!choices) continue
-        if (choices.options.length === 1 && choices.options[0].recordTypeId) {
-          return {
-            parentObject,
-            parentRecordTypeId: choices.options[0].recordTypeId,
-            resolvedParentId:   choices.options[0].id,
-            fkColumn:           choices.fkColumn,
-          }
-        }
-        if (choices.options.length > 1) return { parentObject, parentRecordTypeId: null, choices }
-        continue
-      }
+      if (!parentId || !UUID_RE.test(String(parentId))) continue
 
       const rtColumn = getRecordTypeColumn(parentObject)
       const { data: row, error: rowErr } = await supabase
@@ -540,6 +459,140 @@ export async function fetchConstrainingParentForCreate(childTable, seed) {
     console.warn('fetchConstrainingParentForCreate: lookup failed', err)
   }
   return null
+}
+
+/**
+ * Every parent record the new child could legitimately belong to, when the
+ * create did NOT come from one.
+ *
+ * Same configuration source as fetchConstrainingParentForCreate — which object
+ * constrains this child is read from record_type_eligibility, never hardcoded —
+ * but asked the other way round: instead of "what record type does the parent I
+ * was launched from carry?", this asks "which parents are there to choose
+ * from?". Scoped to the building the create was launched from, else to the
+ * property, because that is the ancestry the child will live under.
+ *
+ * Returns { parentObject, fkColumn, options: [{ id, label, recordTypeId,
+ * recordTypeLabel }] } or null. The CALLER decides what to do with it —
+ * resolveParentChoice() in src/lib/constrainingParentChoice.js derives a lone
+ * candidate and asks about several. Any failure returns null, which leaves the
+ * create exactly as it was before this existed.
+ */
+export async function fetchConstrainingParentCandidates(childTable, seed) {
+  if (!childTable || !seed || typeof seed !== 'object') return null
+  try {
+    const { data: edges, error } = await supabase
+      .from('record_type_eligibility')
+      .select('rte_parent_object')
+      .eq('rte_child_object', childTable)
+      .eq('rte_is_active', true)
+      .eq('rte_is_deleted', false)
+    if (error) throw error
+
+    for (const parentObject of new Set((edges || []).map(e => e.rte_parent_object))) {
+      const prefix = TABLE_COLUMN_PREFIX[parentObject]
+      if (!prefix) continue
+      const fkColumn = `${prefix}_id`
+      // Launched FROM this parent — there is nothing to choose.
+      if (seed[fkColumn] && UUID_RE.test(String(seed[fkColumn]))) return null
+
+      // The ancestry to search under. A building is the narrower and truer
+      // scope (an application is for one building); the property is the
+      // fallback when the create started higher up.
+      const scopes = []
+      if (seed.building_id && UUID_RE.test(String(seed.building_id))) {
+        scopes.push(['building_id', seed.building_id])
+      }
+      if (seed.property_id && UUID_RE.test(String(seed.property_id))) {
+        scopes.push(['property_id', seed.property_id])
+      }
+      if (!scopes.length) continue
+
+      const rtColumn   = getRecordTypeColumn(parentObject)
+      const nameColumn = POLY_DISPLAY_COL[parentObject] || null
+      const meta       = await fetchTableMetadata(parentObject).catch(() => null)
+      const delColumn  = meta?.is_deleted_column || null
+      const cols = ['id', rtColumn, nameColumn].filter(Boolean).join(', ')
+
+      for (const [scopeColumn, scopeId] of scopes) {
+        let q = supabase.from(parentObject).select(cols).eq(scopeColumn, scopeId)
+        if (delColumn) q = q.eq(delColumn, false)
+        const { data: rows, error: rowsErr } = await q
+        // A parent object that carries no such scope column is simply not
+        // scopeable this way — try the next scope rather than failing the create.
+        if (rowsErr) continue
+        if (!rows || rows.length === 0) continue
+
+        const rtIds = [...new Set(rows.map(r => r[rtColumn]).filter(Boolean))]
+        const labelById = new Map()
+        if (rtIds.length) {
+          const { data: rts } = await supabase
+            .from('picklist_values')
+            .select('id, picklist_label, picklist_value')
+            .in('id', rtIds)
+          for (const rt of rts || []) {
+            labelById.set(rt.id, rt.picklist_label || rt.picklist_value)
+          }
+        }
+        return {
+          parentObject,
+          fkColumn,
+          options: rows.map(r => ({
+            id: r.id,
+            label: nameColumn ? (r[nameColumn] || '') : '',
+            recordTypeId: r[rtColumn] || null,
+            recordTypeLabel: labelById.get(r[rtColumn]) || '',
+          })),
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('fetchConstrainingParentCandidates: lookup failed', err)
+  }
+  return null
+}
+
+/**
+ * What a child inherits from the OPPORTUNITY it belongs to.
+ *
+ * One definition, two callers: the create-prefill fills these when the
+ * opportunity came with the click, and the record-type picker's parent selector
+ * fills them when the opportunity was chosen a moment later (a building running
+ * two programs). Written once so the two paths cannot drift — a form opened
+ * from the building must end up carrying the same program facts as one opened
+ * from the opportunity.
+ *
+ * Returns { values: { <child column>: value }, nameBase } — values only for the
+ * facts the opportunity actually holds; the caller fills blanks and never
+ * clobbers. An unknown child table returns empty, not an error.
+ */
+export async function fetchOpportunityInheritedFields(childTable, opportunityId) {
+  const empty = { values: {}, nameBase: null }
+  if (!opportunityId || !UUID_RE.test(String(opportunityId))) return empty
+  try {
+    const { data: opp } = await supabase.from('opportunities')
+      .select('opportunity_name, opportunity_program, opportunity_program_year, ' +
+              'opportunity_income_qualified_confirmation_code, opportunity_ira_income_code, ' +
+              'opportunity_electric_account_number, opportunity_gas_account_number')
+      .eq('id', opportunityId).eq('opportunity_is_deleted', false).maybeSingle()
+    if (!opp) return empty
+    const values = { opportunity_id: opportunityId }
+    if (childTable === 'incentive_applications') {
+      values.ia_program_name = opp.opportunity_program
+      values.ia_program_year = opp.opportunity_program_year
+      values.ia_income_qualified_confirmation_code =
+        opp.opportunity_income_qualified_confirmation_code || opp.opportunity_ira_income_code
+      values.ia_electric_account_number    = opp.opportunity_electric_account_number
+      values.ia_natural_gas_account_number = opp.opportunity_gas_account_number
+    }
+    for (const k of Object.keys(values)) {
+      if (values[k] == null || values[k] === '') delete values[k]
+    }
+    return { values, nameBase: opp.opportunity_name || null }
+  } catch (err) {
+    console.warn('fetchOpportunityInheritedFields: lookup failed', err)
+    return empty
+  }
 }
 
 /**

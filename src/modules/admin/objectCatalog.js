@@ -65,7 +65,6 @@ export const OBJECT_CATALOG = [
   { table: 'documents',                     label: 'Document',                    pluralLabel: 'Documents',                    module: 'Field Operations',      description: 'File attached to any record.' },
 
   // ─── INCENTIVES ────────────────────────────────────────────────────────
-  { table: 'incentives',                    label: 'Incentive',                   pluralLabel: 'Incentives',                   module: 'Incentives',            description: 'Individual incentive amount earned on a project.' },
   { table: 'project_payment_requests',      label: 'Payment Request',             pluralLabel: 'Payment Requests',             module: 'Incentives',            description: 'Invoice submitted to program administrator.' },
   { table: 'payment_receipts',              label: 'Payment Receipt',             pluralLabel: 'Payment Receipts',             module: 'Incentives',            description: 'Received payment matched to a request.' },
 
