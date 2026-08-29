@@ -4,7 +4,7 @@ import { LoadingState, ErrorState } from './UI'
 import RecordDetail from './RecordDetail'
 import RecordLink from './RecordLink'
 import { fetchObjectRecords, buildObjectColumnCatalog, deriveColumnOptions, isRelatedField } from '../data/objectListService'
-import { collectRelatedFieldsForViews, collectRelatedFields } from '../lib/listViewFields'
+import { collectFieldsForViews, collectViewFields } from '../lib/listViewFields'
 import { fetchSavedViewsForObject } from '../data/listViewsService'
 import { useNav } from '../lib/navContext'
 import { isUrlAddressableTable, getTableListUrl } from '../lib/urlNav'
@@ -73,8 +73,8 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   // resolve it. Drill-down filters passed in by a caller are seeded the same
   // way, since they arrive as the default view.
   const seedRelatedFromViews = (savedViews) => {
-    const seeded = new Set(collectRelatedFieldsForViews(savedViews))
-    for (const f of collectRelatedFields({ filters: initialFilters })) seeded.add(f)
+    const seeded = new Set(collectFieldsForViews(savedViews))
+    for (const f of collectViewFields({ filters: initialFilters })) seeded.add(f)
     return Array.from(seeded).sort()
   }
 
@@ -150,8 +150,11 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   // set of active related fields. If it changed, refetch rows with those fields
   // so the parent joins resolve. Own-column changes never trigger a refetch
   // (their data is already on every row).
-  const handleActiveRelatedChange = useCallback((relatedFields) => {
-    const next = Array.from(new Set(relatedFields.filter(isRelatedField))).sort()
+  const handleActiveRelatedChange = useCallback((referencedFields) => {
+    // Own columns are kept as well as related ones: a wide table is fetched
+    // with a narrowed column list, so the fetch has to be told when the view
+    // starts referencing a column it did not ask the database for.
+    const next = Array.from(new Set(referencedFields)).sort()
     setActiveRelated(prev => {
       const prevKey = prev.join('|')
       const nextKey = next.join('|')

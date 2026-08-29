@@ -338,7 +338,10 @@ export async function buildObjectColumnCatalog(table) {
   // used to carry locked:true, which pinned them to the left of every list AND
   // hid them from the filter sidebar's field picker.
   if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
-  if (nameCol) catalog.push({ field: 'name', label: `${objectGroup} Name`, shortLabel: 'Name', type: 'text', group: objectGroup })
+  if (nameCol) catalog.push({
+    field: 'name', label: `${objectGroup} Name`, shortLabel: 'Name', type: 'text', group: objectGroup,
+    valueSource: { kind: 'lookup', table, nameColumn: nameCol },
+  })
 
   // All own selectable columns (no cap).
   for (const c of cols) {
@@ -420,7 +423,16 @@ export async function buildObjectColumnCatalog(table) {
       if (pc.is_foreign_key && pc.references_table === 'picklist_values') {
         valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name }
       } else if (pc.is_foreign_key && pc.references_table === 'users') {
-        valueSource = { kind: 'lookup', table: 'users' }
+        valueSource = { kind: 'lookup', table: 'users', nameColumn: 'user_name' }
+      } else if (pc.column_name === pIdentity.nameCol) {
+        // The parent's NAME. Its pickable values are the parent records
+        // themselves, so the typeahead searches them. Treating it as a "maybe
+        // picklist" found no managed picklist for account_name and dropped to a
+        // bare text box with nothing to choose from (Nicholas, 2026-08-29:
+        // "there should be a picklist of everything that's able to be picked.
+        // It's not there"). The name column is carried explicitly rather than
+        // guessed from the table name.
+        valueSource = { kind: 'lookup', table: parentTable, nameColumn: pIdentity.nameCol }
       } else if (type === 'text') {
         valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name, maybe: true }
       }
@@ -456,6 +468,7 @@ export async function buildObjectColumnCatalog(table) {
         shortLabel: 'Name',
         type: 'text',
         group: groupLabel,
+        valueSource: { kind: 'lookup', table: parentTable, nameColumn: pIdentity.nameCol },
         related: { fkColumn: fk.column_name, parentTable, parentColumn: pIdentity.nameCol },
       })
     }
@@ -492,7 +505,7 @@ export async function buildObjectColumnCatalog(table) {
       group: d.groupLabel,
       // The value is a name on the grandparent object, so the filter typeahead
       // offers the names that are actually out there rather than free text.
-      valueSource: { kind: 'lookup', table: d.grandTable },
+      valueSource: { kind: 'lookup', table: d.grandTable, nameColumn: grandName },
       related: {
         fkColumn: d.fkColumn,
         parentTable: d.parentTable,
@@ -641,7 +654,50 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
   // plain .eq(); a via-path becomes nested inner-join embeds filtered on the
   // parent id. scopeSelect is appended to the base `*` select so the embed
   // rides along; scopeApply adds the filter to both the page and count queries.
-  let scopeSelect = '*'
+  // ── Which COLUMNS to fetch ───────────────────────────────────────────────
+  // `select *` on properties means 828 columns at ~9.5 KB per row. Fetching
+  // every live row then costs ~158 MB and makes Postgres spill a 25 MB external
+  // sort to disk on EVERY page — and the list fires its pages concurrently, so
+  // the whole thing tips over the statement timeout and the list renders
+  // "Could not load records" (Nicholas, 2026-08-29, on the Properties list).
+  //
+  // The list does not need 828 columns. It needs its identity columns, whatever
+  // the active view displays/filters/sorts on, and the FK columns the related
+  // resolvers join through. Anything else the user later adds from the column
+  // picker triggers a refetch, exactly as adding a related column already does.
+  //
+  // Below the threshold this is not worth the risk of missing a column, so a
+  // small object keeps fetching everything.
+  const WIDE_TABLE_COLUMN_COUNT = 120
+  const isWideTable = cols.length > WIDE_TABLE_COLUMN_COUNT
+
+  function narrowedSelect() {
+    if (!isWideTable) return '*'
+    const wanted = new Set(['id'])
+    if (recordNumber) wanted.add(recordNumber)
+    if (nameCol) wanted.add(nameCol)
+    if (softDel) wanted.add(softDel)
+    // Every FK on the object: the row shaper labels them, and the related
+    // resolvers read them to find their parents.
+    for (const c of cols) if (c.is_foreign_key) wanted.add(c.column_name)
+    // Unconstrained uuid columns the platform can still name (picklist-valued).
+    for (const c of cols) if (isPicklistValuedColumn(c, idContext)) wanted.add(c.column_name)
+    // Whatever this view actually references — own columns only; related fields
+    // are resolved separately through their parent fetch.
+    for (const f of (activeFields || [])) {
+      if (typeof f !== 'string' || isRelatedField(f)) continue
+      const bare = f.endsWith('__label') ? f.slice(0, -'__label'.length) : f
+      if (colNames.has(bare)) wanted.add(bare)
+    }
+    // The default-visible column set, so a first paint has its data.
+    for (const c of cols) {
+      if (wanted.size > 60) break
+      if (isListableColumn(c, { recordNumber, nameCol, idContext })) wanted.add(c.column_name)
+    }
+    return Array.from(wanted).join(', ')
+  }
+
+  let scopeSelect = narrowedSelect()
   let scopeApply = (q) => q
   let scopeStripEmbed = false
   if (relatedScope && relatedScope.fk && relatedScope.parentId) {
@@ -654,7 +710,7 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
       for (let i = viaChain.length - 2; i >= 0; i--) {
         embed = `_v${i + 2}:${viaChain[i].fk}!inner(${embed})`
       }
-      scopeSelect = `*, _v1:${relatedScope.fk}!inner(${embed})`
+      scopeSelect = `${narrowedSelect()}, _v1:${relatedScope.fk}!inner(${embed})`
       scopeStripEmbed = true
       const aliasPath = viaChain.map((_, i) => `_v${i + 1}`).join('.')
       const lastFk = viaChain[viaChain.length - 1].fk
@@ -842,7 +898,11 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
           else label = String(raw)
         }
         out[`${n}__label`] = label
-      } else {
+      } else if (Object.prototype.hasOwnProperty.call(r, n)) {
+        // Only columns the query actually asked for. On a wide table the select
+        // is narrowed, and emitting `undefined` for the rest would make every
+        // unfetched column look like a field that is blank on every record —
+        // which is exactly what the "no data" marker in the picker reports.
         out[n] = r[n]
       }
     }

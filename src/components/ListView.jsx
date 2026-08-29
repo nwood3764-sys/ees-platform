@@ -9,7 +9,7 @@ import { Badge, Icon, TableRow, ProgramTag } from './UI';
 import HelpIcon from './help/HelpIcon';
 import FieldValueLink from './FieldValueLink';
 import { formatUsPhoneDisplay } from '../lib/fieldLinks';
-import { collectRelatedFields } from '../lib/listViewFields';
+import { collectRelatedFields, collectViewFields } from '../lib/listViewFields';
 import {
   numberFilters, compileFilterLogic, logicAfterRemoval, validateFilterLogic,
   isMatchAll, defaultFilterLogic, MATCH_ALL,
@@ -1776,7 +1776,10 @@ function FilterValueEditor({ row, onChange }) {
     const t = setTimeout(async () => {
       setLoadingOpts(true);
       try {
-        const list = await searchLookupOptions(vs.table, query).catch(() => []);
+        // The name column is carried by the value source when the catalog knows
+        // it, so the search does not fall back to a hardcoded table -> name map
+        // that simply has no entry for most objects.
+        const list = await searchLookupOptions(vs.table, query, vs.nameColumn ? { nameColumn: vs.nameColumn } : {}).catch(() => []);
         if (cancelled || stale()) return;
         // Two records with the same name are one choice here: the filter
         // matches on the NAME, so offering it twice asks the user to pick
@@ -2145,7 +2148,12 @@ export function ListView({
   const lastRelatedKeyRef = useRef('');
   useEffect(() => {
     if (typeof onActiveRelatedFieldsChange !== 'function') return;
-    const related = collectRelatedFields({ visibleColumns, filters: activeFilters, sortField });
+    // EVERY field the view references, not just the related ones. A wide table
+    // is no longer fetched with `select *` (properties is 828 columns, ~9.5 KB
+    // per row — fetching all of it timed the list out), so the fetch needs to
+    // know about own columns too: adding one from the picker must trigger the
+    // same refetch that adding a related column always has.
+    const related = collectViewFields({ visibleColumns, filters: activeFilters, sortField });
     const key = related.join('|');
     if (key === lastRelatedKeyRef.current) return;
     lastRelatedKeyRef.current = key;
