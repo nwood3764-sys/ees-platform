@@ -3889,9 +3889,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const isNC=m.state==='NC';
     // Each column: [label, value(row), width]. Values are right-aligned at the
     // column's right edge; the description column takes whatever is left.
-    const _qtyU=r=>{const q=_qty(r.qty); let u=r.unit||''; if(u==='Unit'&&Number(r.qty)!==1)u='Units'; return q+(u?(' '+u):'');};
     const numCols=isNC
-      ?[['QUANTITY',_qtyU,84],
+      ?[['QUANTITY/UNITS',r=>_qty(r.qty),84],
         ['LABOR',   r=>_money(r.labor),64],
         ['MATERIAL',r=>_money(r.material),68],
         ['TOTAL',   r=>_money(r.cost),72]]
@@ -4050,7 +4049,7 @@ function hearModel(){
       const qty=Math.max(1,parseInt(r.qty,10)||1);
       const unitCost=Math.max(0,_num(r.cost));            // the Cost field is PER UNIT
       const cost=Math.round(unitCost*qty*100)/100;        // total = per-unit x quantity
-      const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x units
+      const rebate=cost;                                  // HEAR covers 100% of the install cost
       // NC documents split each line 50/50 into labor + material (material takes the
       // clean floored half; labor carries any odd cent so the two sum to the total).
       const material=Math.floor(cost*50)/100, labor=Math.round((cost-material)*100)/100;
@@ -4064,12 +4063,9 @@ function hearModel(){
         rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
     });
   const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
-  const rawRebate=Math.round(rows.reduce((a,r)=>a+r.rebate,0)*100)/100;
-  const programMax=14000*units;
-  const totalRebate=Math.min(rawRebate,programMax);
-  const capped=rawRebate>programMax+0.005;
-  const totalDue=Math.round((totalCost-totalRebate)*100)/100;
-  return {units,state,rows,totalCost,rawRebate,programMax,totalRebate,capped,totalDue,
+  const totalRebate=totalCost;   // low-income HEAR: the rebate covers 100% of the install cost
+  const totalDue=0;              // therefore the balance due is always $0.00
+  return {units,state,rows,totalCost,totalRebate,totalDue,
     fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
 }
 function buildHearPdfBlob(){
@@ -4111,10 +4107,9 @@ function buildHearPdfBlob(){
      NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
   head('Proposed Scope of Work — HEAR Program',12);
   const isNC=m.state==='NC';
-  const _qU=r=>String(r.qty)+' '+(Number(r.qty)===1?'Unit':'Units');
   const cols=isNC
-    ?[['QUANTITY / UNIT',_qU,96],['LABOR',r=>_money(r.labor),74],['MATERIAL',r=>_money(r.material),74],['TOTAL',r=>_money(r.cost),74]]
-    :[['QUANTITY / UNIT',_qU,120],['TOTAL',r=>_money(r.cost),84]];
+    ?[['QUANTITY/UNITS',r=>String(r.qty),96],['LABOR',r=>_money(r.labor),74],['MATERIAL',r=>_money(r.material),74],['TOTAL',r=>_money(r.cost),74]]
+    :[['QUANTITY/UNITS',r=>String(r.qty),120],['TOTAL',r=>_money(r.cost),84]];
   let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
   const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
@@ -4160,7 +4155,8 @@ function buildHearPdfBlob(){
    tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
    st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
    const nm='IRA HEAR — Instant Discount';
-   const desc=stateFullName(m.state)+' HEAR — income-qualified rebate applied as an instant discount, up to $14,000 per dwelling unit.';
+   const perUnit=m.units?Math.round(incentive/m.units*100)/100:incentive;
+   const desc=stateFullName(m.state)+' HEAR — income-qualified instant discount ('+_money(perUnit)+' per dwelling unit).';
    font(9.5,'bold'); const nl=wrap(nm,CW-160);
    font(8.5);        const dl=wrap(desc,CW-160);
    const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
