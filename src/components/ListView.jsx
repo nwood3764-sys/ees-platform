@@ -10,6 +10,7 @@ import HelpIcon from './help/HelpIcon';
 import FieldValueLink from './FieldValueLink';
 import { formatUsPhoneDisplay } from '../lib/fieldLinks';
 import { collectRelatedFields, collectViewFields } from '../lib/listViewFields';
+import { useColumnResize } from '../lib/columnWidths';
 import {
   numberFilters, compileFilterLogic, logicAfterRemoval, validateFilterLogic,
   isMatchAll, defaultFilterLogic, MATCH_ALL,
@@ -52,8 +53,6 @@ function pluralizeLabel(label) {
 // their column sets differ, so their keys differ, and their widths stay
 // independent. No call-site changes required for any of the 8 modules.
 const COLWIDTH_NS = 'ees.colwidths.';
-const COL_MIN_WIDTH = 64;   // px — never let a column collapse below this
-const COL_MAX_WIDTH = 900;  // px — sanity cap so a stray drag can't run away
 
 function columnSignature(columns) {
   // Order-sensitive join of field names, hashed to a short stable token.
@@ -81,10 +80,6 @@ function readStoredWidths(key) {
 function writeStoredWidths(key, widths) {
   try { localStorage.setItem(key, JSON.stringify(widths)); }
   catch { /* storage disabled / quota — widths simply won't persist */ }
-}
-
-function clampWidth(px) {
-  return Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, Math.round(px)));
 }
 
 // defaultColWidth — starting width (px) for a column that the user hasn't
@@ -120,39 +115,21 @@ function useColumnWidths({ enabled, storageKey, columns, onWidthsChanged }) {
     setWidths(readStoredWidths(storageKey));
   }, [storageKey, enabled]);
 
-  const dragRef = useRef(null); // { field, startX, startWidth }
-
-  const onResizeStart = (field, e, currentWidth) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragRef.current = { field, startX: e.clientX, startWidth: currentWidth };
-
-    const onMove = (ev) => {
-      const d = dragRef.current;
-      if (!d) return;
-      const next = clampWidth(d.startWidth + (ev.clientX - d.startX));
-      setWidths(prev => (prev[d.field] === next ? prev : { ...prev, [d.field]: next }));
-    };
-    const onUp = () => {
-      const d = dragRef.current;
-      dragRef.current = null;
-      window.removeEventListener('pointermove', onMove, true);
-      window.removeEventListener('pointerup', onUp, true);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
+  // The drag itself lives in src/lib/columnWidths.js — the one definition,
+  // shared with the report viewer. This owns only what is list-specific: where
+  // the width is kept (this browser's localStorage) and telling the list its
+  // saved view is now dirty.
+  const onResizeStart = useColumnResize({
+    setWidth: (field, px) => setWidths(prev => (prev[field] === px ? prev : { ...prev, [field]: px })),
+    onCommit: () => {
       // Persist on release using the freshest state.
       setWidths(prev => { writeStoredWidths(storageKey, prev); return prev; });
       // Tell the list a resize happened, so the active view goes dirty and the
       // user is prompted to save the layout they just set rather than losing it
       // the next time the view is opened somewhere else.
-      if (d && onWidthsChanged) onWidthsChanged();
-    };
-
-    window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('pointerup', onUp, true);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  };
+      if (onWidthsChanged) onWidthsChanged();
+    },
+  });
 
   // Double-click a grip to reset that one column to auto width.
   const resetColumn = (field) => {

@@ -1,11 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { C } from '../data/constants'
 import {
   PINNED_TABLE, ROW_RULE, TOTAL_RULE, pinnedHeaderCell, pinnedFirstColumn,
 } from '../lib/pinnedTableHeader'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, getRowValue, getReportPrompts, cloneReport } from '../data/reportsService'
+import { runReport, getRowValue, getReportPrompts, cloneReport, saveReportColumnWidths } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
+import { useColumnResize, resizeGripStyle } from '../lib/columnWidths'
+import {
+  reportColumnKey, resolveReportColumnWidths, totalWidth,
+  withColumnWidth, withoutColumnWidth,
+} from '../lib/reportColumnWidths'
 import ReportRecordCellLink, { reportCellLink } from '../components/ReportRecordCellLink'
 import { describeSaveError } from '../lib/saveErrorMessage'
 import { getEditableFieldsForTable, getPicklistOptions, bulkUpdateRecords } from '../data/fieldMetadataService'
@@ -247,6 +252,8 @@ export function TabularLayout({ result, fill = false }) {
   // the RESOLVED, displayed value (labels, not UUIDs) so what you sort is what
   // you see. Column-summarize aggregates recompute over the same rows.
   const [sortKeys, setSortKeys] = useState([])   // [{ col: <index>, dir: 'asc'|'desc' }]
+  // Column widths belong to the report; dragging a header edge changes them.
+  const { widths, onResizeStart, resetColumn, saveError: widthSaveError } = useReportColumnWidths(result)
   const toggleSort = (colIdx, additive) => {
     setSortKeys(prev => {
       const existing = prev.find(k => k.col === colIdx)
@@ -319,6 +326,11 @@ export function TabularLayout({ result, fill = false }) {
 
   const sortedRows = applyViewerSort(rows, sortKeys, allColumns, resolveDisplay)
 
+  // Explicit widths for every column, and a table laid out FIXED — so the
+  // columns are what the report says and re-running, filtering or editing a
+  // cell cannot re-measure them (see lib/reportColumnWidths).
+  const colWidths = resolveReportColumnWidths(allColumns, widths)
+
   // Column-summarize footer — only shows if at least one column has an
   // aggregate chosen in the report definition (col.summarize).
   const summaryRow = buildColumnSummaries(sortedRows, allColumns, resolveDisplay)
@@ -330,22 +342,29 @@ export function TabularLayout({ result, fill = false }) {
       ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
     }}>
       <ReportViewerStyles />
-      <table style={TABLE_STYLE}>
+      {widthSaveError && <ColumnWidthSaveNotice message={widthSaveError} />}
+      <table style={{ ...TABLE_STYLE, ...FIXED_LAYOUT, width: totalWidth(colWidths) }}>
+        <colgroup>
+          {colWidths.map((w, idx) => <col key={`c-${idx}`} style={{ width: w }} />)}
+        </colgroup>
         <thead>
           <tr>
             {allColumns.map((c, idx) => {
               const sk = sortKeys.find(k => k.col === idx)
               const rank = sortKeys.length > 1 && sk ? sortKeys.findIndex(k => k.col === idx) + 1 : null
               return (
-                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), ...STICKY_HEAD, cursor:'pointer', userSelect:'none' }}
-                    onClick={(e) => toggleSort(idx, e.shiftKey)}
-                    title="Click to sort · Shift-click to add a sort level">
-                  <span style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
-                    {c.label}
+                <ResizableHeader
+                  key={`h-${idx}`} column={c} width={colWidths[idx]}
+                  onResizeStart={onResizeStart} resetColumn={resetColumn}
+                  style={{ ...cellHeaderStyle(), ...STICKY_HEAD, cursor:'pointer', userSelect:'none' }}
+                  onClick={(e) => toggleSort(idx, e.shiftKey)}
+                  title="Click to sort · Shift-click to add a sort level · drag the right edge to set the width">
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:4, minWidth:0 }}>
+                    <span style={CELL_CLIP}>{c.label}</span>
                     {c._calc && <span style={{ fontSize:10, color:C.emerald }}>ƒ</span>}
                     {sk && <span style={{ fontSize:10, color:C.emerald }}>{sk.dir === 'asc' ? '▲' : '▼'}{rank ? <sup>{rank}</sup> : null}</span>}
                   </span>
-                </th>
+                </ResizableHeader>
               )
             })}
           </tr>
@@ -572,6 +591,8 @@ export function SummaryLayout({ result, fill = false }) {
   // drive every level at once, Salesforce-style. Keys are the group's path.
   const [collapsedKeys, setCollapsedKeys]   = useState(() => new Set())
   const [showDetailRows, setShowDetailRows] = useState(true)
+  // Column widths belong to the report; dragging a header edge changes them.
+  const { widths, onResizeStart, resetColumn, saveError: widthSaveError } = useReportColumnWidths(result)
 
   // Summary-scope calculated fields show on group subtotal rows and the
   // grand total row. They use SUM_<field>/COUNT_<field>/AVG_<field>/
@@ -591,6 +612,9 @@ export function SummaryLayout({ result, fill = false }) {
   // columns — unless that would leave the table with nothing to draw.
   const ungrouped = columns.filter(c => !groupings.some(g => isSameReportField(c, g)))
   const detailColumns = ungrouped.length > 0 ? ungrouped : columns
+  // Explicit widths for every rendered column, so a fixed-layout table is laid
+  // out by what the report says rather than by what its rows happen to contain.
+  const colWidths = resolveReportColumnWidths(detailColumns, widths)
 
   // Group rows iteratively by each grouping level. Output is a tree of
   // { value, level, rows, children, subtotal }
@@ -652,16 +676,26 @@ export function SummaryLayout({ result, fill = false }) {
         </span>
       </div>
 
+      {widthSaveError && <ColumnWidthSaveNotice message={widthSaveError} />}
       <div style={{
         background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
         overflow:'auto', minHeight:0,
         ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
       }}>
-        <table style={TABLE_STYLE}>
+        <table style={{ ...TABLE_STYLE, ...FIXED_LAYOUT, width: totalWidth(colWidths) }}>
+          <colgroup>
+            {colWidths.map((w, idx) => <col key={`c-${idx}`} style={{ width: w }} />)}
+          </colgroup>
           <thead>
             <tr>
               {detailColumns.map((c, idx) => (
-                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), ...STICKY_HEAD }}>{c.label}</th>
+                <ResizableHeader
+                  key={`h-${idx}`} column={c} width={colWidths[idx]}
+                  onResizeStart={onResizeStart} resetColumn={resetColumn}
+                  style={{ ...cellHeaderStyle(), ...STICKY_HEAD }}
+                  title="Drag the right edge to set this column's width">
+                  <span style={CELL_CLIP}>{c.label}</span>
+                </ResizableHeader>
               ))}
             </tr>
           </thead>
@@ -1518,6 +1552,93 @@ function sheetSafe(s) { return String(s).replace(/[\\/?*[\]:]/g, '_').slice(0, 3
 
 // ─── Style helpers ────────────────────────────────────────────────────────
 
+// ── Column widths ─────────────────────────────────────────────────────────
+//
+// A report's columns are as wide as the report says. `useReportColumnWidths`
+// holds the map for one open report: it starts from what the report has, a
+// drag updates it live, and releasing the grip writes it back to the report so
+// the next person to open it sees the same layout. A failed write keeps the
+// width on screen and says so — losing the drag silently would be worse.
+function useReportColumnWidths(result) {
+  const reportId = result?.reportId || null
+  const [widths, setWidths] = useState(() => result?.columnWidths || {})
+  const [saveError, setSaveError] = useState(null)
+
+  // A different report (or a re-run that returns new saved widths) replaces the
+  // map wholesale; keyed on the id so a re-run of the SAME report doesn't
+  // discard a width dragged a moment ago but not yet reloaded.
+  useEffect(() => { setWidths(result?.columnWidths || {}) }, [reportId])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const persist = (next) => {
+    setWidths(next)
+    if (!reportId) return          // an unsaved draft preview has nowhere to save
+    saveReportColumnWidths(reportId, next)
+      .then(() => setSaveError(null))
+      .catch(err => setSaveError(describeSaveError(err, { object: 'report' }).message))
+  }
+
+  const setWidth = (key, px) => setWidths(prev => withColumnWidth(prev, key, px))
+  const onResizeStart = useColumnResize({
+    setWidth,
+    onCommit: (key, px) => persist(withColumnWidth(widthsRef.current, key, px)),
+  })
+  // The commit needs the freshest map, not the one captured when the drag
+  // started — otherwise two resizes in a row save the first one twice.
+  const widthsRef = useRef(widths)
+  widthsRef.current = widths
+
+  const resetColumn = (key) => persist(withoutColumnWidth(widthsRef.current, key))
+
+  return { widths, onResizeStart, resetColumn, saveError, canSave: !!reportId }
+}
+
+// A resizable header cell: the label, and a grip on its right edge. The header
+// keeps whatever click behaviour its layout gives it (tabular sorts on click);
+// the grip stops the event so dragging an edge never sorts.
+function ResizableHeader({ column, style, onResizeStart, resetColumn, width, children, ...rest }) {
+  const key = reportColumnKey(column)
+  const [gripHover, setGripHover] = useState(false)
+  return (
+    // `style` already carries pinnedHeaderCell()'s sticky position and its
+    // opaque background — the ONE definition of a pinned header. Re-declaring
+    // `position: sticky` here would state it a second time without a background
+    // beside it, which is the exact shape the pinned-header fixture fails (and
+    // the defect it was written for: rows scrolling through a header that
+    // painted nothing). Sticky already establishes the containing block the
+    // grip's absolute position needs.
+    <th {...rest} style={{ ...style, overflow:'hidden' }}>
+      {children}
+      <div
+        onPointerDown={(e) => onResizeStart(key, e, width)}
+        onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); resetColumn(key) }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseEnter={() => setGripHover(true)}
+        onMouseLeave={() => setGripHover(false)}
+        title="Drag to set this column's width · double-click to reset it"
+        style={resizeGripStyle()}
+      >
+        {/* The 7px hit area is invisible until the pointer is on it; then a
+            2px line says exactly which edge is about to move. */}
+        <div style={{ width:2, height:'100%', background: gripHover ? C.emerald : 'transparent', transition:'background 120ms' }} />
+      </div>
+    </th>
+  )
+}
+
+// A width that could not be written back. The column stays where it was
+// dragged for this session — the drag is not undone in front of the person who
+// made it — but they are told it will not be there next time.
+function ColumnWidthSaveNotice({ message }) {
+  return (
+    <div style={{
+      fontSize:11, color:C.textSecondary, background:'#e8f1fb',
+      borderBottom:`1px solid ${C.border}`, padding:'6px 12px',
+    }}>
+      Column width not saved to the report — {message}. The width holds until this report is reopened.
+    </div>
+  )
+}
+
 // Report tables deliberately do NOT use border-collapse:collapse, and their
 // headers pin from src/lib/pinnedTableHeader.js — the ONE definition of that
 // rule. It used to be written out here, in ReportWidget, in DashboardWidgetView
@@ -1526,6 +1647,14 @@ function sheetSafe(s) { return String(s).replace(/[\\/?*[\]:]/g, '_').slice(0, 3
 // on the cells, why the background must be an opaque colour that exists) lives
 // with the definition.
 const TABLE_STYLE = { ...PINNED_TABLE, fontSize:13 }
+
+// `table-layout: fixed` is the whole of "stop moving on their own": under the
+// browser's default `auto`, a width is only a suggestion and every column is
+// re-measured from its widest cell on every render. Fixed makes the declared
+// widths authoritative — and a value longer than its column is then CLIPPED
+// rather than widening it, so cells carry the ellipsis.
+const FIXED_LAYOUT = { tableLayout: 'fixed' }
+const CELL_CLIP = { overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block', minWidth:0 }
 
 // The row rule, carried by each cell — a border on a <tr> is not painted here.
 const ROW_TOP_BORDER   = ROW_RULE
@@ -1589,7 +1718,11 @@ function cellHeaderStyle() {
 function cellStyle() {
   return {
     padding:'8px 12px', color:C.textPrimary, verticalAlign:'top',
-    whiteSpace:'nowrap',
+    // Under fixed layout a long value must not push its column wider — that is
+    // exactly the auto-scaling this replaced. It is clipped with an ellipsis
+    // and the full text stays available on hover (title) and by widening the
+    // column, which is now a thing the reader can do.
+    whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
   }
 }
 
