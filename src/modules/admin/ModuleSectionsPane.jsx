@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
-import { fetchAllModuleSections, saveModuleSections, addModuleObjectSection } from '../../data/adminService'
+import { fetchAllModuleSections, saveModuleSections, addModuleObjectSection, removeModuleSection } from '../../data/adminService'
 import { OBJECT_CATALOG } from './objectCatalog'
 
 // ---------------------------------------------------------------------------
@@ -84,6 +84,28 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
   function rename(sectionId, label) {
     setDraft(d => d.map(s => s.sectionId === sectionId ? { ...s, label } : s))
   }
+  // Remove a tab entirely. Hiding leaves it on this list forever; an admin who
+  // added a tab by mistake needs it gone (Nicholas, 2026-08-29). Confirmed
+  // first, because it takes the tab off the module for every user.
+  const [removing, setRemoving] = useState(null)
+  async function removeTab(section) {
+    if (!window.confirm(
+      `Remove the "${section.label}" tab from this module?\n\n` +
+      `It disappears from the module's navigation for everyone. The object itself ` +
+      `stays reachable from any other module and from Object Manager.`
+    )) return
+    setRemoving(section.sectionId)
+    try {
+      await removeModuleSection(activeModule, section.sectionId)
+      setAllSections(await fetchAllModuleSections())
+      toast?.success?.(`"${section.label}" removed`)
+    } catch (e) {
+      toast?.error?.(e.message || 'Could not remove the tab')
+    } finally {
+      setRemoving(null)
+    }
+  }
+
   function toggleVisible(sectionId) {
     setDraft(d => d.map(s => s.sectionId === sectionId ? { ...s, visible: !s.visible } : s))
   }
@@ -192,8 +214,8 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
           </div>
 
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', background: C.card }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 120px 90px', gap: 8, padding: '9px 14px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              <div></div><div>Tab Label</div><div>Section Key</div><div style={{ textAlign: 'center' }}>Visible</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 120px 90px 80px', gap: 8, padding: '9px 14px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <div></div><div>Tab Label</div><div>Section Key</div><div style={{ textAlign: 'center' }}>Visible</div><div></div>
             </div>
             {draft.map(s => (
               <div
@@ -204,7 +226,7 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
                 onDrop={() => onDrop(s.sectionId)}
                 onDragEnd={() => { setDragId(null); setDragOverId(null) }}
                 style={{
-                  display: 'grid', gridTemplateColumns: '32px 1fr 120px 90px', gap: 8, alignItems: 'center',
+                  display: 'grid', gridTemplateColumns: '32px 1fr 120px 90px 80px', gap: 8, alignItems: 'center',
                   padding: '8px 14px', borderBottom: `1px solid ${C.border}`,
                   background: dragOverId === s.sectionId && dragId !== s.sectionId ? '#f0faf5' : (s.visible ? 'transparent' : '#fafbfd'),
                   opacity: dragId === s.sectionId ? 0.5 : 1,
@@ -222,11 +244,26 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
                 <div style={{ textAlign: 'center' }}>
                   <input type="checkbox" checked={s.visible} onChange={() => toggleVisible(s.sectionId)} style={{ accentColor: C.emerald, width: 16, height: 16, cursor: 'pointer' }} />
                 </div>
+                <div style={{ textAlign: 'center' }}>
+                  <button
+                    onClick={() => removeTab(s)}
+                    disabled={removing === s.sectionId || draft.length <= 1}
+                    title={draft.length <= 1 ? 'A module must keep at least one tab' : 'Remove this tab from the module'}
+                    style={{
+                      background: 'none', border: `1px solid ${C.border}`, borderRadius: 5,
+                      padding: '4px 9px', fontSize: 11.5, color: C.textSecondary,
+                      cursor: draft.length <= 1 ? 'not-allowed' : 'pointer',
+                      opacity: removing === s.sectionId ? 0.5 : 1,
+                    }}
+                  >
+                    {removing === s.sectionId ? '…' : 'Remove'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
           <div style={{ marginTop: 10, fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
-            Drag the handle to reorder. Edit a label to rename a tab. Uncheck Visible to hide a tab from this module's navigation (the underlying object stays accessible from other modules and the Object Manager).
+            Drag the handle to reorder. Edit a label to rename a tab. Uncheck <strong>Visible</strong> to hide a tab while keeping it here, or <strong>Remove</strong> to take it off the module altogether. Either way the underlying object stays reachable from other modules and from Object Manager.
           </div>
         </div>
       </div>

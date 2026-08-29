@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fetchModuleSections } from '../data/adminService'
+import { mergeModuleTabs } from './moduleTabs'
 
 // Module section-tab config consumer.
 //
@@ -22,25 +23,7 @@ export function useModuleSections(moduleId, codeSections) {
     fetchModuleSections(moduleId)
       .then(cfg => {
         if (cancelled) return
-        if (!cfg || cfg.length === 0) { setSections(codeSections); return }
-        const byId = new Map(cfg.map(c => [c.sectionId, c]))
-        // Start from config order. Keep tabs that still exist in code (visible),
-        // PLUS object-backed tabs (those with an objectTable) which render via
-        // the generic ObjectListSection and need no code section. Apply the
-        // config label, and carry objectTable through for the generic renderer.
-        const codeById = new Map(codeSections.map(s => [s.id, s]))
-        const ordered = cfg
-          .filter(c => c.visible && (codeById.has(c.sectionId) || c.objectTable))
-          .sort((a, b) => a.sortOrder - b.sortOrder)
-          .map(c => codeById.has(c.sectionId)
-            ? { ...codeById.get(c.sectionId), label: c.label, objectTable: c.objectTable || null }
-            : { id: c.sectionId, label: c.label, objectTable: c.objectTable })
-        // Append any code tabs not present in config at all (new in code,
-        // not yet seeded) so they remain reachable.
-        for (const s of codeSections) {
-          if (!byId.has(s.id)) ordered.push(s)
-        }
-        setSections(ordered.length > 0 ? ordered : codeSections)
+        setSections(mergeModuleTabs(codeSections, cfg))
       })
       .catch(() => { if (!cancelled) setSections(codeSections) })
     return () => { cancelled = true }

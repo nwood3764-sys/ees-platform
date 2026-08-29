@@ -683,6 +683,10 @@ const DERIVED_READONLY = {
     'building_number_of_four_bedrooms', 'building_number_of_bedrooms',
     'building_average_sq_ft_of_units',
     'building_full_bathrooms', 'building_half_bathrooms',
+    // Forced from the property by trg_0_building_management_company_follows_
+    // property — the property is the only place a management company is
+    // selected (Nicholas, 2026-08-29).
+    'building_management_company_id',
   ],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],

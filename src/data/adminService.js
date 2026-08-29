@@ -1002,15 +1002,18 @@ export async function setRecordTypePicklistValues(recordTypeId, object, field, v
 // ── Module section-tab configuration ─────────────────────────────────────
 // Modules are Salesforce-style apps; their tab strip is DB-driven via
 // module_sections so admins can reorder/rename/show-hide without code.
+// Includes REMOVED (soft-deleted) rows, flagged. A code-backed section that an
+// admin removed must not be re-appended by useModuleSections as "new in code",
+// so the renderer has to be able to tell "removed" from "never configured".
 export async function fetchModuleSections(moduleId) {
   const { data, error } = await supabase
     .from('module_sections')
-    .select('id, ms_module_id, ms_section_id, ms_label, ms_sort_order, ms_is_visible, ms_is_system, ms_object_table')
+    .select('id, ms_module_id, ms_section_id, ms_label, ms_sort_order, ms_is_visible, ms_is_system, ms_object_table, ms_is_deleted')
     .eq('ms_module_id', moduleId)
-    .eq('ms_is_deleted', false)
     .order('ms_sort_order', { ascending: true })
   if (error) throw error
   return (data || []).map(r => ({
+    removed: r.ms_is_deleted === true,
     _id: r.id,
     moduleId: r.ms_module_id,
     sectionId: r.ms_section_id,
@@ -1060,6 +1063,18 @@ export async function addModuleObjectSection(moduleId, objectTable, label) {
     p_module_id: moduleId,
     p_object_table: objectTable,
     p_label: label || null,
+  })
+  if (error) throw error
+  return data
+}
+
+// Remove a tab from a module entirely (soft delete). Hiding leaves it in the
+// editor's list forever; this takes it off. The object itself stays reachable
+// from any other module and from Object Manager.
+export async function removeModuleSection(moduleId, sectionId) {
+  const { data, error } = await supabase.rpc('remove_module_section', {
+    p_module_id: moduleId,
+    p_section_id: sectionId,
   })
   if (error) throw error
   return data
