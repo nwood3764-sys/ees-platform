@@ -576,6 +576,22 @@ export async function cloneScheduledReport(sourceScheduleId, { newName = null } 
  * strategy on save — simpler than diffing and matches how Salesforce
  * persists report metadata.
  */
+/**
+ * Persist a report's column widths — written when a column edge is dragged in
+ * the viewer. Deliberately its own one-column update rather than a saveReport
+ * call: dragging a column is not editing the report's definition, and must not
+ * rewrite its fields, filters or groupings as a side effect.
+ */
+export async function saveReportColumnWidths(reportId, widths) {
+  if (!reportId) return null
+  const { error } = await supabase
+    .from('reports')
+    .update({ rpt_column_widths: widths && Object.keys(widths).length > 0 ? widths : null })
+    .eq('id', reportId)
+  if (error) throw error
+  return widths
+}
+
 export async function saveReport({ id, report, filters, groupings, calculatedFields }) {
   const isNew = !id || id === 'new'
   const userId = await getCurrentUserId()
@@ -1590,6 +1606,12 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     format:        r.rpt_format,
     primaryObject: r.rpt_primary_object,
     name:          r.rpt_name,
+    // The report's own column widths, and the id needed to write a new one
+    // back. A draft preview in the builder has no id — it renders the widths
+    // but cannot save a drag, which is correct: an unsaved report has nothing
+    // to save them to.
+    reportId:      reportId || r.id || null,
+    columnWidths:  r.rpt_column_widths || null,
     truncated,
   }
 }
