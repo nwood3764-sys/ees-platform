@@ -3550,12 +3550,11 @@ const BANK={
 `Custom build and install insulated attic access hatches including insulation damming, insulated access covers, and weatherstripping to minimize thermal bypass and air leakage.`,
 `All insulation materials and installation methods will comply with applicable code requirements, manufacturer specifications, and accepted energy efficiency best practices.`].join('\n\n'),
   airSeal:b=>[
-`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-${b} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
-`Scope of work includes identification and sealing of accessible air leakage pathways including, but not limited to:`,
-`Plumbing penetrations\nElectrical penetrations\nTop plates\nMechanical and duct penetrations\nSoffits and open chases\nAttic access openings\nMiscellaneous bypasses and framing gaps\nFabricated isolation boxes for exhaust fans and recessed lights`,
-`Approved sealants, foam products, sheet materials, and weatherstripping will be utilized as appropriate for each application to improve building envelope tightness, reduce heating and cooling loads, and improve overall occupant comfort and building durability.`].join('\n\n'),
+`Removal and disposal of existing attic insulation and debris. Insulation materials and debris will prepare the attic space for proper air sealing.`,
+`Air sealing of accessible air leakage pathways includes, but is not limited to:`,
+`Dropped soffits and open chases or bypasses\nWall top plates and framing\nExposed framing`].join('\n\n'),
   bath:'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
-  kitchen:'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  kitchen:'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 1.0 GPM Aerator N3210N',
   shower:'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH'
 };
 
@@ -3804,42 +3803,24 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ================= refined brand palette (deep navy + a single emerald
      accent, cool neutrals; no red/orange, per house style) ================= */
-  const NAVY=[20,44,71], EM=[42,157,109], EMd=[28,120,84], EMlt=[150,214,186],
+  const NAVY=[20,44,71], EM=[120,130,144], EMd=[20,44,71], EMlt=[120,130,144],
         PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
   const _state=stateFullName(m.state);
-  /* ---- header: full-width navy band with logomark, wordmark, doc type ---- */
-  fill(NAVY); d.rect(0,0,W,74,'F');
-  fill(EM);   d.rect(0,74,W,3.5,'F');                        // emerald baseline accent
-  // logomark — white rounded badge holding three ascending emerald bars
-  fill(WHITE); d.roundedRect(M,18,38,38,7,7,'F');
-  fill(EM); const _bx=M+10,_bb=47;
-  [[0,13],[8,20],[16,27]].forEach(([dx,hh])=>d.roundedRect(_bx+dx,_bb-hh,6,hh,1.4,1.4,'F'));
-  // wordmark
-  const _wx=M+66;
-  tc(WHITE); font(12.5,'bold'); t(_wx,35,'ENERGY EFFICIENCY SERVICES');
-  tc(EMlt);  font(9,'normal');  t(_wx,49,'of '+_state);
-  // document type + program, right-aligned
+  /* ---- letterhead: company (left) + document title/meta (right) over a thin
+     rule with a short emerald tab. A formal business header — no color band, no
+     logo badge, no bubbly meta panel. ---- */
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
-  tc(WHITE); font(20,'bold'); t(W-M,37,_dt,{align:'right'});
-  tc(EMlt);  font(7.5,'normal'); t(W-M,50,'Inflation Reduction Act  ·  HOMES Program',{align:'right'});
-  st.y=74+3.5+20;
-  /* ---- meta bar: a single light panel of label/value cells ---- */
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
-  const metaCells=[];
-  if(isAudit||isInv) metaCells.push([isAudit?'AUDIT INVOICE NO.':'INVOICE NO.',pv(docNo)]);
-  metaCells.push([(isAudit||isInv)?'INVOICE DATE':'DATE',pv(F.pjInvDate)]);
-  if(isAudit) metaCells.push(['DUE','N/A']);
-  else if(isInv) metaCells.push(['TERMS','Net 30']);
-  if(!isAudit&&m.units) metaCells.push(['UNITS',String(m.units)]);
-  metaCells.push(['IQ NUMBER',pv(F.pjIQ)]);
-  {const barH=42,n=metaCells.length,cw=CW/n;
-   fill(PANEL); d.roundedRect(M,st.y,CW,barH,5,5,'F');
-   stroke(HAIR); d.setLineWidth(.75); d.roundedRect(M,st.y,CW,barH,5,5,'S');
-   metaCells.forEach(([lb,v],i)=>{const cx=M+i*cw;
-     if(i>0){stroke(HAIR); d.setLineWidth(.75); d.line(cx,st.y+9,cx,st.y+barH-9);}
-     tc(INKM); font(6.8,'bold'); t(cx+12,st.y+16,lb);
-     tc(NAVY); font(10.5,'bold'); t(cx+12,st.y+31,(wrap(String(v),cw-20)[0]||''));});
-   st.y+=barH+22;}
+  tc(NAVY); font(15,'bold');    t(M,st.y+13,'Energy Efficiency Services');
+  tc(INKM); font(9.5,'normal'); t(M,st.y+27,'of '+_state);
+  tc(NAVY); font(16,'bold');    t(W-M,st.y+13,_dt,{align:'right'});
+  tc(INKM); font(8,'normal');   t(W-M,st.y+25,'Inflation Reduction Act  ·  HOMES Program',{align:'right'});
+  {const meta=[]; if((isAudit||isInv)&&docNo) meta.push((isAudit?'Audit Invoice No. ':'Invoice No. ')+docNo);
+   meta.push('Date: '+pv(F.pjInvDate)); if(isInv) meta.push('Terms: Net 30');
+   tc(INKM); font(8,'normal'); t(W-M,st.y+35,meta.join('      '),{align:'right'});}
+  st.y+=43;
+  stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  st.y+=16;
   /* ---- party blocks: PROPERTY (left) and BILL TO (right), accent labels ---- */
   const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
   const _pn=String(F.pjPropName||'').trim();
@@ -3858,8 +3839,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
    st.y=Math.max(ly,ry)+6;}
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
-    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(HAIR); d.setLineWidth(1);
-    d.line(M,st.y,W-M,st.y); stroke(EM); d.setLineWidth(2); d.line(M,st.y,M+34,st.y); st.y+=5;};
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+    d.line(M,st.y,W-M,st.y); st.y+=5;};
   /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader=(cols)=>{ // cols: [{x0,x1,lbl,align}]
     const h=16; need(h+4);
@@ -3920,42 +3901,49 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const descW=CW-numTotW;                       // wide left column for name + description
     // Precompute each column's right edge (rightmost first, walking left from W-M).
     let _rx=W-M; for(let c=numCols.length-1;c>=0;c--){numCols[c][3]=_rx; _rx-=numCols[c][2];}
-    // header row — a helper so it can REPEAT at the top of every page the table
-    // spills onto (professional multi-page tables never orphan their columns).
+    // vertical grid: a line at each column boundary so the numbers read as real
+    // columns instead of floating in space.
+    const colXs=[M].concat(numCols.map(c=>c[3]-c[2])).concat([W-M]);
+    const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
+    // header row — repeats at the top of every page the table spills onto.
+    const headH=20;
     const tableHeader=()=>{
-      need(26);
-      stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-      tc(NAVY); font(8,'bold'); t(M+2,st.y+14,'MEASURE');
-      numCols.forEach(([lbl,,w,rx])=>t(rx,st.y+14,lbl,{align:'right'}));
-      st.y+=19; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+      need(headH+8);
+      fill(PANEL); d.rect(M,st.y,CW,headH,'F');
+      stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+      tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
+      numCols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+      colRules(st.y,st.y+headH);
+      stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
+      st.y+=headH;
     };
     tableHeader();
-    const nameLH=12.5, descLH=10.5, padT=8, gapND=5, padB=7;   // comfortable leading = the "line breaks"
+    const nameLH=12.5, descLH=10.5, padT=8, gapND=5, padB=9;
     m.rows.forEach((r,i)=>{
-      font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.name,descW-6);
-      font(8.5);       const dl=wrap(r.desc,descW-6);
+      font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.name,descW-10);
+      font(8.5);       const dl=wrap(r.desc,descW-10);
       const nameH=nameLines.length*nameLH, descH=dl.length?dl.length*descLH:0;
       const h=padT+nameH+(descH?gapND+descH:0)+padB;
-      // page break BEFORE drawing the row, then repeat the header so the columns
-      // are labeled on the new page too. A measure block never splits across pages.
+      // page break BEFORE drawing the row, then repeat the header. A measure block
+      // never splits across pages.
       if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
       const y0=st.y;
       if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}   // subtle zebra for scanning
-      // measure name (numbered), left column
+      // measure name (numbered) + description, left column
       tc(C.ink); font(10,'bold');
-      nameLines.forEach((ln,k)=>t(M+2,y0+padT+k*nameLH+9,ln));
-      // description below the name, wrapping across the wide left column
+      nameLines.forEach((ln,k)=>t(M+5,y0+padT+k*nameLH+9,ln));
       if(dl.length){const dy=y0+padT+nameH+gapND; font(8.5); tc([70,82,98]);
-        dl.forEach((ln,k)=>t(M+2,dy+k*descLH+8,ln));}
-      // quantity / dollar columns — VERTICALLY CENTERED in the row so they sit
-      // level with the whole measure block instead of stranded at the top.
-      const midY=y0+h/2+3;
+        dl.forEach((ln,k)=>t(M+5,dy+k*descLH+8,ln));}
+      // quantity / dollar columns — top-aligned on the measure's first line so
+      // they sit in a clear grid cell, not stranded in the middle of the row.
+      const numY=y0+padT+9;
       numCols.forEach(([lbl,fn,w,rx],c)=>{
         font(9.5,c===numCols.length-1?'bold':'normal');
         tc(c===numCols.length-1?NAVY:[64,78,96]);
-        t(rx,midY,fn(r),{align:'right'});});
+        t(rx-4,numY,fn(r),{align:'right'});});
       st.y=y0+h;
-      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;  // hairline between measures
+      colRules(y0,st.y);                                        // vertical separators
+      stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); // row bottom
     });
   }
   /* ---- rebates as credit lines in a gridded table ---- */
@@ -3989,26 +3977,24 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      else funds it — no deposit, no balance owed by the owner. ---- */
   const reb=foeAmt+iraAmt, deposits=0, due=Math.round((gross-reb-deposits)*100)/100;
   const dueVal=Math.abs(due)<0.005?0:due;
-  need(122); st.y+=18;
-  {const SUMW=252, x0=W-M-SUMW;
-   // note filling the space beside the summary
+  need(112); st.y+=16;
+  {const SUMW=248, x0=W-M-SUMW;
+   // note beside the summary
    tc(INKM); font(8.5,'italic');
    const note=wrap('All eligible program incentives are applied as an instant discount at the point of service. No deposit is required and no balance is due from the property owner.',x0-M-16);
    note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
-   // summary rows
-   const srows=[['Total Cost',_money(gross)],['Rebates & Incentives','('+_money(reb)+')'],['Deposits',_money(deposits)]];
+   // plain right-aligned totals (no color block)
    let sy=st.y;
-   for(const [lb,v] of srows){
-     tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
+   const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
      tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
-     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+17,W-M,sy+17); sy+=19;}
-   // hero Total Due panel
-   sy+=6; const hh=44;
-   fill(NAVY); d.roundedRect(x0,sy,SUMW,hh,6,6,'F');
-   fill(EM);   d.roundedRect(x0,sy,4,hh,2,2,'F');
-   tc(EMlt);  font(8.5,'bold'); t(x0+18,sy+19,'TOTAL DUE');
-   tc(WHITE); font(18,'bold');  t(x0+SUMW-16,sy+29,_money(dueVal),{align:'right'});
-   st.y=Math.max(st.y+note.length*11.5, sy+hh)+6;}
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
+   trow('Total Cost',_money(gross));
+   trow('Rebates & Incentives Applied','('+_money(reb)+')');
+   trow('Total Deposits',_money(deposits));
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
+   tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
+   st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* ---- deliverables (audit only) ---- */
   if(isAudit){
     head('Deliverables',10);
@@ -4017,12 +4003,14 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
       need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
   }
-  /* ---- acknowledgment + signature: INVOICES ONLY — the proposal has no
-     signature/acceptance block (that belongs on the project invoice). ---- */
-  if(isAudit||isInv){
+  /* ---- acknowledgment + acceptance: on the proposal AND the invoices, with
+     wording to match (a proposal is authorized; an invoice is acknowledged). ---- */
+  {
     head('Acknowledgment & Acceptance',10);
     const _ees='EES-'+(m.state||'WI');
-    const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
+    const ack=(isAudit||isInv)
+      ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.'
+      :'The property owner authorizes '+_ees+' to perform the scope of work above and to submit for and receive the corresponding program incentive on their behalf. All eligible incentives are applied as an instant discount, so no deposit is required and no balance is due from the property owner.';
     {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
      al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
     need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
@@ -4030,16 +4018,23 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
     t(W-M-150,st.y+10,'Date');
   }
-  /* ---- footer pinned to the bottom of the last page ---- */
-  const fy=H-44;
-  if(st.y>fy-10) d.addPage();
-  stroke(EM); d.setLineWidth(1.4); d.line(M,fy,M+34,fy);
-  stroke(HAIR); d.setLineWidth(.75); d.line(M+40,fy,W-M,fy);
-  tc(C.mut); font(8.5);
-  t(W/2,fy+12,'Energy Efficiency Services of '+stateFullName(m.state)+'  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
-  const _eesContact=m.state==='NC'?'ncira@ees-nc.org  |  (704) 990-5614':'ira@ees-wi.org  |  608-460-7419';
-  font(8,'italic'); t(W/2,fy+23,_eesContact,{align:'center'});
+  _stampEesFooters(P,m.state);
   return d.output('blob');
+}
+/* Footer on EVERY page + "Page X of Y" on multi-page documents, so shuffled
+   proposal pages can be identified. Runs after all content is laid out. */
+function _stampEesFooters(P,state){
+  const {d,W,H,M,font,t,stroke,tc}=P;
+  const fy=H-40, N=d.getNumberOfPages();
+  const line1='Energy Efficiency Services of '+stateFullName(state)+'    |    112 Owen Rd. PO Box 6141, Monona, WI 53716';
+  const line2=state==='NC'?'ncira@ees-nc.org    |    (704) 990-5614':'ira@ees-wi.org    |    608-460-7419';
+  for(let p=1;p<=N;p++){
+    d.setPage(p);
+    stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
+    tc([122,135,152]); font(8,'normal');   t(W/2,fy+12,line1,{align:'center'});
+    tc([122,135,152]); font(7.5,'italic');  t(W/2,fy+22,line2,{align:'center'});
+    if(N>1){tc([122,135,152]); font(8,'normal'); t(W-M,fy+12,'Page '+p+' of '+N,{align:'right'});}
+  }
 }
 
 /* ===== HEAR model + proposal ================================================
@@ -4054,15 +4049,19 @@ function hearModel(){
     .map(r=>{
       const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
       const qty=Math.max(1,parseInt(r.qty,10)||1);
-      const cost=Math.max(0,_num(r.cost));
-      const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x qty
+      const unitCost=Math.max(0,_num(r.cost));            // the Cost field is PER UNIT
+      const cost=Math.round(unitCost*qty*100)/100;        // total = per-unit x quantity
+      const rebate=Math.min(cost,meas.cap*qty);           // 100% up to cap x units
+      // NC documents split each line 50/50 into labor + material (material takes the
+      // clean floored half; labor carries any odd cent so the two sum to the total).
+      const material=Math.floor(cost*50)/100, labor=Math.round((cost-material)*100)/100;
       const models=r.models||{}, effs=r.effs||{};
       const modelStr=(meas.models||[]).map(md=>{const v=(models[md.key]||'').trim();
         return v?((md.short?md.short+' ':'')+v):'';}).filter(Boolean).join('  ·  ');
       const effStr=(meas.metrics||[]).map(mtr=>{const v=(effs[mtr]||'').trim();
         return v?(v+' '+mtr):'';}).filter(Boolean).join('  ·  ');
       return {key:meas.key,label:meas.label,cap:meas.cap,systemType:r.systemType||'',
-        modelStr,effStr,desc:(r.desc||'').trim(),qty,cost,
+        modelStr,effStr,desc:(r.desc||'').trim(),qty,unitCost,cost,labor,material,
         rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
     });
   const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
@@ -4080,30 +4079,18 @@ function buildHearPdfBlob(){
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
   const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const _state=stateFullName(m.state);
-  const NAVY=[20,44,71], EM=[42,157,109], EMd=[28,120,84], EMlt=[150,214,186],
+  const NAVY=[20,44,71], EM=[120,130,144], EMd=[20,44,71], EMlt=[120,130,144],
         PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
-  /* header band */
-  fill(NAVY); d.rect(0,0,W,74,'F'); fill(EM); d.rect(0,74,W,3.5,'F');
-  fill(WHITE); d.roundedRect(M,18,38,38,7,7,'F');
-  fill(EM); const _bx=M+10,_bb=47; [[0,13],[8,20],[16,27]].forEach(([dx,hh])=>d.roundedRect(_bx+dx,_bb-hh,6,hh,1.4,1.4,'F'));
-  const _wx=M+66;
-  tc(WHITE); font(12.5,'bold'); t(_wx,35,'ENERGY EFFICIENCY SERVICES');
-  tc(EMlt);  font(9,'normal');  t(_wx,49,'of '+_state);
-  tc(WHITE); font(20,'bold'); t(W-M,37,'PROPOSAL',{align:'right'});
-  tc(EMlt);  font(7.5,'normal'); t(W-M,50,'Inflation Reduction Act  ·  HEAR Program',{align:'right'});
-  st.y=74+3.5+20;
-  /* meta bar */
-  const metaCells=[['DATE',pv(F.pjInvDate)]];
-  if(m.units) metaCells.push(['DWELLING UNITS',String(m.units)]);
-  metaCells.push(['IQ NUMBER',pv(F.pjIQ)]);
-  {const barH=42,n=metaCells.length,cw=CW/n;
-   fill(PANEL); d.roundedRect(M,st.y,CW,barH,5,5,'F');
-   stroke(HAIR); d.setLineWidth(.75); d.roundedRect(M,st.y,CW,barH,5,5,'S');
-   metaCells.forEach(([lb,v],i)=>{const cx=M+i*cw;
-     if(i>0){stroke(HAIR); d.setLineWidth(.75); d.line(cx,st.y+9,cx,st.y+barH-9);}
-     tc(INKM); font(6.8,'bold'); t(cx+12,st.y+16,lb);
-     tc(NAVY); font(10.5,'bold'); t(cx+12,st.y+31,(wrap(String(v),cw-20)[0]||''));});
-   st.y+=barH+22;}
+  /* letterhead — matches the HOMES proposal: company (left) + document title/meta
+     (right) over a thin rule with a short emerald tab. No band, no logo, no panel. */
+  tc(NAVY); font(15,'bold');    t(M,st.y+13,'Energy Efficiency Services');
+  tc(INKM); font(9.5,'normal'); t(M,st.y+27,'of '+_state);
+  tc(NAVY); font(16,'bold');    t(W-M,st.y+13,'PROPOSAL',{align:'right'});
+  tc(INKM); font(8,'normal');   t(W-M,st.y+25,'Inflation Reduction Act  ·  HEAR Program',{align:'right'});
+  tc(INKM); font(8,'normal');   t(W-M,st.y+35,'Date: '+pv(F.pjInvDate),{align:'right'});
+  st.y+=43;
+  stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  st.y+=16;
   /* party blocks */
   const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
   const _pn=String(F.pjPropName||'').trim();
@@ -4119,43 +4106,56 @@ function buildHearPdfBlob(){
    for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
    st.y=Math.max(ly,ry)+6;}
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
-    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(HAIR); d.setLineWidth(1);
-    d.line(M,st.y,W-M,st.y); stroke(EM); d.setLineWidth(2); d.line(M,st.y,M+34,st.y); st.y+=5;};
-  /* scope table: measure/system/model/eff (left) + Qty / Cost / Rebate (right) */
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+    d.line(M,st.y,W-M,st.y); st.y+=5;};
+  /* scope table: measure/system/model/eff/description (left) + numbers (right).
+     NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
   head('Electrification Scope — HEAR Program',12);
-  const cols=[['QTY',r=>String(r.qty),48],['COST',r=>_money(r.cost),80],['REBATE',r=>_money(r.rebate),80]];
+  const isNC=m.state==='NC';
+  const cols=isNC
+    ?[['QTY',r=>String(r.qty),34],['LABOR',r=>_money(r.labor),62],['MATERIAL',r=>_money(r.material),66],
+      ['TOTAL',r=>_money(r.cost),66],['REBATE',r=>_money(r.rebate),66]]
+    :[['QTY',r=>String(r.qty),40],['COST',r=>_money(r.cost),80],['REBATE',r=>_money(r.rebate),80]];
   let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
-  const tableHeader=()=>{need(26);
-    stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-    tc(NAVY); font(8,'bold'); t(M+2,st.y+14,'MEASURE');
-    cols.forEach(([lbl,,w,rx])=>t(rx,st.y+14,lbl,{align:'right'}));
-    st.y+=19; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;};
+  const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
+  const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
+  const headH=20;
+  const tableHeader=()=>{need(headH+8);
+    fill(PANEL); d.rect(M,st.y,CW,headH,'F');
+    stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
+    cols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+    colRules(st.y,st.y+headH);
+    stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
+    st.y+=headH;};
   tableHeader();
-  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+2,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No electrification equipment entered yet.'); st.y+=26;}
   m.rows.forEach((r,i)=>{
     const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
-    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-6);
-    font(8.5); const dl=sub?wrap(sub,descW-6):[];
-    font(8.5); const desl=r.desc?wrap(r.desc,descW-6):[];        // free-text description
-    const capNote='Program cap '+_money(r.cap)+'/unit'+(r.qty>1?(' × '+r.qty+' units'):'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
-    const dl2=wrap(capNote,descW-6);
+    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-10);
+    font(8.5); const dl=sub?wrap(sub,descW-10):[];
+    font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];        // free-text description
+    const capNote='Cap '+_money(r.cap)+'/unit × '+r.qty+' unit'+(r.qty>1?'s':'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
+    const dl2=wrap(capNote,descW-10);
     const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0, capH=dl2.length*9.5;
-    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+3+capH+8;
+    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+4+capH+9;
     if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
     const y0=st.y;
     if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
-    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+2,y0+8+k*12.5+9,ln));
+    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+5,y0+8+k*12.5+9,ln));
     let dy=y0+8+nameH;
-    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln)); dy+=subH;}
-    if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln)); dy+=descH;}
-    dy+=3; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+2,dy+k*9.5+7,ln));
-    const midY=y0+h/2+3;
+    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=subH;}
+    if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=descH;}
+    dy+=4; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+5,dy+k*9.5+7,ln));
+    const numY=y0+8+9;                        // top-aligned on the measure's first line
     cols.forEach(([lbl,fn,w,rx],c)=>{
-      font(9.5,c===cols.length-1?'bold':'normal');
-      tc(c===cols.length-1?EMd:[64,78,96]);
-      t(rx,midY,fn(r),{align:'right'});});
-    st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;
+      const isTot=(lbl==='TOTAL'||lbl==='COST'), isReb=(lbl==='REBATE');
+      font(9.5,(isTot||isReb)?'bold':'normal');
+      tc(isReb?EMd:(isTot?NAVY:[64,78,96]));
+      t(rx-4,numY,fn(r),{align:'right'});});
+    st.y=y0+h; colRules(y0,st.y);
+    stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
   });
   /* totals: hero Total Due, right-aligned summary */
   need(132); st.y+=18;
@@ -4170,13 +4170,13 @@ function buildHearPdfBlob(){
    for(const [lb,v] of srows){
      tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
      tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
-     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+17,W-M,sy+17); sy+=19;}
-   sy+=6; const hh=44;
-   fill(NAVY); d.roundedRect(x0,sy,SUMW,hh,6,6,'F');
-   fill(EM);   d.roundedRect(x0,sy,4,hh,2,2,'F');
-   tc(EMlt);  font(8.5,'bold'); t(x0+18,sy+19,m.totalDue>0.005?'BALANCE DUE':'TOTAL DUE');
-   tc(WHITE); font(18,'bold');  t(x0+SUMW-16,sy+29,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
-   st.y=Math.max(st.y+note.length*11.5, sy+hh)+6;}
+     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;}
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
+   tc(NAVY); font(11,'bold');
+   t(x0,sy+11,m.totalDue>0.005?'Balance Due':'Total Due');
+   t(W-M,sy+11,_money(Math.abs(m.totalDue)<0.005?0:m.totalDue),{align:'right'});
+   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
+   st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* acknowledgment + signature */
   head('Acknowledgment & Acceptance',12);
   const _ees='EES-'+(m.state||'WI');
@@ -4186,14 +4186,7 @@ function buildHearPdfBlob(){
   need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
   d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
   tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
-  /* footer */
-  const fy=H-44; if(st.y>fy-10) d.addPage();
-  stroke(EM); d.setLineWidth(1.4); d.line(M,fy,M+34,fy);
-  stroke(HAIR); d.setLineWidth(.75); d.line(M+40,fy,W-M,fy);
-  tc(C.mut); font(8.5);
-  t(W/2,fy+12,'Energy Efficiency Services of '+_state+'  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
-  const _eesContact=m.state==='NC'?'ncira@ees-nc.org  |  (704) 990-5614':'ira@ees-wi.org  |  608-460-7419';
-  font(8,'italic'); t(W/2,fy+23,_eesContact,{align:'center'});
+  _stampEesFooters(P,m.state);
   return d.output('blob');
 }
 
