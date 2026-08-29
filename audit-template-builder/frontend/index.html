@@ -3332,7 +3332,20 @@ const HEAR_MEASURES=[
 const HEAR_BY_KEY=Object.fromEntries(HEAR_MEASURES.map(m=>[m.key,m]));
 var hearState=null, _hearLastKey=null;   // var (not let): pjLoadAndPrefill can run before this line at init — avoid a temporal-dead-zone ReferenceError
 function hearKey(){const k=pjStorageKey();return k?k+'_hear':null;}
-function hearBlankRow(){return {measure:'heat_pump',systemType:'',models:{},effs:{},qty:'1',cost:''};}
+function hearBlankRow(){return {measure:'heat_pump',systemType:'',models:{},effs:{},qty:'1',cost:'',desc:'',descAuto:false};}
+// Some measures carry a suggested description. Mechanical ventilation must tell the
+// reviewer that a companion air-sealing project accompanies it (that pairing is what
+// makes the $1,600 ventilation incentive eligible). Pre-filled but fully editable.
+function hearDefaultDesc(measureKey,systemType){
+  if(systemType==='Mechanical Ventilation')
+    return 'ENERGY STAR mechanical ventilation installed in combination with a whole-home air sealing project on this dwelling. The accompanying air sealing has been (or will be) completed as part of this project’s scope of work, satisfying the program requirement that mechanical ventilation be paired with air sealing. Noted here so the program reviewer can confirm the companion air-sealing project supporting the $1,600 ventilation incentive.';
+  return '';
+}
+function maybeSetDefaultDesc(rw){
+  const def=hearDefaultDesc(rw.measure,rw.systemType);
+  if(def){ if(!rw.desc||rw.descAuto){rw.desc=def; rw.descAuto=true;} }   // fill when empty or still auto
+  else if(rw.descAuto){ rw.desc=''; rw.descAuto=false; }                 // previous auto note no longer applies
+}
 function hearHasRows(){return Array.isArray(hearState)&&hearState.some(r=>r&&(r.cost||r.systemType||(r.models&&Object.values(r.models).some(v=>v))));}
 function hearSave(){const k=hearKey();if(!k)return;try{localStorage.setItem(k,JSON.stringify(hearState||[]));}catch(e){}}
 function hearLoad(){
@@ -3369,6 +3382,7 @@ function renderHear(){
         <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 62px">Qty<input data-hf="qty" inputmode="numeric" value="${esc(r.qty)}" style="${inp}"></label>
         <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px;flex:0 0 110px">Cost $<input data-hf="cost" inputmode="numeric" value="${esc(r.cost)}" placeholder="project cost" style="${inp}"></label>
       </div>
+      <label style="display:flex;flex-direction:column;gap:3px;margin-top:8px;font-size:11px;color:var(--mut)">Description <span style="font-weight:400">— prints on the proposal; edit freely</span><textarea data-hf="desc" rows="2" placeholder="Describe this measure for the proposal…" style="${inp};resize:vertical;min-height:40px;line-height:1.4">${esc(r.desc||'')}</textarea></label>
       <div style="font-size:11px;color:var(--mut);margin-top:8px">Program cap $${meas.cap.toLocaleString('en-US')} per unit · low-income pays 100% up to the cap</div>
     </div>`;
   });
@@ -3383,8 +3397,10 @@ document.addEventListener('input',e=>{
   const rw=hearState[i];
   if(f==='model'){if(!rw.models)rw.models={}; rw.models[t.dataset.mkey]=t.value;}
   else if(f==='eff'){if(!rw.effs)rw.effs={}; rw.effs[t.dataset.emetric]=t.value;}
+  else if(f==='desc'){rw.desc=t.value; rw.descAuto=false;}   // hand-edited -> stop auto-managing it
   else rw[f]=t.value;
-  if(f==='measure'){rw.systemType='';renderHear();}   // measure changed -> refresh model/eff/type fields
+  if(f==='measure'){rw.systemType=''; maybeSetDefaultDesc(rw); renderHear();}   // refresh fields + suggested note
+  else if(f==='systemType'){maybeSetDefaultDesc(rw); renderHear();}             // Mechanical Ventilation -> prefill the air-sealing note
   hearSave();hearUpdateGate();
 });
 document.addEventListener('click',e=>{
@@ -4031,7 +4047,7 @@ function hearModel(){
   const state=buildingState();
   const _num=v=>{const n=parseFloat(String(v==null?'':v).replace(/[^0-9.]/g,''));return Number.isFinite(n)?n:0;};
   const rows=(typeof hearState!=='undefined'&&Array.isArray(hearState)?hearState:[])
-    .filter(r=>r&&(r.systemType||r.cost||(r.models&&Object.values(r.models).some(v=>v))||(r.effs&&Object.values(r.effs).some(v=>v))))
+    .filter(r=>r&&(r.systemType||r.cost||(r.desc&&r.desc.trim())||(r.models&&Object.values(r.models).some(v=>v))||(r.effs&&Object.values(r.effs).some(v=>v))))
     .map(r=>{
       const meas=HEAR_BY_KEY[r.measure]||HEAR_MEASURES[0];
       const qty=Math.max(1,parseInt(r.qty,10)||1);
@@ -4043,7 +4059,7 @@ function hearModel(){
       const effStr=(meas.metrics||[]).map(mtr=>{const v=(effs[mtr]||'').trim();
         return v?(v+' '+mtr):'';}).filter(Boolean).join('  ·  ');
       return {key:meas.key,label:meas.label,cap:meas.cap,systemType:r.systemType||'',
-        modelStr,effStr,qty,cost,
+        modelStr,effStr,desc:(r.desc||'').trim(),qty,cost,
         rebate:Math.round(rebate*100)/100,due:Math.round((cost-rebate)*100)/100};
     });
   const totalCost=Math.round(rows.reduce((a,r)=>a+r.cost,0)*100)/100;
@@ -4118,16 +4134,18 @@ function buildHearPdfBlob(){
     const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
     font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-6);
     font(8.5); const dl=sub?wrap(sub,descW-6):[];
+    font(8.5); const desl=r.desc?wrap(r.desc,descW-6):[];        // free-text description
     const capNote='Program cap '+_money(r.cap)+'/unit'+(r.qty>1?(' × '+r.qty+' units'):'')+(r.due>0.005?('  ·  '+_money(r.due)+' over cap'):'');
     const dl2=wrap(capNote,descW-6);
-    const nameH=nameLines.length*12.5, descH=dl.length?dl.length*10.5:0, capH=dl2.length*9.5;
-    const h=8+nameH+(descH?5+descH:0)+3+capH+8;
+    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0, capH=dl2.length*9.5;
+    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+3+capH+8;
     if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
     const y0=st.y;
     if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
     tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+2,y0+8+k*12.5+9,ln));
     let dy=y0+8+nameH;
-    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln)); dy+=descH;}
+    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln)); dy+=subH;}
+    if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln)); dy+=descH;}
     dy+=3; font(8); tc(INKM); dl2.forEach((ln,k)=>t(M+2,dy+k*9.5+7,ln));
     const midY=y0+h/2+3;
     cols.forEach(([lbl,fn,w,rx],c)=>{
