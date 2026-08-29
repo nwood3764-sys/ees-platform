@@ -14,6 +14,7 @@
     "check:hooks": "node scripts/check-conditional-hooks.mjs",
     "fixtures": "node scripts/run-fixtures.mjs",
     "verify:pinned-headers": "node tools/pinned-header-check/run.mjs",
+    "verify:record-header": "node tools/record-header-check/run.mjs",
     "verify:layout-cards": "node tools/layout-card-check/run.mjs",
     "verify:video-preview": "node tools/video-preview-check/run.mjs",
     "verify:report-column-widths": "node tools/report-column-width-check/run.mjs"
