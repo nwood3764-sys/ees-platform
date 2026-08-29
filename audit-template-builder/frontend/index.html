@@ -4217,20 +4217,17 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   st.y=M+4;
-  // document title / letterhead — names the program, state, document type and number
-  tc(C.sealBlue); font(15,'bold'); t(M,st.y+6,'Inflation Reduction Act Multifamily HOMES');
-  tc(C.ink); font(11,'bold'); t(M,st.y+22,stateFullName(m.state)+' '+docLabel);
-  tc(C.mut); font(9,'normal');
-  t(W-M,st.y+6,(isInv?'Invoice No.: ':'Proposal No.: ')+docNo,{align:'right'});
-  t(W-M,st.y+20,'Date: '+(F.pjInvDate||''),{align:'right'});
-  st.y+=30; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=14;
+  // document title, centered — the proposal name over the full program name
+  tc(C.sealBlue); font(17,'bold'); t(W/2,st.y+12,docLabel,{align:'center'});
+  tc(C.ink); font(10.5,'bold'); t(W/2,st.y+29,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
+  st.y+=39; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=14;
   bh('Primary Contractor:',M,st.y);
   let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+15);
   const RX=W/2+20;
   bh(isInv?'Invoice Details:':'Project Details:',RX,st.y);
   const det=isInv
     ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :['Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
+    :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
   let yB=lines9(det,RX,st.y+15);
   st.y=Math.max(yA,yB)+12;
   bh('Bill To:',M,st.y);
