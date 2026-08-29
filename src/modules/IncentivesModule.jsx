@@ -7,13 +7,14 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import NavLink from '../components/NavLink'
-import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
+import { fetchPaymentRequests, fetchPaymentReceipts, fetchIncentiveApplications } from '../data/incentivesService'
 import ModuleHomeByline from '../components/ModuleHomeByline'
 
 const CODE_SECTIONS = [
-  { id:'home',     label:'Home'                       },
-  { id:'requests', label:'Project Payment Requests'   },
-  { id:'received', label:'Payment Receipt'            },
+  { id:'home',         label:'Home'                     },
+  { id:'applications', label:'Incentive Applications'   },
+  { id:'requests',     label:'Project Payment Requests' },
+  { id:'received',     label:'Payment Receipt'          },
 ]
 
 const PR_COLS = [
@@ -61,7 +62,67 @@ function pmtCell(col, r) {
   return undefined
 }
 
-function IncentivesHome({ setSec, requests, receipts }) {
+
+// ---------------------------------------------------------------------------
+// Incentive Applications panel — the module home's first block
+// ---------------------------------------------------------------------------
+// Built for this screen and this object. The payment-request tiles below it
+// report a different thing (money already claimed), so nothing here is a
+// re-pointed copy of them: an application is the incentive being PURSUED, and
+// what matters about it is how many are open, how many are with the program
+// waiting on an answer, and what has been asked for.
+function IncentiveApplicationsPanel({ applications, setSec }) {
+  const settled = /closed|denied|withdrawn|paid|received/i
+  const withProgram = /submitted|awaiting|under review|pre-approv/i
+
+  const open = applications.filter(a => !settled.test(a.status))
+  const awaiting = applications.filter(a => withProgram.test(a.status))
+  const totalRequested = applications.reduce((sum, a) => sum + (a.amount || 0), 0)
+
+  // Status roll-up in count order, so the longest queue reads first.
+  const byStatus = [...applications.reduce((m, a) => {
+    m.set(a.status, (m.get(a.status) || 0) + 1); return m
+  }, new Map())].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:8 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:C.textPrimary }}>Incentive Applications</div>
+        <span onClick={()=>setSec('applications')}
+          style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>
+          View Incentive Applications →
+        </span>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:12 }}>
+        {[
+          { label:'Open Applications',   value:String(open.length),      note:'Not closed, denied or withdrawn' },
+          { label:'With the Program',    value:String(awaiting.length),  note:'Submitted, awaiting a response'  },
+          { label:'Total Requested',     value:fmt(totalRequested),      note:'Approved amount where set, else requested' },
+        ].map(t => (
+          <div key={t.label} onClick={()=>setSec('applications')}
+            style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px', cursor:'pointer' }}>
+            <div style={{ fontSize:11, color:C.textMuted, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:6 }}>{t.label}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace', marginBottom:4 }}>{t.value}</div>
+            <div style={{ fontSize:11, color:C.textMuted }}>{t.note}</div>
+          </div>
+        ))}
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
+          <div style={{ fontSize:11, color:C.textMuted, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:6 }}>By Status</div>
+          {byStatus.length === 0 ? (
+            <div style={{ fontSize:12, color:C.textMuted }}>No incentive applications yet.</div>
+          ) : byStatus.map(d => (
+            <div key={d.name} style={{ display:'flex', justifyContent:'space-between', gap:10, marginBottom:3 }}>
+              <span style={{ fontSize:11, color:C.textSecondary, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.name}</span>
+              <span style={{ fontSize:11, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace' }}>{d.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IncentivesHome({ setSec, requests, receipts, applications = [] }) {
   const R = useRecharts()
   const toPrepare    = requests.filter(r => r.status==='Payment Request To Be Prepared'||r.status==='Payment Request To Be Verified')
   const toSubmit     = requests.filter(r => r.status==='Payment Request To Be Submitted')
@@ -115,6 +176,8 @@ function IncentivesHome({ setSec, requests, receipts }) {
           <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Incentives Dashboard</h1>
           <ModuleHomeByline />
         </div>
+
+        <IncentiveApplicationsPanel applications={applications} setSec={setSec} />
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
           {[
@@ -291,7 +354,11 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
     else setSelectedRecordLocal(rec)
   }
 
-  const SEC_TABLE = {'requests': 'project_payment_requests', 'received': 'payment_receipts'}
+  const SEC_TABLE = {
+    applications: 'incentive_applications',
+    requests:     'project_payment_requests',
+    received:     'payment_receipts',
+  }
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
 
@@ -311,6 +378,7 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
   }
   const [requests, setRequests] = useState([])
   const [receipts, setReceipts] = useState([])
+  const [applications, setApplications] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -320,8 +388,10 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
   const loadAll = async () => {
     setError(null)
     try {
-      const [r, p] = await Promise.all([fetchPaymentRequests(), fetchPaymentReceipts()])
-      setRequests(r); setReceipts(p)
+      const [r, p, a] = await Promise.all([
+        fetchPaymentRequests(), fetchPaymentReceipts(), fetchIncentiveApplications(),
+      ])
+      setRequests(r); setReceipts(p); setApplications(a)
     } catch (err) {
       setError(err)
     }
@@ -330,15 +400,21 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    Promise.all([fetchPaymentRequests(), fetchPaymentReceipts()])
-      .then(([r, p]) => { if (!cancelled) { setRequests(r); setReceipts(p) } })
+    Promise.all([fetchPaymentRequests(), fetchPaymentReceipts(), fetchIncentiveApplications()])
+      .then(([r, p, a]) => {
+        if (!cancelled) { setRequests(r); setReceipts(p); setApplications(a) }
+      })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
 
   const urgentCount = requests.filter(r=>r.daysOpen>30&&!r.status.includes('Received')).length
-  const counts = { requests: requests.length, received: receipts.length }
+  const counts = {
+    applications: applications.length,
+    requests: requests.length,
+    received: receipts.length,
+  }
   const urgentSections = { home: urgentCount }
 
   return (
@@ -368,7 +444,7 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
             objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
             moduleId="incentives" />
         )}
-        {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
+        {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} applications={applications} />}
         </>)}
       </div>
     </div>
