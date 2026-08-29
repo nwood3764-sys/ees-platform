@@ -278,7 +278,7 @@
   <div id="hearRow" style="margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
     <strong style="font-size:13.5px">HEAR — Home Electrification &amp; Appliance Rebates (mechanical)</strong>
     <span class="copyhint">— the electrification scope, separate from the HOMES proposal. Add each system/appliance with its model number, efficiency and quantity.</span>
-    <div style="font-size:12px;color:var(--mut);margin-top:6px">Low-income (&le;80% AMI): the program pays <b>100% of the project cost</b>, up to the federal per-measure caps (heat pump $8,000 · heat-pump water heater $1,750 · panel $4,000 · wiring $2,500 · heat-pump dryer $840 · induction cooking $840 · insulation/air&nbsp;sealing/ventilation $1,600) and <b>$14,000 total per dwelling unit</b>. Same in North Carolina and Wisconsin.</div>
+    <div style="font-size:12px;color:var(--mut);margin-top:6px">Low-income (&le;80% AMI): the program pays <b>100% of the project cost</b>, up to the ENERGY STAR product-category caps (Heat Pump for Space Heating/Cooling $8,000 · Heat Pump Water Heater $1,750 · Heat Pump Clothes Dryer $840 · Electric Cooking Appliance $840 · Insulation, Air Sealing, and Ventilation $1,600 · Electrical Panel $4,000 · Electric Wiring $2,500) and <b>$14,000 maximum per dwelling unit</b>. Same in North Carolina and Wisconsin.</div>
     <div id="hearBody" style="margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button type="button" id="hearAdd" style="padding:7px 13px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;font-weight:600">+ Add equipment</button>
@@ -3309,24 +3309,27 @@ function pjLoadAndPrefill(){
 // Each measure declares its own MODEL-NUMBER fields and EFFICIENCY metrics — never
 // one combined box. A split heat pump has two model numbers (outdoor condenser +
 // indoor air handler/coil); its ratings (HSPF2 / SEER2 / EER2) each get their own input.
+// Official North Carolina HEAR "Upgrade Type" names + the program's product-category
+// rebate caps (Nicholas, 2026-08-29). Order mirrors the program's measure list. Keys
+// stay stable so saved scopes are unaffected by the display-name change.
 const M1=[{key:'model',label:'Make / Model #',short:''}];   // single-unit default
 const HEAR_MEASURES=[
-  {key:'heat_pump',label:'Heat Pump — Space Heating & Cooling',cap:8000,
+  {key:'panel',label:'Electrical Panel',cap:4000,models:M1,metrics:['Amps'],
+   types:['200A Service','150A Service','100A Service','Subpanel']},
+  {key:'cooking',label:'Electric Cooking Appliance',cap:840,models:M1,metrics:[],
+   types:['Induction Range','Induction Cooktop','Electric Cooktop','Electric Range / Stove','Electric Oven']},
+  {key:'wiring',label:'Electric Wiring',cap:2500,models:[],metrics:[],
+   types:['Branch Circuit','Service Upgrade','Whole-Unit Rewire']},
+  {key:'dryer',label:'Heat Pump Clothes Dryer',cap:840,models:M1,metrics:['CEF'],
+   types:['Ventless Heat Pump Dryer','Combo Washer/Dryer']},
+  {key:'heat_pump',label:'Heat Pump for Space Heating/Cooling',cap:8000,
    models:[{key:'outdoor',label:'Outdoor Unit (Heat Pump) Model #',short:'Outdoor'},
            {key:'indoor', label:'Indoor Unit (Air Handler / Coil) Model #',short:'Indoor'}],
    metrics:['HSPF2','SEER2','EER2'],
    types:['Ducted Central Heat Pump','Ductless Mini-Split','Multi-Zone Mini-Split','Packaged Terminal (PTHP)','Ground-Source (Geothermal)','Air-to-Water Heat Pump']},
   {key:'hpwh',label:'Heat Pump Water Heater',cap:1750,models:M1,metrics:['UEF'],
    types:['50 gallon','65 gallon','80 gallon','Split-System']},
-  {key:'panel',label:'Electric Panel / Load Service Center',cap:4000,models:M1,metrics:['Amps'],
-   types:['200A Service','150A Service','100A Service','Subpanel']},
-  {key:'wiring',label:'Electric Wiring',cap:2500,models:[],metrics:[],
-   types:['Branch Circuit','Service Upgrade','Whole-Unit Rewire']},
-  {key:'dryer',label:'Heat Pump Clothes Dryer',cap:840,models:M1,metrics:['CEF'],
-   types:['Ventless Heat Pump Dryer']},
-  {key:'cooking',label:'Electric / Induction Cooking',cap:840,models:M1,metrics:[],
-   types:['Induction Range','Induction Cooktop','Electric Range']},
-  {key:'weatherization',label:'Insulation / Air Sealing / Ventilation',cap:1600,models:[],metrics:[],
+  {key:'weatherization',label:'Insulation, Air Sealing, and Ventilation',cap:1600,models:[],metrics:[],
    types:['Attic Insulation','Wall Insulation','Air Sealing','Mechanical Ventilation']},
 ];
 const HEAR_BY_KEY=Object.fromEntries(HEAR_MEASURES.map(m=>[m.key,m]));
