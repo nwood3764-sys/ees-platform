@@ -19,6 +19,7 @@ import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
 import { describeObject } from './adminService'
 import { loadPicklists } from './outreachService'
 import { guessPrefix } from './fieldMetadataService'
+import { resolveSoftDeleteColumn } from '../lib/softDeleteColumn'
 import {
   LABELED_FK_TABLES, idColumnKind, isOpaqueIdColumn, stripTablePrefix,
   parentLookupNameField, isParentLookupNameField, parentLookupColumnOf,
@@ -246,11 +247,13 @@ function userFkLabel(columnName) {
   return /_owner$/.test(columnName) ? 'Record Owner' : titleize(columnName)
 }
 
+// Reads the schema rather than guessing from the table name. The old rule
+// derived the prefix as `table.replace(/s$/, '')`, which produced
+// "propertie_is_deleted" and "opportunitie_is_deleted" — columns that do not
+// exist — so the two biggest objects in the platform were filtering NOTHING and
+// their lists included every soft-deleted row.
 function softDeleteColumn(table, colNames) {
-  const prefix = table.replace(/s$/, '')
-  if (colNames.has(`${prefix}_is_deleted`)) return `${prefix}_is_deleted`
-  if (colNames.has('is_deleted')) return 'is_deleted'
-  return null
+  return resolveSoftDeleteColumn(colNames)
 }
 
 // Identify the record-number and name columns by the platform convention.

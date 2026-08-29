@@ -1736,43 +1736,68 @@ function FilterValueEditor({ row, onChange }) {
   const [loadingOpts, setLoadingOpts] = useState(false);
   const fellBackToText = opts === 'TEXT';
 
+  // One effect owns the option list, and every response carries the sequence
+  // number of the request that asked for it.
+  //
+  // There used to be TWO effects writing here: one loading the unfiltered first
+  // page on mount, another searching as you type. Neither cancelled the other's
+  // in-flight request, so whichever HTTP response landed LAST won — which is
+  // why typing "Lutheran Social Services" could leave "1st City, LLC" and
+  // "1602 South Staples Housing" on screen (Nicholas, 2026-08-29). Those are
+  // the matches for the single letter "l", the first keystroke: its response
+  // arrived after the full phrase's and overwrote it. A typeahead that can show
+  // the answer to a question you have finished asking is not a typeahead.
+  const reqSeq = useRef(0);
   useEffect(() => {
     if (!wantsTypeahead) return;
+    const seq = ++reqSeq.current;
+    const stale = () => seq !== reqSeq.current;
     let cancelled = false;
-    (async () => {
-      setLoadingOpts(true);
-      try {
-        if (vs.kind === 'picklist') {
+
+    // Picklists are a fixed, small list: load once and filter in the browser.
+    if (vs.kind === 'picklist') {
+      (async () => {
+        setLoadingOpts(true);
+        try {
           const list = await getPicklistOptions(vs.object, vs.field);
-          if (cancelled) return;
+          if (cancelled || stale()) return;
           if ((!list || list.length === 0) && vs.maybe) setOpts('TEXT');
           else setOpts((list || []).map(o => ({ label: o.label })));
-        } else if (vs.kind === 'lookup') {
-          const list = await searchLookupOptions(vs.table, '').catch(() => []);
-          if (cancelled) return;
-          setOpts((list || []).map(o => ({ label: o.label })));
+        } catch {
+          if (!cancelled && !stale()) setOpts(vs?.maybe ? 'TEXT' : []);
+        } finally {
+          if (!cancelled && !stale()) setLoadingOpts(false);
         }
-      } catch {
-        if (!cancelled) setOpts(vs?.maybe ? 'TEXT' : []);
-      } finally {
-        if (!cancelled) setLoadingOpts(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vs?.kind, vs?.object, vs?.field, vs?.table, wantsTypeahead]);
+      })();
+      return () => { cancelled = true; };
+    }
 
-  // Live lookup search as the user types (lookups can have many records).
-  useEffect(() => {
-    if (!wantsTypeahead || vs?.kind !== 'lookup') return;
-    let cancelled = false;
+    // Lookups are searched on the server, debounced, one request per query.
     const t = setTimeout(async () => {
-      const list = await searchLookupOptions(vs.table, query).catch(() => []);
-      if (!cancelled) setOpts((list || []).map(o => ({ label: o.label })));
-    }, 180);
+      setLoadingOpts(true);
+      try {
+        const list = await searchLookupOptions(vs.table, query).catch(() => []);
+        if (cancelled || stale()) return;
+        // Two records with the same name are one choice here: the filter
+        // matches on the NAME, so offering it twice asks the user to pick
+        // between two identical things.
+        const seen = new Set();
+        const deduped = [];
+        for (const o of (list || [])) {
+          const label = o?.label;
+          if (!label || seen.has(label)) continue;
+          seen.add(label);
+          deduped.push({ label });
+        }
+        setOpts(deduped);
+      } finally {
+        if (!cancelled && !stale()) setLoadingOpts(false);
+      }
+    }, query ? 180 : 0);
+
     return () => { cancelled = true; clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [vs?.kind, vs?.object, vs?.field, vs?.table, wantsTypeahead, query]);
 
   if (VALUELESS_OPS.has(row.op)) return null;
 

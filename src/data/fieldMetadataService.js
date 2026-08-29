@@ -1,5 +1,6 @@
 import { supabase, fetchAllPaged } from '../lib/supabase'
 import { isSystemAuditColumn } from '../lib/systemAuditFields'
+import { resolveSoftDeleteColumn } from '../lib/softDeleteColumn'
 
 // =====================================================================
 // fieldMetadataService
@@ -198,11 +199,24 @@ export function getPicklistOptions(object, field) {
 export async function searchLookupOptions(tableName, query, { nameColumn = null, limit = 20 } = {}) {
   const col = nameColumn || guessNameColumn(tableName)
   if (!col) throw new Error(`No natural-name column known for table ${tableName}`)
+
+  // LEAP never hard-deletes, so without this the picker offers the recycle bin:
+  // 1,001 deleted accounts, among them three stale copies of "Lutheran Social
+  // Services of Wisconsin and Upper Michigan" that read as duplicates of the
+  // one real record (Nicholas, 2026-08-29: "why can I see all these
+  // duplicates?"). A deleted record can never be a useful filter value.
+  let softDel = null
+  try {
+    const fields = await getEditableFieldsForTable(tableName)
+    softDel = resolveSoftDeleteColumn((fields || []).map(f => f.columnName))
+  } catch { softDel = null }
+
   let q = supabase
     .from(tableName)
     .select(`id, ${col}`)
     .order(col, { ascending: true })
     .limit(limit)
+  if (softDel) q = q.eq(softDel, false)
   if (query && query.trim().length > 0) {
     q = q.ilike(col, `%${query.trim()}%`)
   }
