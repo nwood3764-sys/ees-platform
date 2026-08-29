@@ -515,8 +515,7 @@ function buildColumnSummaries(rows, columns, resolveDisplay) {
       case 'max':   val = nums.length ? Math.max(...nums) : null; break
       default: return ''
     }
-    const label = { sum:'Σ', avg:'avg', min:'min', max:'max', count:'#' }[c.summarize]
-    return val == null ? '—' : `${label} ${formatSummaryValue(val, c)}`
+    return val == null ? '—' : summaryValueWithTag(val, c)
   })
 }
 
@@ -985,8 +984,7 @@ function summarizeColumnValue(col, resolvedRows) {
     default: return null
   }
   if (val == null) return '—'
-  const tag = { sum:'Σ', avg:'avg', min:'min', max:'max', count:'#' }[col.summarize]
-  return `${tag} ${formatSummaryValue(val, col)}`
+  return summaryValueWithTag(val, col)
 }
 
 // Rename an aggregate scope's keys with a prefix (SUM_x → PARENT_SUM_x) so a
@@ -1342,6 +1340,16 @@ function formatReportValue(v, col) {
     }
   }
   return formatCellValue(v, col ? col.type : undefined)
+}
+
+// A total is printed as a number and nothing else — a sum under a money column
+// is money, and a symbol in front of it (Σ read as a currency sign) misreads it.
+// The other aggregates say what they are in words, since a column showing its
+// average or its lowest value is not something the reader can infer.
+function summaryValueWithTag(val, col) {
+  const tag = { avg:'Avg', min:'Min', max:'Max', count:'Count' }[col.summarize]
+  const text = formatSummaryValue(val, col)
+  return tag ? `${tag} ${text}` : `${text}`
 }
 
 // A summarized value prints in its own column's format — a currency column
