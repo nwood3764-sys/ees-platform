@@ -338,7 +338,10 @@ export async function buildObjectColumnCatalog(table) {
   // used to carry locked:true, which pinned them to the left of every list AND
   // hid them from the filter sidebar's field picker.
   if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
-  if (nameCol) catalog.push({ field: 'name', label: `${objectGroup} Name`, shortLabel: 'Name', type: 'text', group: objectGroup })
+  if (nameCol) catalog.push({
+    field: 'name', label: `${objectGroup} Name`, shortLabel: 'Name', type: 'text', group: objectGroup,
+    valueSource: { kind: 'lookup', table, nameColumn: nameCol },
+  })
 
   // All own selectable columns (no cap).
   for (const c of cols) {
@@ -420,7 +423,16 @@ export async function buildObjectColumnCatalog(table) {
       if (pc.is_foreign_key && pc.references_table === 'picklist_values') {
         valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name }
       } else if (pc.is_foreign_key && pc.references_table === 'users') {
-        valueSource = { kind: 'lookup', table: 'users' }
+        valueSource = { kind: 'lookup', table: 'users', nameColumn: 'user_name' }
+      } else if (pc.column_name === pIdentity.nameCol) {
+        // The parent's NAME. Its pickable values are the parent records
+        // themselves, so the typeahead searches them. Treating it as a "maybe
+        // picklist" found no managed picklist for account_name and dropped to a
+        // bare text box with nothing to choose from (Nicholas, 2026-08-29:
+        // "there should be a picklist of everything that's able to be picked.
+        // It's not there"). The name column is carried explicitly rather than
+        // guessed from the table name.
+        valueSource = { kind: 'lookup', table: parentTable, nameColumn: pIdentity.nameCol }
       } else if (type === 'text') {
         valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name, maybe: true }
       }
@@ -456,6 +468,7 @@ export async function buildObjectColumnCatalog(table) {
         shortLabel: 'Name',
         type: 'text',
         group: groupLabel,
+        valueSource: { kind: 'lookup', table: parentTable, nameColumn: pIdentity.nameCol },
         related: { fkColumn: fk.column_name, parentTable, parentColumn: pIdentity.nameCol },
       })
     }
@@ -492,7 +505,7 @@ export async function buildObjectColumnCatalog(table) {
       group: d.groupLabel,
       // The value is a name on the grandparent object, so the filter typeahead
       // offers the names that are actually out there rather than free text.
-      valueSource: { kind: 'lookup', table: d.grandTable },
+      valueSource: { kind: 'lookup', table: d.grandTable, nameColumn: grandName },
       related: {
         fkColumn: d.fkColumn,
         parentTable: d.parentTable,

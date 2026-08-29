@@ -1776,7 +1776,10 @@ function FilterValueEditor({ row, onChange }) {
     const t = setTimeout(async () => {
       setLoadingOpts(true);
       try {
-        const list = await searchLookupOptions(vs.table, query).catch(() => []);
+        // The name column is carried by the value source when the catalog knows
+        // it, so the search does not fall back to a hardcoded table -> name map
+        // that simply has no entry for most objects.
+        const list = await searchLookupOptions(vs.table, query, vs.nameColumn ? { nameColumn: vs.nameColumn } : {}).catch(() => []);
         if (cancelled || stale()) return;
         // Two records with the same name are one choice here: the filter
         // matches on the NAME, so offering it twice asks the user to pick
