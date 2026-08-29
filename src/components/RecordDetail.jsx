@@ -5508,6 +5508,17 @@ function RelatedListWidget({
       if ((prefillObj.opportunity_name == null || prefillObj.opportunity_name === '') && parentRecord.property_name) {
         prefillObj.opportunity_name = `${parentRecord.property_name} — Opportunity`
       }
+      // Which BUILDING decides which programs this opportunity may run: a
+      // multifamily building offers the multifamily programs and nothing else
+      // (record_type_eligibility, enforced by
+      // enforce_opportunity_record_type_building_eligibility). Started from the
+      // property the building is unknown, so the picker had nothing to narrow
+      // by and offered every program in the state — single-family programs on a
+      // multifamily building (Nicholas, 2026-08-29). Same rule as everywhere
+      // else: derive when the property holds one building, ASK when it holds
+      // several, never guess.
+      await seedConstrainingParent('opportunities', prefillObj,
+        { propertyId: parentRecord.id })
     } else if (childTable === 'opportunities' && parentTable === 'buildings' && parentRecord
         && (prefillObj.opportunity_state == null || prefillObj.opportunity_state === '')) {
       // From a building, at least carry the state so the record-type picker is

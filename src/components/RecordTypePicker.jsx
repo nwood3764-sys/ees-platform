@@ -187,7 +187,7 @@ export default function RecordTypePicker({
             {noneInState
               ? `Nothing is configured for ${noneInState}.`
               : owesParent
-                ? `This building runs more than one program. Choose the ${parentLabel.toLowerCase()} this belongs to, then its record type.`
+                ? `Choose the ${parentLabel.toLowerCase()} this belongs to, then its record type.`
                 : needsStateChoice
                   ? 'Choose the state this record is in, then its record type.'
                   : 'Choose a record type to continue.'}
@@ -311,10 +311,10 @@ export default function RecordTypePicker({
               border: `1px solid ${C.border}`, borderRadius: 6,
               color: C.textSecondary, fontSize: 12.5, lineHeight: 1.6,
             }}>
-              A {parentLabel.toLowerCase()} record type is the program, and the program
-              decides which record types exist here. Select one above and only that
-              program's record types are offered — the same list you would see
-              creating this from the {parentLabel.toLowerCase()} itself.
+              The {parentLabel.toLowerCase()} record type decides which record types exist
+              here, and there is more than one to choose from. Select one above and only
+              its record types are offered — the same list you would see creating this
+              from the {parentLabel.toLowerCase()} itself.
             </div>
           )}
           {!loading && !error && needsStateChoice && !chosenState && (

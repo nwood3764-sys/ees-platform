@@ -292,6 +292,13 @@ export async function fetchAvailableRecordTypes(
       .eq('picklist_object', objectName)
       .eq('picklist_field', 'record_type')
       .eq('picklist_is_active', true)
+      // A record type the platform assigns is not a record type a person picks.
+      // FIELD-OPERATIONS is the opportunity object's nationwide default and the
+      // anchor LEAP Pad hangs ad-hoc technician work off — fully live, and never
+      // a manual choice (Nicholas, 2026-08-29: "why in the world do we have
+      // field operations as a record type?"). The value stays active and
+      // enforceable; this governs what is OFFERED.
+      .eq('picklist_is_system_assigned', false)
     // When a state is supplied, show only record types scoped to that state plus
     // any nationwide types (picklist_state IS NULL).
     if (applyState && state) {
@@ -616,14 +623,18 @@ async function applyParentEligibility(recordTypes, objectName, parentObject, par
       p_child_object:       objectName,
     })
     if (error) throw error
-    const allowed = new Set((data || []).map(r => r.id))
+    // Eligibility says what MAY be saved; it does not decide what is offered,
+    // so a system-assigned type is dropped here too — otherwise the fallback
+    // below would put it back on the exact screens this is meant to keep it off.
+    const offerable = (data || []).filter(r => !r.picklist_is_system_assigned)
+    const allowed = new Set(offerable.map(r => r.id))
     if (allowed.size === 0) return recordTypes
     const narrowed = recordTypes.filter(rt => allowed.has(rt.id))
     // An empty intersection means the state filter and the eligibility config
     // disagree. Eligibility is the explicit, hand-configured rule, so it wins —
     // returning [] here would silently skip the record-type prompt entirely.
     if (narrowed.length > 0) return narrowed
-    return (data || []).map(r => ({
+    return offerable.map(r => ({
       id:    r.id,
       value: r.picklist_value,
       label: r.picklist_label || r.picklist_value,
