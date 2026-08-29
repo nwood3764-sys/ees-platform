@@ -4213,80 +4213,83 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // are set off with a larger title over a heavier rule so they read as distinct.
   const sh=(txt,yy)=>{tc(C.sealBlue); font(11,'bold'); t(M,yy,txt.toUpperCase());
     stroke(C.sealBlue); d.setLineWidth(1.2); d.line(M,yy+5,W-M,yy+5);};
-  const lines9=(arr,x,yy)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*11.5,String(ln))); return yy+arr.filter(v=>v).length*11.5;};
+  const lines9=(arr,x,yy)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*9.5,String(ln))); return yy+arr.filter(v=>v).length*9.5;};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
-  st.y=M+4;
+  st.y=M+2;
   // document title, centered — the proposal name over the full program name
-  tc(C.sealBlue); font(17,'bold'); t(W/2,st.y+12,docLabel,{align:'center'});
-  tc(C.ink); font(10.5,'bold'); t(W/2,st.y+29,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
-  st.y+=39; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=14;
-  bh('Primary Contractor:',M,st.y);
-  let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+15);
+  tc(C.sealBlue); font(15,'bold'); t(W/2,st.y+10,docLabel,{align:'center'});
+  tc(C.ink); font(9.5,'bold'); t(W/2,st.y+24,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
+  st.y+=30; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10;
+  bh('Primary IRA Contractor:',M,st.y);
+  let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+12);
   const RX=W/2+20;
-  bh(isInv?'Invoice Details:':'Project Details:',RX,st.y);
+  bh(isInv?'Invoice Details:':'Proposal Details:',RX,st.y);
   const det=isInv
-    ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
-  let yB=lines9(det,RX,st.y+15);
-  st.y=Math.max(yA,yB)+12;
-  bh('Bill To:',M,st.y);
-  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+15);
-  bh('Project Address:',RX,st.y);
-  yB=lines9([F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily',isInv?'':F.pjIQ],RX,st.y+15);
-  st.y=Math.max(yA,yB)+12;
-  /* ===== Section 1: Scope of Work ===== */
-  need(72); sh('Scope of Work',st.y+11); st.y+=20;
+    ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||'')]
+    :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||'')];
+  let yB=lines9(det,RX,st.y+12);
+  st.y=Math.max(yA,yB)+6;
+  bh('Customer Information:',M,st.y);
+  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+12);
+  bh('Project Information:',RX,st.y);
+  const projInfo=isInv
+    ?[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
+    :[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily','Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
+  yB=lines9(projInfo,RX,st.y+12);
+  st.y=Math.max(yA,yB)+6;
+  /* ===== Section 1: Project Scope of Work ===== */
+  need(52); sh('Project Scope of Work',st.y+9); st.y+=14;
   /* items table */
   stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
   tc(C.sealBlue); font(8,'bold');
   t(M,st.y+13,'CONTRACTOR'); t(M+92,st.y+13,'NAME'); t(M+185,st.y+13,'DESCRIPTION'); t(W-M,st.y+13,'TOTAL',{align:'right'});
   st.y+=17; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
-  const descW=CW-185-80;
+  const descW=CW-185-78;   // leaves a clear column for the right-aligned TOTAL
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
-    const dl=wrap(desc,descW), cl=wrap('Energy Efficiency Services of '+stateFullName(m.state),82), nml=wrap(r.name,85);
+    font(8,'bold'); const cl=wrap('Energy Efficiency Services of '+stateFullName(m.state),82), nml=wrap(r.name,85);
+    font(7.5); const dl=wrap(desc,descW);
     let i0=0, firstSeg=true;
     while(i0<dl.length){
-      const fit=Math.max(3,Math.floor((H-M-20-st.y)/9.5));
+      const fit=Math.max(3,Math.floor((H-M-20-st.y)/7.6));
       const seg=dl.slice(i0,i0+fit);
-      const h=Math.max(seg.length,firstSeg?Math.max(cl.length,nml.length):0)*9.5+8;
+      const h=Math.max(seg.length,firstSeg?Math.max(cl.length,nml.length):0)*7.6+3;
       if(st.y+h>H-M-16&&!firstSeg){d.addPage();st.y=M;}
       if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
-      tc(C.ink); font(8);
-      if(firstSeg){cl.forEach((ln,k)=>t(M,st.y+10+k*9.5,ln)); nml.forEach((ln,k)=>t(M+92,st.y+10+k*9.5,ln));
-        font(8,'bold'); t(W-M,st.y+10,_money(r.cost),{align:'right'}); font(8);}
-      seg.forEach((ln,k)=>{if(firstSeg&&i0+ (k===0)&&i0===0&&k===0){font(8,'bold');t(M+185,st.y+10,ln);font(8);}
-        else t(M+185,st.y+10+k*9.5,ln);});
+      if(firstSeg){tc(C.ink); font(8);
+        cl.forEach((ln,k)=>t(M,st.y+7+k*7.6,ln)); nml.forEach((ln,k)=>t(M+92,st.y+7+k*7.6,ln));
+        font(8,'bold'); t(W-M,st.y+7,_money(r.cost),{align:'right'});}
+      tc(C.ink); font(7.5); seg.forEach((ln,k)=>t(M+185,st.y+7+k*7.6,ln));
       st.y+=h; i0+=fit; firstSeg=false;
       if(i0<dl.length){d.addPage();st.y=M;}
     }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
   });
   // Section 1 total — the full cost of all the work above
-  {need(24); st.y+=6; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9.5,'bold'); t(M,st.y+13,'Total Project Cost'); t(W-M,st.y+13,_money(m.total),{align:'right'}); st.y+=16;}
+  {need(22); st.y+=4; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
+   tc(C.ink); font(9.5,'bold'); t(M,st.y+12,'Total Project Cost'); t(W-M,st.y+12,_money(m.total),{align:'right'}); st.y+=14;}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
-  need(m.foe?300:220);
-  sh('Rebates & Incentives',st.y+12); st.y+=20;
-  const sect=(title,desc,name,amt)=>{need(46); st.y+=12; bh(title,M,st.y);
-    st.y+=5; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-    const dl=wrap(desc,270), h=Math.max(dl.length*9.5,19)+10; need(h);
-    tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+12+k*9.5,ln));
-    wrap(name,150).forEach((ln,k)=>t(M+300,st.y+12+k*9.5,ln));
-    tc(C.ink); font(9,'bold'); t(W-M,st.y+12,_money(amt),{align:'right'});
+  need(m.foe?185:135);
+  sh('Rebates & Incentives',st.y+10); st.y+=16;
+  const sect=(title,desc,name,amt)=>{need(32); st.y+=9; bh(title,M,st.y);
+    st.y+=4; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    const dl=wrap(desc,270), h=Math.max(dl.length*9,18)+8; need(h);
+    tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+11+k*9,ln));
+    wrap(name,150).forEach((ln,k)=>t(M+300,st.y+11+k*9,ln));
+    tc(C.ink); font(9,'bold'); t(W-M,st.y+11,_money(amt),{align:'right'});
     st.y+=h; stroke([188,214,242]); d.line(M,st.y,W-M,st.y);};
   sect('IRA Rebates','Incentive Description: '+(m.tier?m.tier.desc:'')+'. Notes: '+(m.tier?m.tier.note:'')+'.',
     'IRA HOMES '+(isInv?'Incentive ':'')+'- Instant Discount',m.homesAmt);
   if(m.foe) sect('Other Non-IRA Rebates','Incentive Description: '+m.foe.desc+'. Notes: '+m.foe.note+'.',
     'Focus on Energy - Instant Discount',m.foeAmt);
   // total of every rebate available toward the project cost
-  {need(24); st.y+=8; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+13,'Total Rebate Amount');
-   tc(C.ink); t(W-M,st.y+13,_money(m.total),{align:'right'}); st.y+=18;}
+  {need(18); st.y+=6; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
+   tc(C.ink); font(9,'bold'); t(M,st.y+12,'Total Rebate Amount');
+   tc(C.ink); t(W-M,st.y+12,_money(m.total),{align:'right'}); st.y+=16;}
   /* ===== Section 3: Project Summary ===== */
-  need(96); st.y+=14; sh('Project Summary',st.y+9); st.y+=18;
+  need(64); st.y+=8; sh('Project Summary',st.y+8); st.y+=16;
   const trows=[['Total Project Cost',_money(m.total),false],
     ['Total Rebate Amount Applied as Instant Discount','('+_money(m.total)+')',false],
     [isInv?'Total Due':'Total Remaining Amount','$0.00',true]];
