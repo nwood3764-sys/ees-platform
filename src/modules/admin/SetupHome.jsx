@@ -744,7 +744,6 @@ const RECYCLE_BIN_TABLES = [
   { value: 'contacts',                     label: 'Contacts' },
   { value: 'assessments',                  label: 'Assessments' },
   { value: 'incentive_applications',       label: 'Incentive Applications' },
-  { value: 'incentives',                   label: 'Incentives' },
   { value: 'project_payment_requests',     label: 'Project Payment Requests' },
   { value: 'payment_receipts',             label: 'Payment Receipts' },
   { value: 'documents',                    label: 'Documents' },

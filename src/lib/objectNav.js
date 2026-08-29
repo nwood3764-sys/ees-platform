@@ -164,7 +164,6 @@ const OBJECT_HOME = {
   project_payment_requests: ['incentives', 'requests'],
   payment_receipts:         ['incentives', 'received'],
   project_reservations:     ['incentives', null],
-  incentives:               ['incentives', null],
 
   // ── Stock ───────────────────────────────────────────────────────────────
   products:                     ['stock', 'products'],
