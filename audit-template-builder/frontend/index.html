@@ -4234,8 +4234,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+12);
   bh('Project Information:',RX,st.y);
   const projInfo=isInv
-    ?[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily','Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
+    ?[F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
+    :[F.pjInstallAddr,F.pjCsz,'Multifamily','Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
   yB=lines9(projInfo,RX,st.y+12);
   st.y=Math.max(yA,yB)+6;
   /* ===== Section 1: Project Scope of Work ===== */
