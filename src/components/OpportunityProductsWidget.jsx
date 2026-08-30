@@ -341,43 +341,76 @@ export default function OpportunityProductsWidget({
       {/* Per-dwelling-unit rebate cap. Rendered outside the collapse so a
           project that is over the cap cannot be folded out of sight. */}
       {capStatus && (() => {
-        const over    = !!capStatus.is_over_cap
-        const amount  = Number(capStatus.amount_per_unit) || 0
-        const cap     = Number(capStatus.cap_per_unit) || 0
-        const room    = Number(capStatus.headroom_per_unit) || 0
-        const accent  = over ? C.amber : C.emerald
+        // Two different questions, side by side, because they answer different
+        // things and can disagree: PER UNIT is the rule a submission is judged
+        // against, PROJECT is the budget you estimate against. A project can sit
+        // under budget while one unit is over its cap, since caps are per unit.
+        const overUnit = !!capStatus.is_over_cap
+        const amount   = Number(capStatus.amount_per_unit) || 0
+        const cap      = Number(capStatus.cap_per_unit) || 0
+        const room     = Number(capStatus.headroom_per_unit) || 0
+
+        // Project figures are null until somebody says how many units this is —
+        // showing a $0 budget would read as "nothing left" rather than "unknown".
+        const units     = capStatus.unit_count == null ? null : Number(capStatus.unit_count)
+        const available = capStatus.total_available == null ? null : Number(capStatus.total_available)
+        const spent     = Number(capStatus.grand_total) || 0
+        const remaining = capStatus.remaining_budget == null ? null : Number(capStatus.remaining_budget)
+        const overBudget = remaining != null && remaining < 0
+
+        const warn   = overUnit || overBudget
+        const accent = warn ? C.amber : C.emerald
+        const mono   = { fontFamily: "'JetBrains Mono', monospace", color: C.textPrimary, fontWeight: 600 }
+        const divider = <span style={{ color: C.border }}>|</span>
+
         return (
           <div style={{
             display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8,
             padding: '8px 14px',
             // Tint of C.amber, which this palette points at sky blue — warning
             // states are blue or navy here, never red or orange.
-            background: over ? 'rgba(126,179,232,0.14)' : CARD_SECONDARY,
+            background: warn ? 'rgba(126,179,232,0.14)' : CARD_SECONDARY,
             borderTop: `1px solid ${C.border}`,
             borderLeft: `3px solid ${accent}`,
             fontSize: 12,
             color: C.textSecondary,
           }}>
-            <span style={{ fontWeight: 600, color: over ? C.textPrimary : C.textSecondary }}>
-              {over ? 'Over the per-unit rebate cap' : 'Rebate per dwelling unit'}
+            <span style={{ color: C.textMuted }}>Total</span>
+            <span style={mono}>{fmtCurrency(spent)}</span>
+
+            {divider}
+
+            <span style={{ color: C.textMuted }}>Per unit</span>
+            <span style={mono}>{fmtCurrency(amount)}</span>
+            <span style={{ color: C.textMuted }}>of {fmtCurrency(cap)}</span>
+            <span style={{ color: overUnit ? C.amber : C.textSecondary, fontWeight: 600 }}>
+              {overUnit
+                ? `over by ${fmtCurrency(Math.abs(room))}`
+                : `· ${fmtCurrency(room)} left`}
             </span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.textPrimary, fontWeight: 600 }}>
-              {fmtCurrency(amount)}
-            </span>
-            <span>of</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.textPrimary }}>
-              {fmtCurrency(cap)}
-            </span>
-            <span style={{ color: accent, fontWeight: 600 }}>
-              {over
-                ? `· over by ${fmtCurrency(Math.abs(room))}`
-                : `· ${fmtCurrency(room)} remaining`}
-            </span>
-            <span style={{ color: C.textMuted }}>
-              {over
-                ? `— ${capStatus.program_label} allows ${fmtCurrency(cap)} per unit across all measures. Reduce a sales price or drop a measure.`
-                : `— ${capStatus.program_label} cap across all measures`}
-            </span>
+
+            {available != null && (
+              <>
+                {divider}
+                <span style={{ color: C.textMuted }}>
+                  Remaining {capStatus.program_label} funding
+                </span>
+                <span style={{ ...mono, color: overBudget ? C.amber : C.textPrimary }}>
+                  {fmtCurrency(remaining)}
+                </span>
+                <span style={{ color: C.textMuted }}>
+                  of {fmtCurrency(available)} ({units} {units === 1 ? 'unit' : 'units'} × {fmtCurrency(cap)})
+                </span>
+              </>
+            )}
+
+            {warn && (
+              <span style={{ color: C.textPrimary, fontWeight: 600 }}>
+                {overUnit
+                  ? `— a dwelling unit is over the ${fmtCurrency(cap)} cap. Reduce a sales price or drop a measure.`
+                  : '— the project is over its available funding.'}
+              </span>
+            )}
           </div>
         )
       })()}
