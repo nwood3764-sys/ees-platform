@@ -4204,7 +4204,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const SGAP=8;                                    // clear space above every section header
   const bh=(txt,x,yy,al)=>{tc(C.sealBlue); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
   // one identical section-header treatment for all three sections
-  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.sealBlue); font(10.5,'bold'); t(M,st.y+9,txt.toUpperCase());
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.sealBlue); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
     stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
@@ -4213,26 +4213,31 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   st.y=M-12;   // tighter top margin above the title
   // centered title block: document name over the program, over the submittal stage
   tc(C.sealBlue); font(18,'bold'); t(W/2,st.y+12,docLabel,{align:'center'});
-  tc(C.ink);      font(12,'bold'); t(W/2,st.y+28,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
+  tc(C.ink);      font(12,'bold'); t(W/2,st.y+28,stateFullName(m.state)+' IRA Multifamily HOMES Program',{align:'center'});
   tc(C.ink);      font(11,'bold'); t(W/2,st.y+41,stageLabel,{align:'center'});
   st.y+=48; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13;
-  // two balanced columns: left block flush-left, right block flush-right across the full page width
-  bh('Primary IRA Contractor:',M,st.y);
-  let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+13);
-  bh(isInv?'Invoice Details:':'Proposal Details:',W-M,st.y,'right');
+  // three balanced columns across the page: Contractor | Project Information | Proposal Details
+  const CX2=M+200, CX3=W-M;
+  const projInfo=isInv
+    ?[F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
+    :[F.pjInstallAddr,F.pjCsz,'Multifamily','Est. Start Date: '+(F.pjEstStart||''),'Est. Completion Date: '+(F.pjEstEnd||'')];
   const det=isInv
     ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','Income Qualification Number: '+(F.pjIQ||'')]
     :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'Income Qualification Number: '+(F.pjIQ||'')];
-  let yB=lines9(det,W-M,st.y+13,'right');
-  st.y=Math.max(yA,yB)+4;
+  bh('Primary IRA Contractor:',M,st.y);
+  bh('Project Information:',CX2,st.y);
+  bh(isInv?'Invoice Details:':'Proposal Details:',CX3,st.y,'right');
+  let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+13);
+  let y2=lines9(projInfo,CX2,st.y+13);
+  let y3=lines9(det,CX3,st.y+13,'right');
+  st.y=Math.max(y1,y2,y3)+7;
+  // Customer Information spread across the same three columns (two lines each)
   bh('Customer Information:',M,st.y);
-  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+13);
-  bh('Project Information:',W-M,st.y,'right');
-  const projInfo=isInv
-    ?[F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :[F.pjInstallAddr,F.pjCsz,'Multifamily','Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
-  yB=lines9(projInfo,W-M,st.y+13,'right');
-  st.y=Math.max(yA,yB);
+  const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail];
+  y1=lines9([ci[0],ci[1]],M,st.y+13);
+  y2=lines9([ci[2],ci[3]],CX2,st.y+13);
+  y3=lines9([ci[4],ci[5]],CX3,st.y+13,'right');
+  st.y=Math.max(y1,y2,y3);
   /* ===== Section 1: Project Scope of Work ===== */
   sh('Project Scope of Work');
   /* items table — narrow Contractor/Measure columns, wide readable Description;
