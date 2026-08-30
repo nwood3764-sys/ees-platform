@@ -4210,37 +4210,37 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
-  const SGAP=10;                                    // even space above every section header
-  const bh=(txt,x,yy)=>{tc(C.sealBlue); font(9,'bold'); t(x,yy,txt.toUpperCase());};
+  const SGAP=13;                                    // clear space above every section header
+  const bh=(txt,x,yy,al)=>{tc(C.sealBlue); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
   // one identical section-header treatment for all three sections
-  const sh=(txt)=>{st.y+=SGAP; need(46); tc(C.sealBlue); font(11,'bold'); t(M,st.y+9,txt.toUpperCase());
-    stroke(C.sealBlue); d.setLineWidth(1.2); d.line(M,st.y+13,W-M,st.y+13); st.y+=19;};
-  const lines9=(arr,x,yy)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*9,String(ln))); return yy+arr.filter(v=>v).length*9;};
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.sealBlue); font(11,'bold'); t(M,st.y+9,txt.toUpperCase());
+    stroke(C.sealBlue); d.setLineWidth(1.2); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*9,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*9;};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
-  st.y=M+2;
+  st.y=M-12;   // tighter top margin above the title
   // centered title block: document name over the program, over the submittal stage
   tc(C.sealBlue); font(18,'bold'); t(W/2,st.y+12,docLabel,{align:'center'});
   tc(C.ink);      font(12,'bold'); t(W/2,st.y+28,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
   tc(C.ink);      font(11,'bold'); t(W/2,st.y+41,stageLabel,{align:'center'});
-  st.y+=47; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=11;
+  st.y+=48; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13;
+  // two balanced columns: left block flush-left, right block flush-right across the full page width
   bh('Primary IRA Contractor:',M,st.y);
-  let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+12);
-  const RX=W/2+20;
-  bh(isInv?'Invoice Details:':'Proposal Details:',RX,st.y);
+  let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+13);
+  bh(isInv?'Invoice Details:':'Proposal Details:',W-M,st.y,'right');
   const det=isInv
     ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','Income Qualification Number: '+(F.pjIQ||'')]
     :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'Income Qualification Number: '+(F.pjIQ||'')];
-  let yB=lines9(det,RX,st.y+12);
-  st.y=Math.max(yA,yB)+4;
+  let yB=lines9(det,W-M,st.y+13,'right');
+  st.y=Math.max(yA,yB)+6;
   bh('Customer Information:',M,st.y);
-  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+12);
-  bh('Project Information:',RX,st.y);
+  yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+13);
+  bh('Project Information:',W-M,st.y,'right');
   const projInfo=isInv
     ?[F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
     :[F.pjInstallAddr,F.pjCsz,'Multifamily','Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
-  yB=lines9(projInfo,RX,st.y+12);
+  yB=lines9(projInfo,W-M,st.y+13,'right');
   st.y=Math.max(yA,yB);
   /* ===== Section 1: Project Scope of Work ===== */
   sh('Project Scope of Work');
@@ -4256,15 +4256,15 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     font(7.5); const dl=wrap(desc,descW);
     let i0=0, firstSeg=true;
     while(i0<dl.length){
-      const fit=Math.max(3,Math.floor((H-M-20-st.y)/7.4));
+      const fit=Math.max(3,Math.floor((H-M-20-st.y)/7.2));
       const seg=dl.slice(i0,i0+fit);
-      const h=Math.max(seg.length,firstSeg?Math.max(cl.length,nml.length):0)*7.4+3;
+      const h=Math.max(seg.length,firstSeg?Math.max(cl.length,nml.length):0)*7.2+2;
       if(st.y+h>H-M-16&&!firstSeg){d.addPage();st.y=M;}
       if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
       if(firstSeg){tc(C.ink); font(8);
-        cl.forEach((ln,k)=>t(M,st.y+7+k*7.4,ln)); nml.forEach((ln,k)=>t(M+92,st.y+7+k*7.4,ln));
+        cl.forEach((ln,k)=>t(M,st.y+7+k*7.2,ln)); nml.forEach((ln,k)=>t(M+92,st.y+7+k*7.2,ln));
         font(8,'bold'); t(W-M,st.y+7,_money(r.cost),{align:'right'});}
-      tc(C.ink); font(7.5); seg.forEach((ln,k)=>t(M+185,st.y+7+k*7.4,ln));
+      tc(C.ink); font(7.5); seg.forEach((ln,k)=>t(M+185,st.y+7+k*7.2,ln));
       st.y+=h; i0+=fit; firstSeg=false;
       if(i0<dl.length){d.addPage();st.y=M;}
     }
@@ -4277,7 +4277,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
      the project summary together so the summary never lands nearly alone. */
   need(m.foe?196:150);                              // keep rebates + summary together
   sh('Rebates & Incentives');
-  const sect=(title,desc,name,amt)=>{need(34); st.y+=6; bh(title,M,st.y);
+  const sect=(title,desc,name,amt)=>{need(36); st.y+=11; bh(title,M,st.y);
     st.y+=4; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     const dl=wrap(desc,270), h=Math.max(dl.length*9,18)+8; need(h);
     tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+11+k*9,ln));
