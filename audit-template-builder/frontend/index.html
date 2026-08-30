@@ -3261,9 +3261,9 @@ const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjContactTitl
   'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas',
   'occUnits','occBeds','occBedsTotal'];   // occupancy persists per property too
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
-// Contacts are company representatives, so show "Name — Title" (e.g. "Kevin — CEO").
+// Contacts are company representatives, so show "First Last - Title" (e.g. "Dennis Hanson - CEO").
 function contactWithTitle(F){const n=(F.pjContact||'').trim(),tt=(F.pjContactTitle||'').trim();
-  return n?(tt?n+' — '+tt:n):'';}
+  return n?(tt?n+' - '+tt:n):'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
   try{localStorage.setItem(k,JSON.stringify(Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))));}catch(e){}}
@@ -3831,7 +3831,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,
     'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
-    F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
+    F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
@@ -4109,7 +4109,7 @@ function buildHearPdfBlob(){
   const _pn=String(F.pjPropName||'').trim();
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
-    F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
+    F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
    tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
@@ -4226,8 +4226,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const RX=W/2+20;
   bh(isInv?'Invoice Details:':'Proposal Details:',RX,st.y);
   const det=isInv
-    ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||'')]
-    :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'IQ Number: '+(F.pjIQ||'')];
+    ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','Income Qualification Number: '+(F.pjIQ||'')]
+    :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'Income Qualification Number: '+(F.pjIQ||'')];
   let yB=lines9(det,RX,st.y+12);
   st.y=Math.max(yA,yB)+6;
   bh('Customer Information:',M,st.y);
