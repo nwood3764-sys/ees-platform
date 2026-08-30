@@ -4033,7 +4033,7 @@ function _stampEesFooters(P,state){
    (so shuffled pages can be traced) plus Page X of Y. Runs after all content. */
 function _stampSealedFooters(P,docLabel,docNo){
   const {d,W,H,M,font,t,stroke,tc}=P;
-  const fy=H-40, N=d.getNumberOfPages();
+  const fy=H-24, N=d.getNumberOfPages();
   const left=docNo?(docLabel+' No.: '+docNo):'';
   for(let p=1;p<=N;p++){
     d.setPage(p);
@@ -4198,7 +4198,7 @@ function buildHearPdfBlob(){
 function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
   const isInv=kind==='invoice';
-  const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const P=_pdfNew(20); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
   const SGAP=8;                                    // clear space above every section header
@@ -4210,7 +4210,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
-  st.y=M-12;   // tighter top margin above the title
+  st.y=M-6;   // tight top margin above the title
   // centered title block: document name over the program, over the submittal stage
   tc(C.sealBlue); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
   tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
@@ -4242,7 +4242,6 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   /* items table — narrow Contractor/Measure columns, wide readable Description;
      every cell is vertically centered in its row, the way an Excel table reads. */
   const cW=84, mX=M+cW, mW=86, dX=mX+mW, dW=(W-M-64)-dX;   // column geometry
-  stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
   tc(C.sealBlue); font(8,'bold');
   t(M,st.y+12,'CONTRACTOR'); t(mX,st.y+12,'MEASURE'); t(dX,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
   st.y+=16; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
@@ -4263,8 +4262,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     st.y+=h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
   });
   // Section 1 total — the full cost of all the work above
-  {need(22); st.y+=4; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Project Cost'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=10;}
+  {need(28); st.y+=6; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=3;
+   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Project Cost'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=13;
+   stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
   need(m.foe?196:150);                              // keep rebates + summary together
@@ -4281,8 +4281,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   if(m.foe) sect('Other Non-IRA Rebates','Incentive Description: '+m.foe.desc+'. Notes: '+m.foe.note+'.',
     'Focus on Energy - Instant Discount',m.foeAmt);
   // total of every rebate available toward the project cost
-  {need(18); st.y+=8; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Rebate Amount'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=10;}
+  {need(26); st.y+=8; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=3;
+   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Rebate Amount'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=13;
+   stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);}
   /* ===== Section 3: Project Summary ===== */
   sh('Project Summary');
   const trows=[['Total Project Cost',_money(m.total),false],
