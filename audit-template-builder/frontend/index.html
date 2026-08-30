@@ -4212,9 +4212,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
   st.y=M-12;   // tighter top margin above the title
   // centered title block: document name over the program, over the submittal stage
-  tc(C.sealBlue); font(18,'bold'); t(W/2,st.y+12,docLabel,{align:'center'});
-  tc(C.ink);      font(12,'bold'); t(W/2,st.y+28,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
-  st.y+=35; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13;
+  tc(C.sealBlue); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
+  tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
+  st.y+=32; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13;
   // three balanced columns across the page: Contractor | Project Information | Proposal Details
   const CX2=M+200, CX3=W-M;
   const projInfo=isInv
