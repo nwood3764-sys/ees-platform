@@ -3546,17 +3546,8 @@ restoreSession();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
 const BANK={
-  atticIns:b=>i=>[
-`Upgrade existing attic insulation levels from approximately R-${b} to R-${i} in accordance with applicable PNNL building science standards and program requirements to improve thermal performance, reduce energy consumption, and enhance occupant comfort. Work will include preparation of attic areas to support proper airflow, insulation depth consistency, and long-term system performance.`,
-`Install eave baffles with 48-inch extensions in each accessible attic bay to maintain ventilation pathways and allow full insulation coverage above exterior wall top plates.`,
-`Install insulation rulers in each attic bay on both sides to verify uniform insulation depth and ensure consistent installed R-values throughout the attic plane.`,
-`Install blown-in fiberglass insulation to achieve a minimum final attic insulation value of R-${i} across all accessible attic areas.`,
-`Custom build and install insulated attic access hatches including insulation damming, insulated access covers, and weatherstripping to minimize thermal bypass and air leakage.`,
-`All insulation materials and installation methods will comply with applicable code requirements, manufacturer specifications, and accepted energy efficiency best practices.`].join('\n\n'),
-  airSeal:b=>[
-`Removal and disposal of existing attic insulation and debris. Insulation materials and debris will prepare the attic space for proper air sealing.`,
-`Air sealing of accessible air leakage pathways includes, but is not limited to:`,
-`Dropped soffits and open chases or bypasses\nWall top plates and framing\nExposed framing`].join('\n\n'),
+  atticIns:b=>i=>`Upgrade existing attic insulation from R-${b} to R-${i}. Prepare attic areas for proper airflow and insulation depth consistency, install eave baffles with 48-inch extensions in each accessible bay to maintain ventilation and allow full coverage above exterior wall top plates, and install insulation rulers on both sides of each bay to verify uniform depth. Install blown-in fiberglass to a minimum final value of R-${i} across all accessible areas, and custom build and install insulated attic access hatches with insulation damming, insulated covers, and weatherstripping to minimize thermal bypass and air leakage. All materials and methods will comply with applicable codes, manufacturer's specifications, and the program installation and materials standards.`,
+  airSeal:b=>`Removal and disposal of existing attic insulation and debris to prepare the attic space for proper air sealing of accessible air leakage pathways, to include dropped soffits, open bypasses, and wall top plates, to reduce infiltration and exfiltration into conditioned space.`,
   bath:'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
   kitchen:'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 1.0 GPM Aerator N3210N',
   shower:'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH'
@@ -4210,12 +4201,12 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
-  const SGAP=13;                                    // clear space above every section header
+  const SGAP=8;                                    // clear space above every section header
   const bh=(txt,x,yy,al)=>{tc(C.sealBlue); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
   // one identical section-header treatment for all three sections
-  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.sealBlue); font(11,'bold'); t(M,st.y+9,txt.toUpperCase());
-    stroke(C.sealBlue); d.setLineWidth(1.2); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
-  const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*9,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*9;};
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.sealBlue); font(10.5,'bold'); t(M,st.y+9,txt.toUpperCase());
+    stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
@@ -4233,7 +4224,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','Income Qualification Number: '+(F.pjIQ||'')]
     :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'Income Qualification Number: '+(F.pjIQ||'')];
   let yB=lines9(det,W-M,st.y+13,'right');
-  st.y=Math.max(yA,yB)+6;
+  st.y=Math.max(yA,yB)+4;
   bh('Customer Information:',M,st.y);
   yA=lines9([F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+13);
   bh('Project Information:',W-M,st.y,'right');
@@ -4244,40 +4235,37 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   st.y=Math.max(yA,yB);
   /* ===== Section 1: Project Scope of Work ===== */
   sh('Project Scope of Work');
-  /* items table */
+  /* items table — narrow Contractor/Measure columns, wide readable Description;
+     every cell is vertically centered in its row, the way an Excel table reads. */
+  const cW=84, mX=M+cW, mW=86, dX=mX+mW, dW=(W-M-64)-dX;   // column geometry
   stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
   tc(C.sealBlue); font(8,'bold');
-  t(M,st.y+12,'CONTRACTOR'); t(M+92,st.y+12,'NAME'); t(M+185,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
+  t(M,st.y+12,'CONTRACTOR'); t(mX,st.y+12,'MEASURE'); t(dX,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
   st.y+=16; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
-  const descW=CW-185-78;   // leaves a clear column for the right-aligned TOTAL
+  const CLH=9, RH=10;
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
-    font(8,'bold'); const cl=wrap('Energy Efficiency Services of '+stateFullName(m.state),82), nml=wrap(r.name,85);
-    font(7.5); const dl=wrap(desc,descW);
-    let i0=0, firstSeg=true;
-    while(i0<dl.length){
-      const fit=Math.max(3,Math.floor((H-M-20-st.y)/7.2));
-      const seg=dl.slice(i0,i0+fit);
-      const h=Math.max(seg.length,firstSeg?Math.max(cl.length,nml.length):0)*7.2+2;
-      if(st.y+h>H-M-16&&!firstSeg){d.addPage();st.y=M;}
-      if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
-      if(firstSeg){tc(C.ink); font(8);
-        cl.forEach((ln,k)=>t(M,st.y+7+k*7.2,ln)); nml.forEach((ln,k)=>t(M+92,st.y+7+k*7.2,ln));
-        font(8,'bold'); t(W-M,st.y+7,_money(r.cost),{align:'right'});}
-      tc(C.ink); font(7.5); seg.forEach((ln,k)=>t(M+185,st.y+7+k*7.2,ln));
-      st.y+=h; i0+=fit; firstSeg=false;
-      if(i0<dl.length){d.addPage();st.y=M;}
-    }
-    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
+    font(8.5);        const cl=wrap('Energy Efficiency Services of '+stateFullName(m.state),cW-6);
+    font(8.5,'bold'); const nml=wrap(r.name,mW-6);
+    font(9);          const dl=wrap(desc,dW);
+    const h=Math.max(dl.length*RH, cl.length*CLH, nml.length*CLH)+4;
+    if(st.y+h>H-M-16){d.addPage();st.y=M;}
+    if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
+    tc(C.ink);
+    font(8.5);        let y0=st.y+(h-cl.length*CLH)/2+7;  cl.forEach((ln,k)=>t(M,y0+k*CLH,ln));
+    font(8.5,'bold'); y0=st.y+(h-nml.length*CLH)/2+7;     nml.forEach((ln,k)=>t(mX,y0+k*CLH,ln));
+    font(9,'bold');   t(W-M,st.y+h/2+3,_money(r.cost),{align:'right'});
+    font(9);          y0=st.y+(h-dl.length*RH)/2+8;       dl.forEach((ln,k)=>t(dX,y0+k*RH,ln));
+    st.y+=h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
   });
   // Section 1 total — the full cost of all the work above
   {need(22); st.y+=4; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+11,'Total Project Cost'); t(W-M,st.y+11,_money(m.total),{align:'right'}); st.y+=11;}
+   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Project Cost'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=10;}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
   need(m.foe?196:150);                              // keep rebates + summary together
   sh('Rebates & Incentives');
-  const sect=(title,desc,name,amt)=>{need(36); st.y+=11; bh(title,M,st.y);
+  const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
     st.y+=4; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     const dl=wrap(desc,270), h=Math.max(dl.length*9,18)+8; need(h);
     tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+11+k*9,ln));
@@ -4290,7 +4278,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     'Focus on Energy - Instant Discount',m.foeAmt);
   // total of every rebate available toward the project cost
   {need(18); st.y+=8; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+11,'Total Rebate Amount'); t(W-M,st.y+11,_money(m.total),{align:'right'}); st.y+=11;}
+   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Rebate Amount'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=10;}
   /* ===== Section 3: Project Summary ===== */
   sh('Project Summary');
   const trows=[['Total Project Cost',_money(m.total),false],
@@ -4299,7 +4287,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   for(const [lbl,val,strong] of trows){
     tc(C.ink); font(9,strong?'bold':'normal');
     t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'});
-    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=15;}
+    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
   /* signature — ONLY on the final invoice / project payment request, never on a
      proposal. It certifies the project is complete, signed by both parties. */
   if(isInv){
