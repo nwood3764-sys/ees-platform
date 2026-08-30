@@ -4211,10 +4211,14 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
   st.y=M-6;   // tight top margin above the title
-  // centered title block: document name over the program, over the submittal stage
-  tc(C.sealBlue); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
-  tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
-  st.y+=32; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13;
+  // centered title block; drawn on page 1 and repeated atop any continuation page
+  const drawTitle=()=>{
+    tc(C.sealBlue); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
+    tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
+    st.y+=32; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
+  const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };   // a continuation page keeps the header
+  const needH=h=>{ if(st.y+h>H-M-16) contPage(); };             // page break that redraws the header
+  drawTitle();
   // three balanced columns across the page: Contractor | Project Information | Proposal Details
   const CX2=M+200, CX3=W-M;
   const projInfo=isInv
@@ -4252,7 +4256,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     font(8.5,'bold'); const nml=wrap(r.name,mW-6);
     font(9);          const dl=wrap(desc,dW);
     const h=Math.max(dl.length*RH, cl.length*CLH, nml.length*CLH)+4;
-    if(st.y+h>H-M-16){d.addPage();st.y=M;}
+    if(st.y+h>H-M-16){contPage();}
     if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
     tc(C.ink);
     font(8.5);        let y0=st.y+(h-cl.length*CLH)/2+7;  cl.forEach((ln,k)=>t(M,y0+k*CLH,ln));
@@ -4267,7 +4271,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
    stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
-  need(m.foe?196:150);                              // keep rebates + summary together
+  needH((m.foe?196:150)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
   sh('Rebates & Incentives');
   const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
     st.y+=4; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
@@ -4293,12 +4297,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     tc(C.ink); font(9,strong?'bold':'normal');
     t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'});
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
-  /* signature — ONLY on the final invoice / project payment request, never on a
-     proposal. It certifies the project is complete, signed by both parties. */
+  // signature — invoice / project payment request only; reserved with the block above so it is never orphaned
   if(isInv){
+    st.y+=26;
     const sl=wrap('By signing below, the customer and the contractor confirm that the project described above has been completed.',CW);
-    need(90+sl.length*11); st.y+=24;
-    tc(C.ink); font(8.5); sl.forEach((ln,k)=>t(M,st.y+k*11,ln)); st.y+=sl.length*11+34;
+    tc(C.ink); font(8.5); sl.forEach((ln,k)=>t(M,st.y+k*11,ln)); st.y+=sl.length*11+36;
     stroke([68,68,68]); d.setLineWidth(1);
     d.line(M,st.y,M+230,st.y); d.line(W-M-230,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-230,st.y+11,'Contractor Signature');
