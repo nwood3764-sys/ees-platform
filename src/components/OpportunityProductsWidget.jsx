@@ -19,6 +19,7 @@ import {
   getOpportunityPriceBook,
   listSelectablePriceBooks,
   setOpportunityPriceBook,
+  getOpportunityRebateCapStatus,
 } from '../data/opportunityProductsService'
 
 const CARD_SECONDARY = '#f7f9fc'
@@ -80,6 +81,29 @@ export default function OpportunityProductsWidget({
     () => rows.reduce((s, r) => s + (Number(r.oli_total_price) || 0), 0),
     [rows],
   )
+
+  // Per-dwelling-unit rebate cap (IRA HEAR and any other capped program).
+  // Re-read from the server whenever the lines change rather than recomputing
+  // it here: the "worst-off unit" rule has ONE definition, in the database, so
+  // this card and any future save-time check can never disagree. A program with
+  // no cap configured returns nothing and the band simply does not render — it
+  // must never invent a limit for a program that has none.
+  const [capStatus, setCapStatus] = useState(null)
+  useEffect(() => {
+    if (!opportunityId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const s = await getOpportunityRebateCapStatus(opportunityId)
+        if (!cancelled) setCapStatus(s)
+      } catch (e) {
+        // A missing cap is not an error worth interrupting the grid for.
+        console.error('Rebate cap status failed', e)
+        if (!cancelled) setCapStatus(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [opportunityId, rows])
 
   // --- cell editing -------------------------------------------------------
   const startEdit = (row, field) => {
@@ -313,6 +337,50 @@ export default function OpportunityProductsWidget({
           </button>
         </div>
       </div>
+
+      {/* Per-dwelling-unit rebate cap. Rendered outside the collapse so a
+          project that is over the cap cannot be folded out of sight. */}
+      {capStatus && (() => {
+        const over    = !!capStatus.is_over_cap
+        const amount  = Number(capStatus.amount_per_unit) || 0
+        const cap     = Number(capStatus.cap_per_unit) || 0
+        const room    = Number(capStatus.headroom_per_unit) || 0
+        const accent  = over ? C.amber : C.emerald
+        return (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8,
+            padding: '8px 14px',
+            // Tint of C.amber, which this palette points at sky blue — warning
+            // states are blue or navy here, never red or orange.
+            background: over ? 'rgba(126,179,232,0.14)' : CARD_SECONDARY,
+            borderTop: `1px solid ${C.border}`,
+            borderLeft: `3px solid ${accent}`,
+            fontSize: 12,
+            color: C.textSecondary,
+          }}>
+            <span style={{ fontWeight: 600, color: over ? C.textPrimary : C.textSecondary }}>
+              {over ? 'Over the per-unit rebate cap' : 'Rebate per dwelling unit'}
+            </span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.textPrimary, fontWeight: 600 }}>
+              {fmtCurrency(amount)}
+            </span>
+            <span>of</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.textPrimary }}>
+              {fmtCurrency(cap)}
+            </span>
+            <span style={{ color: accent, fontWeight: 600 }}>
+              {over
+                ? `· over by ${fmtCurrency(Math.abs(room))}`
+                : `· ${fmtCurrency(room)} remaining`}
+            </span>
+            <span style={{ color: C.textMuted }}>
+              {over
+                ? `— ${capStatus.program_label} allows ${fmtCurrency(cap)} per unit across all measures. Reduce a sales price or drop a measure.`
+                : `— ${capStatus.program_label} cap across all measures`}
+            </span>
+          </div>
+        )
+      })()}
 
       {!collapsed && (
         <>
