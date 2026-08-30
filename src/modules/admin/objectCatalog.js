@@ -23,6 +23,7 @@ export const OBJECT_CATALOG = [
   { table: 'price_books',                   label: 'Price Book',                  pluralLabel: 'Price Books',                  module: 'CRM & Enrollment',        description: 'Program price book — the set of items sellable on an opportunity of a given record type.' },
   { table: 'price_book_entries',            label: 'Price Book Entry',            pluralLabel: 'Price Book Entries',           module: 'CRM & Enrollment',        description: 'A product priced into a price book; pricing a product here is what makes it chargeable.' },
   { table: 'opportunity_record_type_price_books', label: 'Record Type Price Book', pluralLabel: 'Record Type Price Books',     module: 'CRM & Enrollment',        description: 'Maps an opportunity record type to its price book — the record type dictates the price book.' },
+  { table: 'program_rebate_caps',           label: 'Program Rebate Cap',          pluralLabel: 'Program Rebate Caps',          module: 'CRM & Enrollment',        description: 'The most a single dwelling unit may receive from a program across all measures (IRA HEAR: $14,000). Warns on the opportunity when the line items exceed it.' },
 
   // ─── SERVICE PROVIDERS ─────────────────────────────────────────────────
   { table: 'service_provider_applications',  label: 'Service Provider Application', pluralLabel: 'Service Provider Applications', module: 'Service Providers',      description: 'Subcontractor / service-provider signup application with an approval stage lifecycle.' },

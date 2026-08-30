@@ -157,3 +157,23 @@ export async function setOpportunityPriceBook(opportunityId, priceBookId) {
   const row = await saveRecord('opportunities', opportunityId, { price_book_id: priceBookId })
   return row?.price_book_id ?? priceBookId
 }
+
+// ---------------------------------------------------------------------------
+// Per-dwelling-unit rebate cap. Some programs (IRA HEAR) cap the TOTAL rebate a
+// single dwelling unit may receive across all measures, so the figure that
+// matters is not the grand total but the worst-off unit. That rule lives in the
+// database (opportunity_rebate_cap_status, migration 20260830...) and is not
+// re-implemented here — one definition, so the screen and any future validation
+// can never disagree about whether a project is over.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cap status for an opportunity, or null when its program has no cap configured
+ * (most programs). Never invents a limit: no row means no cap to show.
+ */
+export async function getOpportunityRebateCapStatus(opportunityId) {
+  const { data, error } = await supabase
+    .rpc('opportunity_rebate_cap_status', { p_opportunity_id: opportunityId })
+  if (error) throw error
+  return (Array.isArray(data) ? data[0] : data) ?? null
+}
