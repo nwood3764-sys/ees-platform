@@ -4218,9 +4218,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   st.y=M+2;
   // document title, centered — the proposal name over the full program name
-  tc(C.sealBlue); font(15,'bold'); t(W/2,st.y+10,docLabel,{align:'center'});
-  tc(C.ink); font(9.5,'bold'); t(W/2,st.y+24,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
-  st.y+=30; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10;
+  const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
+  tc(C.sealBlue); font(18,'bold'); t(W/2,st.y+13,docLabel,{align:'center'});
+  tc(C.ink); font(12,'bold'); t(W/2,st.y+30,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
+  tc(C.ink); font(11,'bold'); t(W/2,st.y+45,stageLabel,{align:'center'});
+  st.y+=52; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10;
   bh('Primary IRA Contractor:',M,st.y);
   let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+12);
   const RX=W/2+20;
