@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated <!--STAMP-->2026-08-13 · dev<!--/STAMP--> — owner, unit count, and invoice numbers auto-fill from the uploaded reports; NC proposal/invoice measures are stacked with a Quantity / Labor / Material / Total sub-grid and a Total Cost / Rebates / Deposits / Due summary</div>
+    Last updated <!--STAMP-->2026-08-13 · dev<!--/STAMP--> — owner, unit count, and invoice numbers auto-fill from the uploaded reports; the IRA HOMES proposal fits on one page with a Project Scope of Work, Rebates &amp; Incentives, and Project Summary (Total Project Cost, rebate applied as instant discount, Total Remaining Amount)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -4218,9 +4218,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   st.y=M+2;
   // document title, centered — the proposal name over the full program name
-  tc(C.sealBlue); font(15,'bold'); t(W/2,st.y+10,docLabel,{align:'center'});
-  tc(C.ink); font(9.5,'bold'); t(W/2,st.y+24,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
-  st.y+=30; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10;
+  const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
+  tc(C.sealBlue); font(18,'bold'); t(W/2,st.y+13,docLabel,{align:'center'});
+  tc(C.ink); font(12,'bold'); t(W/2,st.y+30,stateFullName(m.state)+' Inflation Reduction Act Multifamily HOMES Program',{align:'center'});
+  tc(C.ink); font(11,'bold'); t(W/2,st.y+45,stageLabel,{align:'center'});
+  st.y+=52; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10;
   bh('Primary IRA Contractor:',M,st.y);
   let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+12);
   const RX=W/2+20;
