@@ -3806,27 +3806,28 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      logo badge, no bubbly meta panel. ---- */
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
-  tc(NAVY); font(15,'bold');    t(M,st.y+13,'Energy Efficiency Services');
-  tc(INKM); font(9.5,'normal'); t(M,st.y+27,'of '+_state);
-  tc(NAVY); font(16,'bold');    t(W-M,st.y+13,_dt,{align:'right'});
-  tc(INKM); font(8,'normal');   t(W-M,st.y+25,'Inflation Reduction Act  ·  HOMES Program',{align:'right'});
-  {const meta=[]; if((isAudit||isInv)&&docNo) meta.push((isAudit?'Audit Invoice No. ':'Invoice No. ')+docNo);
-   meta.push('Date: '+pv(F.pjInvDate)); if(isInv) meta.push('Terms: Net 30');
-   tc(INKM); font(8,'normal'); t(W-M,st.y+35,meta.join('      '),{align:'right'});}
-  st.y+=43;
-  stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-  st.y+=16;
+  const drawHead=()=>{
+    tc(NAVY); font(12,'bold');    t(M,st.y+10,'Energy Efficiency Services');
+    tc(INKM); font(8.5,'normal'); t(M,st.y+21,'of '+_state);
+    tc(NAVY); font(12,'bold');    t(W-M,st.y+10,_dt,{align:'right'});
+    tc(INKM); font(8,'normal');   t(W-M,st.y+20,'Inflation Reduction Act  \u00b7  HOMES Program',{align:'right'});
+    {const meta=[]; if((isAudit||isInv)&&docNo) meta.push((isAudit?'Audit Invoice No. ':'Invoice No. ')+docNo);
+     meta.push('Date: '+pv(F.pjInvDate)); if(isInv) meta.push('Terms: Net 30');
+     tc(INKM); font(8,'normal'); t(W-M,st.y+29,meta.join('      '),{align:'right'});}
+    st.y+=35; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16; };
+  const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the letterhead
+  const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
+  drawHead();
   /* ---- party blocks: PROPERTY (left) and BILL TO (right), accent labels ---- */
   const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
   const _pn=String(F.pjPropName||'').trim();
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
-  const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,
-    'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
+  const lLines=[F.pjInstallAddr,F.pjCsz,
     F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
+   tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT INFORMATION'); t(rX,pT+8,'CUSTOMER INFORMATION');
    stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
@@ -3889,9 +3890,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
         ['LABOR',   r=>_money(r.labor),64],
         ['MATERIAL',r=>_money(r.material),68],
         ['TOTAL',   r=>_money(r.cost),72]]
-      :[['QUANTITY',r=>_qty(r.qty),82],
-        ['UNIT',    r=>String(r.unit||''),70],
-        ['AMOUNT',  r=>_money(r.cost),80]];
+      :[['QUANTITY',r=>_qty(r.qty),54],
+        ['UNIT OF MEASURE',r=>String(r.unit||''),62],
+        ['AMOUNT',  r=>_money(r.cost),78]];
     const numTotW=numCols.reduce((a,c)=>a+c[2],0);
     const descW=CW-numTotW;                       // wide left column for name + description
     // Precompute each column's right edge (rightmost first, walking left from W-M).
@@ -3901,13 +3902,14 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const colXs=[M].concat(numCols.map(c=>c[3]-c[2])).concat([W-M]);
     const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
     // header row — repeats at the top of every page the table spills onto.
-    const headH=20;
+    const headH=26;
     const tableHeader=()=>{
       need(headH+8);
       fill(PANEL); d.rect(M,st.y,CW,headH,'F');
       stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-      tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
-      numCols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+      tc(NAVY); font(8,'bold'); t(M+5,st.y+headH/2+3,'ENERGY EFFICIENCY MEASURE');
+      numCols.forEach(([lbl,,w,rx])=>{const wl=wrap(lbl,w-8); const ty=st.y+(headH-wl.length*9)/2+7;
+        wl.forEach((ln,k)=>t(rx-4,ty+k*9,ln,{align:'right'}));});
       colRules(st.y,st.y+headH);
       stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
       st.y+=headH;
@@ -3921,7 +3923,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       const h=padT+nameH+(descH?gapND+descH:0)+padB;
       // page break BEFORE drawing the row, then repeat the header. A measure block
       // never splits across pages.
-      if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
+      if(st.y+h>H-M-24){contPage(); tableHeader();}
       const y0=st.y;
       if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}   // subtle zebra for scanning
       // measure name (numbered) + description, left column
@@ -3931,7 +3933,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
         dl.forEach((ln,k)=>t(M+5,dy+k*descLH+8,ln));}
       // quantity / dollar columns — top-aligned on the measure's first line so
       // they sit in a clear grid cell, not stranded in the middle of the row.
-      const numY=y0+padT+9;
+      const numY=y0+h/2+3;
       numCols.forEach(([lbl,fn,w,rx],c)=>{
         font(9.5,c===numCols.length-1?'bold':'normal');
         tc(c===numCols.length-1?NAVY:[64,78,96]);
@@ -3951,7 +3953,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   }
   // clean rebate rows (matching the line-item table), heading kept with the
   // column header and first credit line so a title is never orphaned.
-  need(96);
+  needH((m.foe?250:190));   // keep rebates + totals together on one page
   head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',12);
   {stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
@@ -3960,7 +3962,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      font(9.5,'bold'); const nl=wrap(nm,CW-160);
      font(8.5);        const dl=wrap(desc,CW-160);
      const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
-     if(st.y+h>H-M-24){d.addPage();st.y=M;}
+     if(st.y+h>H-M-24){contPage();}
      const y0=st.y;
      tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
      if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2;
@@ -3983,10 +3985,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
    const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
      tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
      stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
-   trow('Total Cost',_money(gross));
+   trow('Total Project Cost',_money(gross));
    trow('Rebates & Incentives Applied','('+_money(reb)+')');
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
-   tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
+   tc(NAVY); font(11,'bold'); t(x0,sy+11,isInv?'Total Due':'Total Remaining Amount'); t(W-M,sy+11,_money(dueVal),{align:'right'});
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
    st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* ---- deliverables (audit only) ---- */
