@@ -4024,10 +4024,10 @@ function _stampEesFooters(P,state){
 
 /* Footer for the Sealed proposal / invoice: the document number on every page
    (so shuffled pages can be traced) plus Page X of Y. Runs after all content. */
-function _stampSealedFooters(P,docLabel,docNo){
+function _stampSealedFooters(P,docLabel,docNo,docDate){
   const {d,W,H,M,font,t,stroke,tc}=P;
   const fy=H-24, N=d.getNumberOfPages();
-  const left=docNo?(docLabel+' No.: '+docNo):'';
+  const left=[docNo?(docLabel+' No.: '+docNo):'', docDate?('Date: '+docDate):''].filter(Boolean).join('    \u00b7    ');
   for(let p=1;p<=N;p++){
     d.setPage(p);
     stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
@@ -4217,22 +4217,13 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const projInfo=isInv
     ?[F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
     :[F.pjInstallAddr,F.pjCsz,'Multifamily','Est. Start Date: '+(F.pjEstStart||''),'Est. Completion Date: '+(F.pjEstEnd||'')];
-  const det=isInv
-    ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','Income Qualification Number: '+(F.pjIQ||'')]
-    :['Proposal No.: '+docNo,'Date: '+(F.pjInvDate||''),'Income Qualification Number: '+(F.pjIQ||'')];
+  const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail];
   bh('Primary IRA Contractor:',M,st.y);
   bh('Project Information:',CX2,st.y);
-  bh(isInv?'Invoice Details:':'Proposal Details:',CX3,st.y,'right');
+  bh('Customer Information:',CX3,st.y,'right');
   let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+13);
   let y2=lines9(projInfo,CX2,st.y+13);
-  let y3=lines9(det,CX3,st.y+13,'right');
-  st.y=Math.max(y1,y2,y3)+7;
-  // Customer Information spread across the same three columns (two lines each)
-  bh('Customer Information:',M,st.y);
-  const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail];
-  y1=lines9([ci[0],ci[1]],M,st.y+13);
-  y2=lines9([ci[2],ci[3]],CX2,st.y+13);
-  y3=lines9([ci[4],ci[5]],CX3,st.y+13,'right');
+  let y3=lines9(ci,CX3,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
   /* ===== Section 1: Project Scope of Work ===== */
   sh('Project Scope of Work');
@@ -4273,7 +4264,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     wrap(name,150).forEach((ln,k)=>t(M+300,st.y+11+k*9,ln));
     tc(C.ink); font(9,'bold'); t(W-M,st.y+11,_money(amt),{align:'right'});
     st.y+=h; stroke(C.line); d.line(M,st.y,W-M,st.y);};
-  sect('IRA Rebates','Incentive Description: '+(m.tier?m.tier.desc:'')+'. Notes: '+(m.tier?m.tier.note:'')+'.',
+  sect('Inflation Reduction Act HOMES Rebate','Incentive Description: '+(m.tier?m.tier.desc:'')+'. Notes: '+(m.tier?m.tier.note:'')+'.',
     'IRA HOMES '+(isInv?'Incentive ':'')+'- Instant Discount',m.homesAmt);
   if(m.foe) sect('Other Non-IRA Rebates','Incentive Description: '+m.foe.desc+'. Notes: '+m.foe.note+'.',
     'Focus on Energy - Instant Discount',m.foeAmt);
@@ -4299,7 +4290,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     d.line(M,st.y,M+230,st.y); d.line(W-M-230,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-230,st.y+11,'Contractor Signature');
   }
-  _stampSealedFooters(P,docLabel,docNo);
+  _stampSealedFooters(P,docLabel,docNo,F.pjInvDate);
   return d.output('blob');
 }
 
