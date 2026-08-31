@@ -88,6 +88,20 @@ const DECIMALS_FIELD = {
   dependsOn: { key: 'number_format', notEquals: 'compact' },
 }
 const DATA_LABELS_FIELD = { key: 'show_data_labels', label: 'Show data labels', type: 'boolean' }
+// WHAT a data label says, not merely whether there is one. The boolean above
+// stays for every widget already saved with it; this wins when it is set.
+// (Nicholas, 2026-08-31: "I need to be able to turn on percentages, count, all
+// of this stuff.")
+const DATA_LABEL_MODE_FIELD = {
+  key: 'data_label_mode', label: 'Data labels', type: 'select',
+  options: [
+    { value: 'auto',          label: 'Default for this chart' },
+    { value: 'value',         label: 'Value' },
+    { value: 'percent',       label: 'Percentage' },
+    { value: 'value_percent', label: 'Value and percentage' },
+    { value: 'none',          label: 'None' },
+  ],
+}
 const LEGEND_FIELD      = { key: 'show_legend', label: 'Show legend', type: 'boolean' }
 // Where the legend sits. Right by default: a bottom legend in a tile-height
 // widget collapses into a one-item-at-a-time pager, and a pie's categories are
@@ -236,7 +250,7 @@ export const COMPONENT_REGISTRY = [
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM12 2v10l8 4',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
     defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(false)),
   },
   {
@@ -244,7 +258,7 @@ export const COMPONENT_REGISTRY = [
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 6a4 4 0 100 8 4 4 0 000-8z',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
     defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(true)),
   },
   {
