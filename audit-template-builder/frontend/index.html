@@ -3848,16 +3848,17 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
     // isolate the header block from the sections below with a horizontal rule, kept close to the content
     st.y=Math.max(cy,ly,ry)+6; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
-  const drawHead=()=>{
+  const drawHead=(withParties)=>{
     st.y=18;                                                          // tight top margin — title sits near the top, not floating in white space
     tc(BLUE);       font(12,'bold');   t(W/2,st.y+11,'Energy Efficiency Services of '+_state,{align:'center'});
     tc(C.ink);      font(15,'bold');   t(W/2,st.y+31,dlab,{align:'center'});
     tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+47,_state+' IRA Multifamily HOMES Program',{align:'center'});
-    st.y+=54; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10;   // rule kept close to the party labels below
-    drawParties(); };
-  const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the FULL header
+    st.y+=54; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    // party blocks appear on the FIRST page only; continuation pages carry just the title header
+    if(withParties){ st.y+=10; drawParties(); } else { st.y+=14; } };
+  const contPage=()=>{ d.addPage(); st.y=M; drawHead(false); };   // continuation page: title header only, no party columns
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
-  drawHead();
+  drawHead(true);
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(BLUE); font(10.5,'bold');
     t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke(BLUE); d.setLineWidth(.9);
