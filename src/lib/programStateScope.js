@@ -7,7 +7,7 @@
 // therefore one rule applied to one input — the state the new record is in.
 //
 // Nicholas, 2026-08-23, from the New Opportunity pop-up on a Rocky Mount, North
-// Carolina building that offered FOE-2024-WI and the whole Michigan set:
+// Carolina building that offered WI-FOE-2024 and the whole Michigan set:
 // "North Carolina properties only get North Carolina opportunities."
 //
 // Pure and side-effect free so scripts/program-state-scope-fixture.mjs can pin

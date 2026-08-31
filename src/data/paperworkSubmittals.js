@@ -196,9 +196,9 @@ export const PROGRAM_SUBMITTALS = Object.freeze({
   'WI-IRA-SF-HOMES-AUDIT': notBuilt('WI-IRA-SF-HOMES-AUDIT', 'WI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Wisconsin (Single Family Energy Audit)'),
   'WI-IRA-MF-HEAR':        notBuilt('WI-IRA-MF-HEAR',        'WI-IRA-MF-HEAR',        'IRA HEAR — Wisconsin (Multifamily)'),
   'WI-IRA-SF-HEAR':        notBuilt('WI-IRA-SF-HEAR',        'WI-IRA-SF-HEAR',        'IRA HEAR — Wisconsin (Single Family)'),
-  'FOE-2024-WI':           notBuilt('FOE-2024-WI',           'FOE-2024-WI',           'Focus on Energy — Wisconsin (2024)'),
-  'FOE-2025-WI':           notBuilt('FOE-2025-WI',           'FOE-2025-WI',           'Focus on Energy — Wisconsin (2025)'),
-  'FOE-2026-WI':           notBuilt('FOE-2026-WI',           'FOE-2026-WI',           'Focus on Energy — Wisconsin (2026)'),
+  'WI-FOE-2024':           notBuilt('WI-FOE-2024',           'WI-FOE-2024',           'Focus on Energy — Wisconsin (2024)'),
+  'WI-FOE-2025':           notBuilt('WI-FOE-2025',           'WI-FOE-2025',           'Focus on Energy — Wisconsin (2025)'),
+  'WI-FOE-2026':           notBuilt('WI-FOE-2026',           'WI-FOE-2026',           'Focus on Energy — Wisconsin (2026)'),
 
   // ── North Carolina ──────────────────────────────────────────────────────
   'NC-IRA-MF-HOMES':       notBuilt('NC-IRA-MF-HOMES',       'NC-IRA-MF-HOMES',       'IRA HOMES — North Carolina (Multifamily)'),
