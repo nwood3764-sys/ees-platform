@@ -5,6 +5,7 @@ import SearchableCombo from '../components/SearchableCombo'
 import AnchoredPopover from '../components/AnchoredPopover'
 import { describeSaveError } from '../lib/saveErrorMessage'
 import { classifyCalcFields, describeIncompleteCalcFields } from '../lib/reportCalcFields'
+import { childRollupKey, aggregatesForColumnType, childRollupLabel } from '../lib/reportChildRollups'
 import { guessPrefix } from '../data/fieldMetadataService'
 import {
   deriveReportColumnLabel,
@@ -15,6 +16,7 @@ import {
   loadReport, saveReport, cloneReport,
   loadFieldTree, loadRelatedObjectFields,
   listPrimaryObjectOptions,
+  loadChildObjectFields,
   listObjectColumns,
   loadFilterValueOptions,
   runReport,
@@ -91,6 +93,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
 
   const [fieldTree, setFieldTree]               = useState(null)
   const [expandedRelated, setExpandedRelated]   = useState({})  // viaTable → { columns: [...] }
+  const [expandedChildren, setExpandedChildren] = useState({})  // childTable → { columns: [...] }
 
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(null)
@@ -265,6 +268,48 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     } catch (err) {
       console.warn('related fields load failed:', err)
     }
+  }
+
+  // Expand a CHILD object to choose what to aggregate over it. Keyed by the
+  // child's table + the foreign key it points back through, because an object
+  // can be a child twice (work_orders reaches properties through property_id
+  // and buildings through building_id).
+  const handleExpandChild = async (childTable, fkColumn) => {
+    const key = `${childTable}.${fkColumn}`
+    if (expandedChildren[key]) {
+      const next = { ...expandedChildren }
+      delete next[key]
+      setExpandedChildren(next)
+      return
+    }
+    try {
+      const obj = await loadChildObjectFields(childTable)
+      setExpandedChildren(prev => ({ ...prev, [key]: obj }))
+    } catch (err) {
+      console.warn('child fields load failed:', err)
+    }
+  }
+
+  // Add an aggregate over a child object as a column on the parent's row.
+  // `column` is null for a straight count of the children.
+  const addChildRollup = (child, agg, column) => {
+    const field = {
+      kind:         'child_rollup',
+      child_table:  child.table,
+      child_fk:     child.fk_column,
+      agg,
+      value_column: column ? column.name : null,
+      type:         agg === 'count' ? 'integer' : (column?.type || 'numeric'),
+      table:        child.table,
+      via_path:     null,
+    }
+    field.name = childRollupKey(field)
+    field.label = childRollupLabel(child.label, agg, column ? (column.label || column.name) : '')
+    if (report.rpt_selected_fields.some(f => f.name === field.name)) return
+    updateReport({
+      rpt_selected_fields: resolveReportColumnLabels(
+        [...report.rpt_selected_fields, field], labelOpts),
+    })
   }
 
   // Bulk-load every DIRECT related object's columns (non-toggling), so a field
@@ -517,6 +562,9 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 expandedRelated={expandedRelated}
                 onExpandRelated={handleExpandRelated}
                 onLoadAllRelated={loadAllRelatedFields}
+                expandedChildren={expandedChildren}
+                onExpandChild={handleExpandChild}
+                addChildRollup={addChildRollup}
                 addField={addField}
                 removeField={removeField}
                 moveField={moveField}
@@ -610,6 +658,7 @@ function fieldKey(f) {
 function FieldsTab({
   primaryOptions, report, updateReport,
   fieldTree, expandedRelated, onExpandRelated, onLoadAllRelated,
+  expandedChildren, onExpandChild, addChildRollup,
   addField, removeField, moveField, reorderFields,
 }) {
   const [search, setSearch] = useState('')
@@ -739,6 +788,28 @@ function FieldsTab({
                       selected={isSelected(col.name, primaryObject, null)}
                       onAdd={() => addField(col, primaryObject)} />
                   ))}
+
+                  {fieldTree.children?.length > 0 && (
+                    <div style={{ marginTop:16 }}>
+                      <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4 }}>
+                        Child Objects
+                      </div>
+                      <div style={{ fontSize:11, color:C.textMuted, marginBottom:6, lineHeight:1.5 }}>
+                        Records that point at this one. A child is added as a
+                        number ON this row — how many, or a total of theirs — so
+                        the report keeps one row per {primaryLabel.toLowerCase()}.
+                      </div>
+                      {fieldTree.children.map(child => (
+                        <ChildObjectNode
+                          key={`${child.table}.${child.fk_column}`}
+                          child={child}
+                          node={expandedChildren?.[`${child.table}.${child.fk_column}`]}
+                          onExpand={() => onExpandChild(child.table, child.fk_column)}
+                          addChildRollup={addChildRollup}
+                        />
+                      ))}
+                    </div>
+                  )}
 
                   {fieldTree.related?.length > 0 && (
                     <div style={{ marginTop:16 }}>
@@ -892,6 +963,74 @@ function SelectedFieldRow({ f, setNodeRef, style, dragHandleProps, onUpdate, onR
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A child object in the field tree. Children cannot be columns — a building
+// with twelve units is not twelve buildings — so what you pick is an AGGREGATE:
+// how many there are, or a total / average / earliest / latest of one of their
+// fields. The value lands on the parent's own row.
+function ChildObjectNode({ child, node, onExpand, addChildRollup }) {
+  const isExpanded = !!node
+  // Only fields you can aggregate are offered: numbers total and average,
+  // dates take an earliest and a latest. Offering SUM of a text column is
+  // offering an error.
+  const AGGREGATABLE = (col) => aggregatesForColumnType(col.type)
+  const AGG_LABEL = { sum: 'Sum', avg: 'Average', min: 'Earliest / Min', max: 'Latest / Max' }
+
+  return (
+    <div style={{ marginBottom:6 }}>
+      <div style={{ display:'flex', gap:6, alignItems:'stretch' }}>
+        <button
+          onClick={onExpand}
+          style={{
+            flex:1, textAlign:'left', padding:'6px 8px',
+            background: isExpanded ? C.cardSecondary : 'transparent',
+            border:`1px solid ${C.border}`, borderRadius:6,
+            fontSize:12, color:C.textPrimary, cursor:'pointer',
+            display:'flex', justifyContent:'space-between', alignItems:'center',
+          }}
+        >
+          <span>{child.label} <span style={{ color:C.textMuted }}>(via {child.fk_column})</span></span>
+          <span>{isExpanded ? '−' : '+'}</span>
+        </button>
+        <button
+          onClick={() => addChildRollup(child, 'count', null)}
+          title={`Add a column counting this record's ${child.label.toLowerCase()}`}
+          style={{
+            padding:'6px 10px', border:`1px solid ${C.border}`, borderRadius:6,
+            background:C.card, color:C.textSecondary, fontSize:11.5, fontWeight:500, cursor:'pointer',
+          }}
+        >Count</button>
+      </div>
+      {isExpanded && node && (
+        <div style={{ paddingLeft:12, marginTop:4 }}>
+          {node.columns.filter(AGGREGATABLE).length === 0 ? (
+            <div style={{ fontSize:11, color:C.textMuted, padding:'4px 0' }}>
+              Nothing here can be totalled — use <strong>Count</strong>, or report on
+              {' '}{child.label} directly and pull this object's fields in as its parent.
+            </div>
+          ) : node.columns.filter(AGGREGATABLE).map(col => (
+            <div key={col.name} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:4 }}>
+              <div style={{ flex:1, fontSize:12, color:C.textPrimary, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {col.label || col.name}
+              </div>
+              {AGGREGATABLE(col).map(agg => (
+                <button
+                  key={agg}
+                  onClick={() => addChildRollup(child, agg, col)}
+                  title={`${AGG_LABEL[agg]} of ${col.label || col.name} across this record's ${child.label.toLowerCase()}`}
+                  style={{
+                    padding:'3px 7px', border:`1px solid ${C.border}`, borderRadius:5,
+                    background:C.card, color:C.textSecondary, fontSize:10.5, cursor:'pointer',
+                  }}
+                >{agg === 'avg' ? 'avg' : agg}</button>
+              ))}
+            </div>
+          ))}
         </div>
       )}
     </div>
