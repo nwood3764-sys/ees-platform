@@ -31,6 +31,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
   const [error, setError]       = useState(null)
   const [prompts, setPrompts]   = useState(null)        // null = not yet checked, [] = none
   const [promptValues, setPromptValues] = useState({})  // collected user input
+  const [ranAt, setRanAt]       = useState(null)   // when THIS result was fetched
   const [duplicating, setDuplicating] = useState(false)
   const [duplicateError, setDuplicateError] = useState(null)
 
@@ -39,6 +40,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
     try {
       const r = await runReport(reportId, overrides, extraFilters)
       setResult(r)
+      setRanAt(new Date())
     } catch (err) {
       setError(err)
     } finally {
@@ -198,6 +200,16 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
               </span>
             )}
             <span> · {result.format} · {result.primaryObject}</span>
+            {/* A report is a SNAPSHOT: it runs once when it is opened and does
+                not follow the data afterwards. Without this the row count reads
+                as live, and a record created since the run looks like the
+                report is filtering it out (Nicholas, 2026-08-31, on a report
+                showing 10 of what were by then 12 applications). */}
+            {ranAt && (
+              <span title={`Run at ${ranAt.toLocaleString()} — press Run Again for the current data`}>
+                {' · run at '}{ranAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+              </span>
+            )}
           </div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
