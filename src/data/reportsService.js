@@ -17,8 +17,10 @@ import {
   isDerivedLabel,
 } from '../lib/reportColumnLabels'
 import { recordLinkForField } from '../lib/reportRecordLinks'
+import { softDeleteColumnFor } from '../lib/softDeleteColumn'
 import {
   childRollupKey, isChildRollupField, childRollupValue, isRelationshipFk,
+  isChildDetailField, childFieldKey, isChildDetailReport, expandChildRows,
 } from '../lib/reportChildRollups'
 import {
   fieldKindFor,
@@ -396,7 +398,10 @@ function humanizeChildLabel(table) {
 }
 
 // Re-exported so the Report Builder keeps one import site for report rules.
-export { childRollupKey, isChildRollupField } from '../lib/reportChildRollups'
+export {
+  childRollupKey, isChildRollupField, childFieldKey, isChildDetailField,
+  isChildDetailReport,
+} from '../lib/reportChildRollups'
 
 /**
  * Pull columns AND outgoing FKs for a related object (lazy-loaded when
@@ -651,6 +656,7 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
     rpt_runtime_prompts:  report.rpt_runtime_prompts || [],
     rpt_charts:           report.rpt_charts || [],
     rpt_row_limit:        report.rpt_row_limit || null,
+    rpt_child_detail:     report.rpt_child_detail || null,
     updated_by:           userId,
   }
 
@@ -1311,9 +1317,10 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   }
 
   for (const f of (r.rpt_selected_fields || [])) {
-    // A child roll-up has no column on this table — it is computed from a
-    // separate grouped query once the rows are in.
-    if (isChildRollupField(f)) continue
+    // Neither a child roll-up nor a child-detail column has a column on THIS
+    // table: one is computed from a grouped query, the other is read from the
+    // child row the report expands into.
+    if (isChildRollupField(f) || isChildDetailField(f)) continue
     if (!f.via_path || f.via_path.length === 0) {
       directFields.push(f.name)
       const fkInfo = fkLookup[`${r.rpt_primary_object}.${f.name}`]
@@ -1542,6 +1549,49 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     data = applyFilterLogic(data, loaded.filters || [], logicExpression, fkLookup, r.rpt_primary_object)
   }
 
+  // ── One row per child ("A with B") ───────────────────────────────────────
+  // When the report declares a child detail object, each primary row becomes
+  // one row per child, with the parent's fields repeated. Done HERE, before the
+  // row limit, so Top-N counts the rows the report actually returns — and
+  // before the roll-up and picklist passes, so both see every row they must
+  // write onto.
+  const childDetail = r.rpt_child_detail || null
+  if (isChildDetailReport(childDetail) && data && data.length > 0) {
+    const parentIds = Array.from(new Set(data.map(row => row.id).filter(Boolean)))
+    // Only the child columns this report shows, plus what the join needs. A
+    // child table can be as wide as `properties` (828 columns), and selecting
+    // all of them is the timeout this platform has already paid for once.
+    const childCols = new Set(['id', childDetail.child_fk])
+    for (const f of (r.rpt_selected_fields || [])) {
+      if (isChildDetailField(f) && f.name) childCols.add(f.name)
+    }
+    for (const g of (loaded.groupings || [])) {
+      if (g.rgr_field_table === childDetail.child_table && g.rgr_field_name) childCols.add(g.rgr_field_name)
+    }
+    const { data: childMeta } = await supabase.rpc('ees_table_metadata', { p_table: childDetail.child_table })
+    // ees_table_metadata names it `is_deleted_column` — the same key the primary
+    // query and the cross-filter query above read. Getting this wrong would
+    // silently include soft-deleted children in the rows.
+    const childSoftDelete = childMeta?.is_deleted_column || softDeleteColumnFor(childDetail.child_table)
+
+    const childRows = []
+    const CHUNK = 300
+    for (let i = 0; i < parentIds.length; i += CHUNK) {
+      const slice = parentIds.slice(i, i + CHUNK)
+      let q = supabase.from(childDetail.child_table)
+        .select(Array.from(childCols).join(', '))
+        .in(childDetail.child_fk, slice)
+      if (childSoftDelete) q = q.eq(childSoftDelete, false)
+      const { data: page, error: childErr } = await q.limit(HARD_CEILING)
+      // Never swallow: a failed child fetch on an INNER report returns nothing
+      // and looks exactly like "no children exist", which is a wrong empty
+      // report rather than an error.
+      if (childErr) throw childErr
+      if (page) childRows.push(...page)
+    }
+    data = expandChildRows(data, childRows, childDetail)
+  }
+
   // Top-N row limit — cap the returned rows after all filtering + sort
   // (Salesforce "Row Limit"). NULL/0 = no cap.
   const rowLimit = parseInt(r.rpt_row_limit, 10)
@@ -1598,7 +1648,7 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
 
   const picklistPairs = []
   for (const f of (r.rpt_selected_fields || [])) {
-    if (isChildRollupField(f)) continue
+    if (isChildRollupField(f) || isChildDetailField(f)) continue
     if (isPicklistField(f.name, f.table, f.via_path)) {
       picklistPairs.push({ object: tableForField(f.table, f.via_path), field: f.name })
     }
@@ -1704,6 +1754,7 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     // but cannot save a drag, which is correct: an unsaved report has nothing
     // to save them to.
     reportId:      reportId || r.id || null,
+    childDetail:   r.rpt_child_detail || null,
     columnWidths:  r.rpt_column_widths || null,
     truncated,
   }
@@ -1739,6 +1790,8 @@ export function getRowValue(row, field, ctx = null) {
   // A child roll-up is computed after the rows are fetched and written onto the
   // row under its own key — there is no column to read.
   if (isChildRollupField(field)) return childRollupValue(field, row[field.name])
+  // A child-detail column lives on the child row this row was expanded from.
+  if (isChildDetailField(field)) return row[childFieldKey(field.name)] ?? null
   if (!field.via_path || field.via_path.length === 0) {
     // Direct field
 

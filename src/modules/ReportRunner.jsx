@@ -200,6 +200,16 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
               </span>
             )}
             <span> · {result.format} · {result.primaryObject}</span>
+            {/* When a report is expanded into its children, a row is no longer
+                a primary record — say so, or the row count reads as a count of
+                buildings when it is a count of units. */}
+            {result.childDetail && (
+              <span style={{ color:C.textSecondary, fontWeight:500 }}>
+                {' · one row per '}
+                {String(result.childDetail.label || result.childDetail.child_table).replace(/s$/, '')}
+                {result.childDetail.join === 'outer' ? ' (including those with none)' : ''}
+              </span>
+            )}
             {/* A report is a SNAPSHOT: it runs once when it is opened and does
                 not follow the data afterwards. Without this the row count reads
                 as live, and a record created since the run looks like the

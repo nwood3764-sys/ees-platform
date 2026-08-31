@@ -9,6 +9,7 @@
 import {
   ROLLUP_AGGREGATES, childRollupKey, isChildRollupField, childRollupValue,
   aggregatesForColumnType, childRollupLabel, isRelationshipFk,
+  isChildDetailField, childFieldKey, isChildDetailReport, expandChildRows,
 } from '../src/lib/reportChildRollups.js'
 
 let pass = 0, fail = 0
@@ -72,6 +73,63 @@ ok('updated_by is not', !isRelationshipFk('ia_updated_by'))
 ok('deleted_by is not', !isRelationshipFk('deleted_by'))
 ok('a real parent key is', isRelationshipFk('building_id'))
 ok('a missing column name is not', !isRelationshipFk(null))
+
+// ── One row per child ("A with B") ────────────────────────────────────────
+const parents = [{ id: 'p1', building_name: 'Alden Road' }, { id: 'p2', building_name: 'Empty' }]
+const kids = [
+  { id: 'k1', building_id: 'p1', unit_name: '1A', unit_square_feet: 700 },
+  { id: 'k2', building_id: 'p1', unit_name: '1B', unit_square_feet: 800 },
+]
+const detail = (join) => ({ child_table: 'units', child_fk: 'building_id', join })
+const names = (rows) => rows.map(r => `${r.building_name}/${r[childFieldKey('unit_name')] ?? '—'}`)
+
+check('inner keeps one row per child and drops the childless parent',
+  names(expandChildRows(parents, kids, detail('inner'))), ['Alden Road/1A', 'Alden Road/1B'])
+check('outer keeps the childless parent, once, with no child values',
+  names(expandChildRows(parents, kids, detail('outer'))), ['Alden Road/1A', 'Alden Road/1B', 'Empty/—'])
+check('no child detail leaves the rows exactly as they were',
+  expandChildRows(parents, kids, null).length, 2)
+check('an unconfigured child detail is ignored',
+  expandChildRows(parents, kids, { join: 'inner' }).length, 2)
+check('no children at all: inner returns nothing',
+  expandChildRows(parents, [], detail('inner')).length, 0)
+check('no children at all: outer returns every parent',
+  expandChildRows(parents, [], detail('outer')).length, 2)
+{
+  const rows = expandChildRows(parents, kids, detail('inner'))
+  ok('the parent fields are repeated on every child row',
+    rows.every(r => r.building_name === 'Alden Road'))
+  ok('each row carries its own child id', rows[0].__child_id === 'k1' && rows[1].__child_id === 'k2')
+  ok('every child column is namespaced', rows[0][childFieldKey('unit_square_feet')] === 700)
+  // Two rows from one parent must not share an object, or a later pass writing
+  // a roll-up or a picklist label onto one writes it onto both.
+  rows[0].__marker = 'x'
+  ok('sibling rows are not the same object', rows[1].__marker === undefined)
+  ok('the source parent row is not mutated', parents[0].__marker === undefined)
+}
+{
+  // A child column can share a name with a parent column — id, name, created_at
+  // are on both — and must not overwrite it.
+  const p = [{ id: 'p1', name: 'Building A' }]
+  const k = [{ id: 'k1', building_id: 'p1', name: 'Unit 1' }]
+  const row = expandChildRows(p, k, detail('inner'))[0]
+  check('the parent keeps its own name', row.name, 'Building A')
+  check('the child name is reachable under its own key', row[childFieldKey('name')], 'Unit 1')
+  check('the row id stays the parent id, so roll-ups still key correctly', row.id, 'p1')
+}
+{
+  // A child row whose foreign key is empty belongs to no parent and is dropped
+  // rather than attached to whichever row came first.
+  const orphan = [{ id: 'k9', building_id: null, unit_name: 'Nowhere' }]
+  check('an orphan child is not attached to anything',
+    expandChildRows(parents, orphan, detail('inner')).length, 0)
+}
+ok('a child-detail field is recognised', isChildDetailField({ kind: 'child_field' }))
+ok('a roll-up is not a child-detail field', !isChildDetailField({ kind: 'child_rollup' }))
+ok('a configured child detail is recognised', isChildDetailReport(detail('inner')))
+ok('null is not', !isChildDetailReport(null))
+ok('a half-configured one is not', !isChildDetailReport({ child_table: 'units' }))
+ok('a child field key cannot collide with a real column', childFieldKey('name').startsWith('__childrow__'))
 
 console.log(`report-child-rollups fixture: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
