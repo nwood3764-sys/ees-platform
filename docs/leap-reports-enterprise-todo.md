@@ -60,6 +60,37 @@ are struck through as they ship, with the PR that did it.
       module exists. Registering them in `src/lib/objectNav.js` fixes the group
       AND their record navigation, which today falls back to the Field module.
 
+## 3c. Dashboard filters
+
+Nicholas, 2026-08-31: *"we definitely need a dashboard-level filter for states
+and things, just like Salesforce"*, then *"all dashboards need the filter. I'm
+looking at the enrollment dashboard. Do you see a filter there? I don't see it.
+The user needs to be able to put any kind of filter they want on, not just the
+state filter."*
+
+- [x] **A filter names its column per object** (`dfilt_field_map`). One control
+      filters properties by `property_state` and opportunities by
+      `opportunity_state`. Before this a filter carried ONE column name and a
+      widget whose object lacked it was silently skipped — DSH-00010's Pipeline
+      by Stage widget was showing every state next to four widgets scoped to NC.
+- [x] **A real field picker**, grouped by the objects the dashboard's widgets
+      report on, replacing the free-text box for a raw column name. Picking a
+      field proposes the equivalent on every other object and states coverage:
+      "Applies to Properties, Opportunities. Not applied to Work Orders."
+- [x] **"Not filtered by X" on the widget itself** — a filter a widget's object
+      cannot answer is still dropped (the only safe thing), but it no longer
+      does so invisibly.
+- [x] **The value dropdown shows names, not uuids.**
+      `dashboard_filter_distinct_values` resolves a picklist or lookup column
+      through its target, so Status and Record Type are pickable at all. It also
+      lost its `anon` EXECUTE grant.
+- [x] **Every dashboard carries a filter**: Enrollment and Qualification take
+      Status (their widgets are single-object), Program Operations takes State.
+- [ ] Filters are per-dashboard, not per-viewer: there is no "my default filter
+      value", and no equivalent of Salesforce's dashboard "view as" role.
+- [ ] An on-canvas filter widget still names one column and cannot be mapped
+      across objects the way a bar filter can.
+
 ## 4. The audit itself
 
 Walk the report builder, the viewer and the dashboard builder against

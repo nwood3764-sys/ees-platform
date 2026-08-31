@@ -98,6 +98,9 @@ export async function loadDashboardForCanvas(dashboardId) {
       operator:      f.dfilt_operator || 'equals',
       default_value: f.dfilt_default_value ?? '',
       options:       f.dfilt_options || [],
+      // Per-object column equivalents. Null on every filter saved before the
+      // map existed, which reads as "same column everywhere" — what it did.
+      field_map:     f.dfilt_field_map || null,
     })),
   }
 }
@@ -141,6 +144,7 @@ export async function saveDashboardFromCanvas({ id, meta, components, layout, fi
       operator:      f.operator || 'equals',
       default_value: f.default_value ?? null,
       options:       f.options || [],
+      field_map:     (f.field_map && Object.keys(f.field_map).length) ? f.field_map : null,
     }))
 
   // Authoritative geometry also mirrored into dash_layout for convenience.
