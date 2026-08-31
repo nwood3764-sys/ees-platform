@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
 import { useRecharts } from '../lib/RechartsLazy'
-import { C, CHART_COLORS, fmt } from '../data/constants'
+import { C, CHART_COLORS, seriesColor, fmt } from '../data/constants'
 import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
@@ -107,12 +107,12 @@ function Dashboard({ workOrders, projects, opportunities, technicians, partners,
         <Widget title="Work Orders by Status" subtitle={`Total: ${workOrders.length}`} footer="View Work Orders →" onFooter={() => onGo('workorders')}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <R.ResponsiveContainer width={100} height={130}>
-              <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</R.Pie><R.Tooltip /></R.PieChart>
+              <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <R.Cell key={i} fill={seriesColor(i)} />)}</R.Pie><R.Tooltip /></R.PieChart>
             </R.ResponsiveContainer>
             <div style={{ flex: 1, fontSize: 11, color: C.textSecondary }}>
               {woByStatus.map((d, i) => (
                 <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: seriesColor(i), flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>{d.name}</span>
                   <span style={{ fontWeight: 600, color: C.textPrimary }}>{d.value}</span>
                 </div>

@@ -9,7 +9,7 @@
 // floor, WCAG contrast against the surfaces a widget actually sits on, and
 // OKLab ΔE separation under the Machado (2009) colour-blindness simulation.
 
-import { CHART_COLORS } from '../src/data/constants.js'
+import { CHART_COLORS, CHART_COLOR_OVERFLOW, seriesColor } from '../src/data/constants.js'
 import {
   contrast, oklch, deltaE, worstPair, worstPairNormal,
   chainPairs, ringPairs, THRESHOLDS as T,
@@ -111,6 +111,20 @@ check('a pair is not a ring', ringPairs(2), [[0,1]])
   ok('so the positive control fails, which proves these checks bite',
     bandFails.length > 0 && grayFails.length > 0 && dim.length > 0)
 }
+
+// ── Slots are assigned, never cycled ──────────────────────────────────────
+// `CHART_COLORS[i % length]` painted the 8th series the same emerald as the
+// 1st. Caught on a live 8-row funnel, where "Westminster Company" came out
+// identical to "Lutheran Social Services" — two different things wearing one
+// identity, which is worse than an ugly colour.
+check('slot 0 is the first colour', seriesColor(0), CHART_COLORS[0])
+check('slot 6 is the last colour', seriesColor(6), CHART_COLORS[6])
+ok('slot 7 is NOT slot 0 — the palette does not wrap', seriesColor(7) !== seriesColor(0))
+check('slot 7 is the overflow neutral', seriesColor(7), CHART_COLOR_OVERFLOW)
+check('so is slot 40', seriesColor(40), CHART_COLOR_OVERFLOW)
+ok('the overflow neutral is not one of the seven', !CHART_COLORS.includes(CHART_COLOR_OVERFLOW))
+check('a nonsense index is the neutral, never a crash', seriesColor(undefined), CHART_COLOR_OVERFLOW)
+check('a negative index likewise', seriesColor(-1), CHART_COLOR_OVERFLOW)
 
 console.log(`chart-palette fixture: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

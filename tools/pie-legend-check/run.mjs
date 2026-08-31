@@ -37,7 +37,7 @@ const server = await createServer({
 await server.listen()
 const browser = await chromium.launch({ executablePath })
 try {
-  const page = await browser.newPage({ viewport: { width: 700, height: 1900 }, deviceScaleFactor: 2 })
+  const page = await browser.newPage({ viewport: { width: 980, height: 5200 }, deviceScaleFactor: 2 })
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
   await page.goto('http://localhost:5313/tools/pie-legend-check/', { waitUntil: 'networkidle' })
@@ -47,7 +47,7 @@ try {
   // reads as a clipped pie and sends you looking for a layout bug that is not
   // there.
   await page.waitForTimeout(1500)
-  for (const id of ['wide', 'narrow', 'tiny', 'donut', 'bottom']) {
+  for (const id of ['wide', 'xwide', 'narrow', 'tiny', 'auto', 'numsleft', 'novalue', 'nopct', 'namesonly', 'donut', 'bottom', 'funnel', 'funnelnarrow']) {
     await page.locator(`[data-case="${id}"]`).screenshot({ path: join(outDir, `pie-${id}.png`) })
     console.log(`wrote ${join(outDir, `pie-${id}.png`)}`)
   }
