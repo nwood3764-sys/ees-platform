@@ -4228,10 +4228,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
   const SGAP=26;                                   // clear space above every section header, so each section reads as its own block
-  const bh=(txt,x,yy,al)=>{tc(C.ink); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
-  // one identical section-header treatment for all three sections
-  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.ink); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
-    stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const ORANGE=[216,106,30];                        // Sealed brand accent — visually distinguishes Sealed documents from the EES proposals
+  const bh=(txt,x,yy,al)=>{tc(ORANGE); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
+  // one identical section-header treatment for all three sections — Sealed orange
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(ORANGE); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
+    stroke(ORANGE); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   // A total drawn on the RIGHT: the label right-aligns just left of its figure,
   // both anchored to the page's right edge, so the reader's eye lands on the money.
@@ -4246,7 +4247,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const drawTitle=()=>{
     tc(C.ink); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
     tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
-    st.y+=32; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
+    st.y+=32; stroke(ORANGE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
   const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };   // a continuation page keeps the header
   const needH=h=>{ if(st.y+h>H-M-16) contPage(); };             // page break that redraws the header
   drawTitle();
@@ -4270,7 +4271,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const cW=84, mX=M+cW, mW=86, dX=mX+mW, dW=(W-M-64)-dX;   // column geometry
   tc(C.ink); font(8,'bold');
   t(M,st.y+12,'CONTRACTOR'); t(mX,st.y+12,'MEASURE'); t(dX,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
-  st.y+=16; stroke(C.line); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+  st.y+=16; stroke(ORANGE); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
   const CLH=9, RH=10;
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
@@ -4293,7 +4294,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
    stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=4;}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
-  needH((m.foe?244:198)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
+  needH((m.foe?244:198)+(isInv?150:0));             // keep rebates + summary (+ invoice acknowledgment) together
   sh('Available Rebates & Incentives');
   const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
     st.y+=4; stroke(C.line); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
@@ -4321,14 +4322,16 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     if(strong){ rline(lbl,val,true); }
     else{ tc(C.ink); font(9,'normal'); t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'}); }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
-  // signature — invoice / project payment request only; reserved with the block above so it is never orphaned
+  // Acknowledgment & Acceptance — invoice / payment request only, matching the
+  // EES invoice; reserved with the block above so it is never orphaned.
   if(isInv){
-    st.y+=26;
-    const sl=wrap('By signing below, the customer and the contractor confirm that the project described above has been completed.',CW);
-    tc(C.ink); font(8.5); sl.forEach((ln,k)=>t(M,st.y+k*11,ln)); st.y+=sl.length*11+36;
-    stroke([68,68,68]); d.setLineWidth(1);
-    d.line(M,st.y,M+230,st.y); d.line(W-M-230,st.y,W-M,st.y);
-    tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-230,st.y+11,'Contractor Signature');
+    sh('Acknowledgment & Acceptance');
+    const _ees='EES-'+(m.state||'WI');
+    const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
+    const al=wrap(ack,CW); tc(C.ink); font(9); al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;
+    st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
+    d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
+    tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
   }
   _stampSealedFooters(P,docLabel,docNo,F.pjInvDate);
   return d.output('blob');
