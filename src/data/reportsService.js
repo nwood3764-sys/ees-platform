@@ -1286,6 +1286,19 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       // link to that record, and the link needs the record it points at.
       if (!node.fields.includes('id')) node.fields.push('id')
       if (!node.fields.includes(f.name)) node.fields.push(f.name)
+      // A related column that is ITSELF a lookup holds an id, not a name —
+      // "Property → Management Company" is an FK to accounts, so without this
+      // the cell prints a raw uuid (Nicholas, 2026-08-29, building an
+      // enrollments report: "I can't find the property management company name
+      // or the account name. I only get the UUIDs."). Direct FK columns have
+      // had a `_lbl_` embed since this shipped; a column reached through a
+      // relationship never did. The embed is nested INSIDE the parent's, so
+      // one round trip still answers the whole report.
+      const leafFk = fkLookup[`${f.table}.${f.name}`]
+      if (leafFk && leafFk.name_column) {
+        const labelEmbed = `_lbl_${f.name}:${f.name}(${leafFk.name_column})`
+        if (!node.fields.includes(labelEmbed)) node.fields.push(labelEmbed)
+      }
     }
   }
 
@@ -1657,12 +1670,8 @@ export function getRowValue(row, field, ctx = null) {
     }
 
     // FK label resolution — prefer auto-embedded label
-    const labelEmbed = row[`_lbl_${field.name}`]
-    if (labelEmbed && typeof labelEmbed === 'object') {
-      for (const k of Object.keys(labelEmbed)) {
-        if (labelEmbed[k] != null) return labelEmbed[k]
-      }
-    }
+    const label = labelFromEmbed(row[`_lbl_${field.name}`])
+    if (label != null) return label
     return row[field.name] ?? null
   }
   // Walk via_path of arbitrary depth.
@@ -1682,7 +1691,23 @@ export function getRowValue(row, field, ctx = null) {
     if (entry) return entry.label
   }
 
+  // A related column that is itself a lookup carries its own label embed,
+  // fetched alongside it — the account's NAME, not the id the column holds.
+  const relLabel = labelFromEmbed(nested[`_lbl_${field.name}`])
+  if (relLabel != null) return relLabel
+
   return rawValue
+}
+
+// An auto-embedded label is a one-column object: `{ account_name: 'Acme' }`.
+// Returns the first value it actually carries, or null when there is none —
+// the embed is absent for a row whose FK is empty, which is not an error.
+function labelFromEmbed(embed) {
+  if (!embed || typeof embed !== 'object') return null
+  for (const k of Object.keys(embed)) {
+    if (embed[k] != null) return embed[k]
+  }
+  return null
 }
 
 // ─── Dashboards ───────────────────────────────────────────────────────────
