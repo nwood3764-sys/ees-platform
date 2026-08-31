@@ -13,6 +13,7 @@
 import { fetchHomePage, saveHomePage } from '../../data/adminService'
 import { GRID_COLS, newLayoutItem } from '../geometry'
 import { homeRegistry } from '../registries/homeRegistry'
+import { assertUuidOrNull } from '../../lib/builderSourceOptions'
 
 function splitGeometry(rawConfig) {
   const cfg = { ...(rawConfig || {}) }
@@ -77,7 +78,10 @@ export async function saveHomePageFromCanvas({ id, meta, components, layout }) {
       // Canvas pages collapse to one region; geometry drives placement.
       region: 'main',
       type: c.type,
-      sourceId: c.dataSourceId || null,
+      // Named here rather than left to the RPC's ::uuid cast: a display id that
+      // slips into a picker otherwise surfaces as "invalid input syntax for
+      // type uuid", which names neither the component nor the field.
+      sourceId: assertUuidOrNull(c.dataSourceId || null, `${c.title || homeRegistry.getComponent(c.type)?.label || c.type} source`),
       title: c.title || null,
       config: { ...(c.config || {}), _geometry: { x: geo.x, y: geo.y, w: geo.w, h: geo.h } },
     }
@@ -88,7 +92,7 @@ export async function saveHomePageFromCanvas({ id, meta, components, layout }) {
       id: id === 'new' ? null : id,
       name: meta.name,
       template: 'single',
-      roleId: meta.roleId || null,
+      roleId: assertUuidOrNull(meta.roleId || null, 'Role'),
       moduleId: meta.moduleId || null,
       isActive: !!meta.isActive,
       isDefault: !!meta.isDefault,
