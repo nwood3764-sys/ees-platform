@@ -459,8 +459,28 @@ function humanizeFkLabel(fkColumn, referencesTable) {
 // registry settled on (src/lib/objectNav.js) after the identical defect took
 // browser navigation away from 51 objects.
 
+// The order the modules appear in the sidebar. A picker grouped by module
+// should read in the order the person already navigates in; anything not in a
+// module falls to the end under Setup & configuration.
+const PRIMARY_OBJECT_GROUP_ORDER = [
+  'Outreach', 'Enrollment', 'Qualification', 'Project Planning',
+  'Project Implementation', 'Field', 'Dispatch', 'Incentives', 'Stock', 'Fleet',
+  'Service Providers', 'Portal', 'Reports', 'Tasks', 'Home', 'Admin',
+]
+
+// An object's group is the module it actually lives in — but ONLY when the nav
+// registry really names one. An unregistered object falls back to a default
+// module for navigation purposes, and using that here would file 45 config
+// tables under "Field", which is worse than the category names this replaced.
+// Those objects genuinely have no module home, and the group says so.
+function primaryObjectGroup(nav) {
+  if (!nav?.isRegistered || !nav.moduleLabel) return 'Setup & configuration'
+  return nav.moduleLabel
+}
+
 export async function listPrimaryObjectOptions() {
   const { OBJECT_CATALOG } = await import('../modules/admin/objectCatalog')
+  const { objectNavFor } = await import('../lib/objectNav')
   // The catalog carries an object twice when two modules both claim it
   // (price_books and price_book_entries are listed under CRM & Enrollment and
   // again under Stock). One table is one reportable object, so the first
@@ -472,13 +492,25 @@ export async function listPrimaryObjectOptions() {
     .map(o => ({
       table:  o.table,
       // The picker names objects the way the rest of the platform does: an
-      // object is reported on in the plural ("Enrollments"), and the module is
-      // carried so the picker can group by it.
+      // object is reported on in the plural ("Enrollments").
       label:  o.pluralLabel || o.label || o.table,
-      module: o.module || 'Other',
+      // Grouped by the MODULE THE OBJECT LIVES IN — the same names as the
+      // sidebar. It used to group by OBJECT_CATALOG's own categories ("CRM &
+      // Enrollment", "Data", "User Interface"), which are Object Manager's
+      // internal filing and correspond to nothing the reader has ever seen
+      // (Nicholas, 2026-08-31: "what is CRM and enrollment under these
+      // available fields? That makes no sense to me"). objectNav already knows
+      // each object's real host module, because navigation needs the same fact.
+      module: primaryObjectGroup(objectNavFor(o.table)),
     }))
-    .sort((a, b) =>
-      a.module.localeCompare(b.module) || a.label.localeCompare(b.label))
+    .sort((a, b) => {
+      const ai = PRIMARY_OBJECT_GROUP_ORDER.indexOf(a.module)
+      const bi = PRIMARY_OBJECT_GROUP_ORDER.indexOf(b.module)
+      // A module the order doesn't name sorts after every one it does.
+      const ao = ai === -1 ? PRIMARY_OBJECT_GROUP_ORDER.length : ai
+      const bo = bi === -1 ? PRIMARY_OBJECT_GROUP_ORDER.length : bi
+      return ao - bo || a.module.localeCompare(b.module) || a.label.localeCompare(b.label)
+    })
 }
 
 // ─── Save / load report definitions ───────────────────────────────────────

@@ -49,6 +49,17 @@ are struck through as they ship, with the PR that did it.
 - [x] Every table surface now uses ONE resize definition
       (`src/lib/columnWidths.js`). **PR #673.**
 
+## 3b. Object grouping
+
+- [x] The primary-object picker grouped by OBJECT_CATALOG's internal categories
+      ("CRM & Enrollment", "Data", "User Interface") — filing nobody outside
+      Object Manager has ever seen. It groups by the object's real module now.
+      **PR #679.**
+- [ ] **The service-provider objects have no module in the nav registry**, so
+      they group under "Setup & configuration" even though a Service Providers
+      module exists. Registering them in `src/lib/objectNav.js` fixes the group
+      AND their record navigation, which today falls back to the Field module.
+
 ## 4. The audit itself
 
 Walk the report builder, the viewer and the dashboard builder against
