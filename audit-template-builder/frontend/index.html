@@ -3789,6 +3789,19 @@ function _pdfNew(margin){
 }
 function _money(v){return '$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function _qty(q){return q!=null?Number(q).toLocaleString('en-US'):'';}
+// Normalize any US phone to the standard (XXX) XXX-XXXX, keeping an extension.
+// Anything that isn't a 10-digit number is returned unchanged.
+function _phone(s){
+  if(!s) return '';
+  const raw=String(s).trim();
+  const em=raw.match(/(?:ext\.?|x|extension)\s*(\d+)\s*$/i);
+  const ext=em?em[1]:'';
+  let digits=(em?raw.slice(0,em.index):raw).replace(/\D/g,'');
+  if(digits.length===11 && digits[0]==='1') digits=digits.slice(1);
+  if(digits.length!==10) return raw;
+  const out='('+digits.slice(0,3)+') '+digits.slice(3,6)+'-'+digits.slice(6);
+  return ext?out+' ext. '+ext:out;
+}
 
 function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
@@ -3814,21 +3827,24 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   // EES is the Primary IRA Contractor (name + phone follow the document's state,
   // like the footer), so the contractor block is Energy Efficiency Services'.
   const cLines=['Energy Efficiency Services of '+_state,'112 Owen Rd. PO Box 6141','Monona, WI 53716',
-    (m.state==='NC'?'(704) 990-5614':'608-460-7419')].filter(v=>v&&String(v).trim());
-  const lLines=[F.pjInstallAddr,F.pjCsz,
-    F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
+    _phone(m.state==='NC'?'7049905614':'6084607419')].filter(v=>v&&String(v).trim());
+  const lLines=[F.pjInstallAddr,F.pjCsz,'Multi-Family',
+    (m.units?('Total Units: '+m.units):''),
+    (F.pjIQ?('Income Qualification Number: '+F.pjIQ):'')].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail]
     .filter(v=>v&&String(v).trim());
+  // Three evenly spaced columns across the full width: contractor left, project
+  // information left-aligned at the one-third mark, customer flush-right.
   const drawParties=()=>{
-    const pT=st.y, CX2=M+180, cW=CX2-M-14, pW=185, rW=150;
+    const pT=st.y, colW=CW/3, x2=M+colW, wCol=colW-12;
     tc(EMd); font(8.5,'bold');
     t(M,pT+8,'PRIMARY IRA CONTRACTOR');
-    t(CX2,pT+8,'PROJECT INFORMATION');
+    t(x2,pT+8,'PROJECT INFORMATION');
     t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
     let cy=pT+25,ly=pT+25,ry=pT+25; tc(C.ink); font(9);
-    for(const v of cLines) for(const ln of wrap(v,cW)){t(M,cy,ln); cy+=11.5;}
-    for(const v of lLines) for(const ln of wrap(v,pW)){t(CX2,ly,ln); ly+=11.5;}
-    for(const v of rLines) for(const ln of wrap(v,rW)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
+    for(const v of cLines) for(const ln of wrap(v,wCol)){t(M,cy,ln); cy+=11.5;}
+    for(const v of lLines) for(const ln of wrap(v,wCol)){t(x2,ly,ln); ly+=11.5;}
+    for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
     st.y=Math.max(cy,ly,ry)+6; };
   const drawHead=()=>{
     tc(NAVY); font(14,'bold'); t(W/2,st.y+12,dlab,{align:'center'});
@@ -3842,6 +3858,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
     t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
     d.line(M,st.y,W-M,st.y); st.y+=5;};
+  // A section total drawn on the RIGHT: label right-aligned just left of its
+  // figure, both anchored to the right edge, so the eye lands on the money.
+  const AMTW=92;
+  const rlineE=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
+    t(W-M-AMTW,st.y+11,lbl,{align:'right'}); t(W-M,st.y+11,val,{align:'right'});};
   /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader=(cols)=>{ // cols: [{x0,x1,lbl,align}]
     const h=16; need(h+4);
@@ -3952,7 +3973,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const gross=isAudit?2000:m.total, foeAmt=isAudit?0:m.foeAmt, iraAmt=isAudit?2000:m.homesAmt;
   // close the Scope of Work with its total — the full cost of the work above
   {needH(34); st.y+=6; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+11,'Total Project Cost'); t(W-M,st.y+11,_money(gross),{align:'right'}); st.y+=14;
+   rlineE('Total Project Cost',_money(gross),true); st.y+=14;
    stroke([120,130,144]); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   const credits=[];
   if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
@@ -3982,7 +4003,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const dueVal=Math.abs(due)<0.005?0:due;
   // close the rebate section with its total (positive — a contribution)
   {st.y+=4; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
-   tc(C.ink); font(9,'bold'); t(M,st.y+11,'Total Rebate Amount'); t(W-M,st.y+11,_money(reb),{align:'right'}); st.y+=14;
+   rlineE('Total Rebate Amount',_money(reb),true); st.y+=14;
    stroke([120,130,144]); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   /* ---- Project Summary: a full-width section mirroring the Sealed layout ---- */
   head('Project Summary',16);
@@ -3990,8 +4011,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      ['Total Rebate Amount Applied as Instant Discount','('+_money(reb)+')',false],
      [isInv?'Total Due':'Total Remaining Amount',_money(dueVal),true]];
    for(const [lb,v,strong] of trows){
-     tc(C.ink); font(9,strong?'bold':'normal');
-     t(M,st.y+11,lb); t(W-M,st.y+11,v,{align:'right'});
+     if(strong){ rlineE(lb,v,true); }
+     else{ tc(C.ink); font(9,'normal'); t(M,st.y+11,lb); t(W-M,st.y+11,v,{align:'right'}); }
      stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+15,W-M,st.y+15); st.y+=16;}}
   /* ---- deliverables (audit only) ---- */
   if(isAudit){
@@ -4023,7 +4044,7 @@ function _stampEesFooters(P,state,docDate){
   const {d,W,H,M,font,t,stroke,tc}=P;
   const fy=H-40, N=d.getNumberOfPages();
   const line1='Energy Efficiency Services of '+stateFullName(state)+'    |    112 Owen Rd. PO Box 6141, Monona, WI 53716';
-  const line2=state==='NC'?'ncira@ees-nc.org    |    (704) 990-5614':'ira@ees-wi.org    |    608-460-7419';
+  const line2=state==='NC'?'ncira@ees-nc.org    |    (704) 990-5614':'ira@ees-wi.org    |    (608) 460-7419';
   for(let p=1;p<=N;p++){
     d.setPage(p);
     stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
@@ -4232,13 +4253,13 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // three balanced columns across the page: Contractor | Project Information | Proposal Details
   const CX2=M+200, CX3=W-M;
   const projInfo=isInv
-    ?[F.pjInstallAddr,F.pjCsz,'Multifamily','Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :[F.pjInstallAddr,F.pjCsz,'Multifamily','Est. Start Date: '+(F.pjEstStart||''),'Est. Completion Date: '+(F.pjEstEnd||'')];
-  const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail];
+    ?[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
+    :[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),'Est. Start Date: '+(F.pjEstStart||''),'Est. Completion Date: '+(F.pjEstEnd||'')];
+  const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail];
   bh('Primary IRA Contractor:',M,st.y);
   bh('Project Information:',CX2,st.y);
   bh('Customer Information:',CX3,st.y,'right');
-  let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+13);
+  let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593',_phone('(949) 832-6798')],M,st.y+13);
   let y2=lines9(projInfo,CX2,st.y+13);
   let y3=lines9(ci,CX3,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
@@ -4294,8 +4315,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const trows=[['Total Project Cost',_money(m.total),false],
     ['Total Rebate Amount Applied as Instant Discount','('+_money(m.total)+')',false],
     [isInv?'Total Due':'Total Remaining Amount','$0.00',true]];
+  // A real table: labels on the left, figures on the right; only the final
+  // emphasized total is pulled right, next to its figure.
   for(const [lbl,val,strong] of trows){
-    rline(lbl,val,strong);
+    if(strong){ rline(lbl,val,true); }
+    else{ tc(C.ink); font(9,'normal'); t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'}); }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
   // signature — invoice / project payment request only; reserved with the block above so it is never orphaned
   if(isInv){
