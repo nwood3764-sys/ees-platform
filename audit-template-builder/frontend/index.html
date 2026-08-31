@@ -3620,8 +3620,9 @@ function invoiceModel(){
   const rows=[];
   const push=(name,frac,qty,unit,desc)=>rows.push({name,frac,qty,unit,desc,cost:Math.round(total*frac*100)/100});
   if(hasAttic){
-    push('Attic Insulation',0.44,roofSqFt,'Sq Ft',BANK.atticIns(fmtR(baseAtticR!=null?baseAtticR:0))(fmtR(iMin)));
+    // Order of operations: air sealing is always measure #1, insulation #2.
     push('Attic Air Sealing',0.5483,roofSqFt,'Sq Ft',BANK.airSeal(fmtR(baseAtticR!=null?baseAtticR:0)));
+    push('Attic Insulation',0.44,roofSqFt,'Sq Ft',BANK.atticIns(fmtR(baseAtticR!=null?baseAtticR:0))(fmtR(iMin)));
   }
   push('Low Flow Devices: Bath Aerators',0.0033,_ovr('pjQtyBath')!=null?_ovr('pjQtyBath'):units,'Unit',BANK.bath);
   push('Low Flow Devices: Kitchen Aerators',0.0035,_ovr('pjQtyKitchen')!=null?_ovr('pjQtyKitchen'):units,'Unit',BANK.kitchen);
@@ -3806,14 +3807,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      logo badge, no bubbly meta panel. ---- */
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
+  const dlab=isAudit?'Audit Invoice':(isInv?'Project Invoice':'Project Proposal');
   const drawHead=()=>{
-    tc(NAVY); font(12,'bold');  t(M,st.y+13,'Energy Efficiency Services of '+_state);
-    tc(NAVY); font(12,'bold');  t(W-M,st.y+13,_dt,{align:'right'});
-    tc(INKM); font(8,'normal'); t(W-M,st.y+24,'Inflation Reduction Act  \u00b7  HOMES Program',{align:'right'});
-    {const meta=[]; if((isAudit||isInv)&&docNo) meta.push((isAudit?'Audit Invoice No. ':'Invoice No. ')+docNo);
-     meta.push('Date: '+pv(F.pjInvDate)); if(isInv) meta.push('Terms: Net 30');
-     tc(INKM); font(8,'normal'); t(W-M,st.y+34,meta.join('      '),{align:'right'});}
-    st.y+=41; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16; };
+    tc(NAVY); font(14,'bold'); t(W/2,st.y+12,dlab,{align:'center'});
+    tc(NAVY); font(11,'bold'); t(W/2,st.y+27,_state+' IRA Multifamily HOMES Program',{align:'center'});
+    st.y+=34; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16; };
   const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the letterhead
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
   drawHead();
@@ -3825,11 +3823,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
-  {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8.5,'bold'); t(M,pT+8,'PROJECT INFORMATION'); t(rX,pT+8,'CUSTOMER INFORMATION');
+  {const colW=CW/2-12, pT=st.y;
+   tc(EMd); font(8.5,'bold'); t(M,pT+8,'PROJECT INFORMATION'); t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
-   for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
+   for(const v of rLines) for(const ln of wrap(v,colW)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
    st.y=Math.max(ly,ry)+6;}
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
@@ -4003,12 +4001,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
     t(W-M-150,st.y+10,'Date');
   }
-  _stampEesFooters(P,m.state);
+  _stampEesFooters(P,m.state,pv(F.pjInvDate));
   return d.output('blob');
 }
 /* Footer on EVERY page + "Page X of Y" on multi-page documents, so shuffled
    proposal pages can be identified. Runs after all content is laid out. */
-function _stampEesFooters(P,state){
+function _stampEesFooters(P,state,docDate){
   const {d,W,H,M,font,t,stroke,tc}=P;
   const fy=H-40, N=d.getNumberOfPages();
   const line1='Energy Efficiency Services of '+stateFullName(state)+'    |    112 Owen Rd. PO Box 6141, Monona, WI 53716';
@@ -4018,6 +4016,7 @@ function _stampEesFooters(P,state){
     stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
     tc([122,135,152]); font(8,'normal');   t(W/2,fy+12,line1,{align:'center'});
     tc([122,135,152]); font(7.5,'italic');  t(W/2,fy+22,line2,{align:'center'});
+    if(docDate){tc([122,135,152]); font(8,'normal'); t(M,fy+12,'Date: '+docDate);}
     if(N>1){tc([122,135,152]); font(8,'normal'); t(W-M,fy+12,'Page '+p+' of '+N,{align:'right'});}
   }
 }
@@ -4184,7 +4183,7 @@ function buildHearPdfBlob(){
    stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
    st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
   /* no acknowledgment/signature block on the proposal (Nicholas) */
-  _stampEesFooters(P,m.state);
+  _stampEesFooters(P,m.state,pv(F.pjInvDate));
   return d.output('blob');
 }
 
