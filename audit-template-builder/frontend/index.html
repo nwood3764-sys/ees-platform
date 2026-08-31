@@ -3819,16 +3819,25 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
   const _pn=String(F.pjPropName||'').trim();
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
+  // Three balanced columns matching the Sealed layout: on the generic proposal
+  // EES is the Primary IRA Contractor (name + phone follow the document's state,
+  // like the footer), so the contractor block is Energy Efficiency Services'.
+  const cLines=['Energy Efficiency Services of '+_state,'112 Owen Rd. PO Box 6141','Monona, WI 53716',
+    (m.state==='NC'?'(704) 990-5614':'608-460-7419')].filter(v=>v&&String(v).trim());
   const lLines=[F.pjInstallAddr,F.pjCsz,
     F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
-  {const colW=CW/2-12, pT=st.y;
-   tc(EMd); font(8.5,'bold'); t(M,pT+8,'PROJECT INFORMATION'); t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
-   let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
-   for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
-   for(const v of rLines) for(const ln of wrap(v,colW)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
-   st.y=Math.max(ly,ry)+6;}
+  {const pT=st.y, CX2=M+180, cW=CX2-M-14, pW=185, rW=150;
+   tc(EMd); font(8.5,'bold');
+   t(M,pT+8,'PRIMARY IRA CONTRACTOR');
+   t(CX2,pT+8,'PROJECT INFORMATION');
+   t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
+   let cy=pT+25,ly=pT+25,ry=pT+25; tc(C.ink); font(9);
+   for(const v of cLines) for(const ln of wrap(v,cW)){t(M,cy,ln); cy+=11.5;}
+   for(const v of lLines) for(const ln of wrap(v,pW)){t(CX2,ly,ln); ly+=11.5;}
+   for(const v of rLines) for(const ln of wrap(v,rW)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
+   st.y=Math.max(cy,ly,ry)+6;}
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
     t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
