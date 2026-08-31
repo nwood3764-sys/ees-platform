@@ -3890,12 +3890,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     gridHeader(CA);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const rows=[['1','Whole-Building Energy Audit \u2014 Multifamily','1','Building','$2,000.00','$2,000.00'],
-      ['2','Whole Building Blower Door and Diagnostic Testing','1','Building','','Included'],
-      ['3','Common Area and Building Envelope Assessment','1','Building','','Included'],
-      ['4','Mechanical Systems Survey','1','Building','','Included'],
-      ['5','Energy Modeling — Asset Score (HPXML / BuildingSync)','1','Building','','Included'],
-      ['6','Program Energy Audit Report (ASHRAE Level II)','1','Building','','Included'],
-      ['7','Customer Report / Building Assessment Tool Report','1','Building','','Included']];
+      ['2','Whole Building Blower Door and Diagnostic Testing','1','Building','Included','Included'],
+      ['3','Common Area and Building Envelope Assessment','1','Building','Included','Included'],
+      ['4','Mechanical Systems Survey','1','Building','Included','Included'],
+      ['5','Energy Modeling — Asset Score (HPXML / BuildingSync)','1','Building','Included','Included'],
+      ['6','Program Energy Audit Report (ASHRAE Level II)','1','Building','Included','Included'],
+      ['7','Customer Report / Building Assessment Tool Report','1','Building','Included','Included']];
     rows.forEach((r,i)=>{const h=16;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}
       if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
