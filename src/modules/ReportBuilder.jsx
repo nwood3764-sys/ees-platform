@@ -5,7 +5,9 @@ import SearchableCombo from '../components/SearchableCombo'
 import AnchoredPopover from '../components/AnchoredPopover'
 import { describeSaveError } from '../lib/saveErrorMessage'
 import { classifyCalcFields, describeIncompleteCalcFields } from '../lib/reportCalcFields'
-import { childRollupKey, aggregatesForColumnType, childRollupLabel } from '../lib/reportChildRollups'
+import {
+  childRollupKey, aggregatesForColumnType, childRollupLabel, isChildDetailField,
+} from '../lib/reportChildRollups'
 import { guessPrefix } from '../data/fieldMetadataService'
 import {
   deriveReportColumnLabel,
@@ -312,6 +314,58 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     })
   }
 
+  // Make a child object the report's ROWS — Salesforce's "A with B". This is a
+  // declaration about the whole report, not a column: every row count, total
+  // and grouping follows from it, which is why it is one explicit choice rather
+  // than something a field pick implies.
+  const setChildDetail = (child) => {
+    const already = report.rpt_child_detail
+    if (already && already.child_table === child.table && already.child_fk === child.fk_column) return
+    updateReport({
+      rpt_child_detail: {
+        child_table: child.table,
+        child_fk:    child.fk_column,
+        join:        'inner',
+        label:       child.label,
+      },
+    })
+    handleExpandChild(child.table, child.fk_column)
+  }
+
+  const clearChildDetail = () => {
+    // The child's own columns go with it — they have nothing to read once the
+    // report is back to one row per primary record.
+    updateReport({
+      rpt_child_detail: null,
+      rpt_selected_fields: report.rpt_selected_fields.filter(f => !isChildDetailField(f)),
+    })
+  }
+
+  const setChildDetailJoin = (join) => {
+    if (!report.rpt_child_detail) return
+    updateReport({ rpt_child_detail: { ...report.rpt_child_detail, join } })
+  }
+
+  // A column read from the CHILD row, available only while the report is
+  // expanded into child rows.
+  const addChildDetailField = (child, column) => {
+    const field = {
+      kind:        'child_field',
+      name:        column.name,
+      table:       child.table,
+      child_table: child.table,
+      child_fk:    child.fk_column,
+      type:        column.type,
+      via_path:    null,
+      label:       column.label || column.name,
+    }
+    if (report.rpt_selected_fields.some(f => isChildDetailField(f) && f.name === field.name)) return
+    updateReport({
+      rpt_selected_fields: resolveReportColumnLabels(
+        [...report.rpt_selected_fields, field], labelOpts),
+    })
+  }
+
   // Bulk-load every DIRECT related object's columns (non-toggling), so a field
   // search can span the whole object graph one hop out — Salesforce-style, the
   // search box reaches related-object fields, not just the primary object's.
@@ -565,6 +619,11 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 expandedChildren={expandedChildren}
                 onExpandChild={handleExpandChild}
                 addChildRollup={addChildRollup}
+                childDetail={report.rpt_child_detail || null}
+                setChildDetail={setChildDetail}
+                clearChildDetail={clearChildDetail}
+                setChildDetailJoin={setChildDetailJoin}
+                addChildDetailField={addChildDetailField}
                 addField={addField}
                 removeField={removeField}
                 moveField={moveField}
@@ -659,6 +718,7 @@ function FieldsTab({
   primaryOptions, report, updateReport,
   fieldTree, expandedRelated, onExpandRelated, onLoadAllRelated,
   expandedChildren, onExpandChild, addChildRollup,
+  childDetail, setChildDetail, clearChildDetail, setChildDetailJoin, addChildDetailField,
   addField, removeField, moveField, reorderFields,
 }) {
   const [search, setSearch] = useState('')
@@ -795,10 +855,34 @@ function FieldsTab({
                         Child Objects
                       </div>
                       <div style={{ fontSize:11, color:C.textMuted, marginBottom:6, lineHeight:1.5 }}>
-                        Records that point at this one. A child is added as a
-                        number ON this row — how many, or a total of theirs — so
-                        the report keeps one row per {primaryLabel.toLowerCase()}.
+                        Records that point at this one. <strong>Count</strong> or a
+                        total keeps one row per {primaryLabel.toLowerCase()};
+                        {' '}<strong>Rows</strong> turns the report into one row per
+                        child, with the {primaryLabel.toLowerCase()}'s fields repeated.
                       </div>
+                      {childDetail && (
+                        <div style={{
+                          background:'#e8f1fb', border:`1px solid ${C.border}`, borderRadius:6,
+                          padding:'8px 10px', marginBottom:8, fontSize:11.5, color:C.textSecondary,
+                        }}>
+                          <div style={{ fontWeight:600, color:C.textPrimary, marginBottom:4 }}>
+                            One row per {childDetail.label || childDetail.child_table}
+                          </div>
+                          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                            <select
+                              value={childDetail.join || 'inner'}
+                              onChange={e => setChildDetailJoin(e.target.value)}
+                              style={{ ...inputStyle(), width:'auto', fontSize:11.5, padding:'4px 6px' }}
+                            >
+                              <option value="inner">Only {primaryLabel.toLowerCase()} that have them</option>
+                              <option value="outer">Include those with none</option>
+                            </select>
+                            <button onClick={clearChildDetail} style={{ ...miniBtn(), fontSize:11.5 }}>
+                              Back to one row per {primaryLabel.toLowerCase()}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       {fieldTree.children.map(child => (
                         <ChildObjectNode
                           key={`${child.table}.${child.fk_column}`}
@@ -806,6 +890,10 @@ function FieldsTab({
                           node={expandedChildren?.[`${child.table}.${child.fk_column}`]}
                           onExpand={() => onExpandChild(child.table, child.fk_column)}
                           addChildRollup={addChildRollup}
+                          isDetail={!!childDetail && childDetail.child_table === child.table && childDetail.child_fk === child.fk_column}
+                          hasDetail={!!childDetail}
+                          setChildDetail={setChildDetail}
+                          addChildDetailField={addChildDetailField}
                         />
                       ))}
                     </div>
@@ -973,7 +1061,10 @@ function SelectedFieldRow({ f, setNodeRef, style, dragHandleProps, onUpdate, onR
 // with twelve units is not twelve buildings — so what you pick is an AGGREGATE:
 // how many there are, or a total / average / earliest / latest of one of their
 // fields. The value lands on the parent's own row.
-function ChildObjectNode({ child, node, onExpand, addChildRollup }) {
+function ChildObjectNode({
+  child, node, onExpand, addChildRollup,
+  isDetail, hasDetail, setChildDetail, addChildDetailField,
+}) {
   const isExpanded = !!node
   // Only fields you can aggregate are offered: numbers total and average,
   // dates take an earliest and a latest. Offering SUM of a text column is
@@ -1005,9 +1096,42 @@ function ChildObjectNode({ child, node, onExpand, addChildRollup }) {
             background:C.card, color:C.textSecondary, fontSize:11.5, fontWeight:500, cursor:'pointer',
           }}
         >Count</button>
+        <button
+          onClick={() => setChildDetail(child)}
+          disabled={hasDetail && !isDetail}
+          title={hasDetail && !isDetail
+            ? 'A report can be expanded into one child object at a time — clear the current one first'
+            : `Make this report one row per ${child.label.toLowerCase()}`}
+          style={{
+            padding:'6px 10px', border:`1px solid ${isDetail ? C.emerald : C.border}`, borderRadius:6,
+            background: isDetail ? '#e7f7ef' : C.card,
+            color: isDetail ? '#1c7a52' : C.textSecondary,
+            fontSize:11.5, fontWeight:500,
+            cursor: (hasDetail && !isDetail) ? 'default' : 'pointer',
+            opacity: (hasDetail && !isDetail) ? 0.5 : 1,
+          }}
+        >{isDetail ? 'Rows ✓' : 'Rows'}</button>
       </div>
       {isExpanded && node && (
         <div style={{ paddingLeft:12, marginTop:4 }}>
+          {isDetail && (
+            <div style={{ marginBottom:8 }}>
+              <div style={{ fontSize:10.5, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4 }}>
+                Columns from each {child.label.replace(/s$/, '').toLowerCase()}
+              </div>
+              {node.columns.map(col => (
+                <FieldRow
+                  key={`detail-${col.name}`}
+                  column={col}
+                  selected={false}
+                  onAdd={() => addChildDetailField(child, col)}
+                />
+              ))}
+              <div style={{ fontSize:10.5, color:C.textMuted, margin:'6px 0 2px' }}>
+                Or aggregate instead:
+              </div>
+            </div>
+          )}
           {node.columns.filter(AGGREGATABLE).length === 0 ? (
             <div style={{ fontSize:11, color:C.textMuted, padding:'4px 0' }}>
               Nothing here can be totalled — use <strong>Count</strong>, or report on
