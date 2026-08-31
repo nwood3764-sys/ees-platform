@@ -3846,12 +3846,13 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     for(const v of cLines) for(const ln of wrap(v,wCol)){t(M,cy,ln); cy+=11.5;}
     for(const v of lLines) for(const ln of wrap(v,wCol)){t(x2,ly,ln); ly+=11.5;}
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
-    st.y=Math.max(cy,ly,ry)+6; };
+    // isolate the header block from the sections below with a horizontal rule
+    st.y=Math.max(cy,ly,ry)+10; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
   const drawHead=()=>{
-    tc(BLUE);      font(12,'bold'); t(W/2,st.y+11,'Energy Efficiency Services of '+_state,{align:'center'});
-    tc(C.ink);     font(14,'bold'); t(W/2,st.y+29,dlab,{align:'center'});
-    tc([70,82,98]);font(10.5,'bold'); t(W/2,st.y+44,_state+' IRA Multifamily HOMES Program',{align:'center'});
-    st.y+=51; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16;
+    tc(BLUE);       font(12,'bold');   t(W/2,st.y+15,'Energy Efficiency Services of '+_state,{align:'center'});
+    tc(C.ink);      font(15,'bold');   t(W/2,st.y+37,dlab,{align:'center'});
+    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+54,_state+' IRA Multifamily HOMES Program',{align:'center'});
+    st.y+=63; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16;
     drawParties(); };
   const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the FULL header
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
@@ -4266,6 +4267,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   let y2=lines9(projInfo,CX2,st.y+13);
   let y3=lines9(ci,CX3,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
+  // isolate the header block from the sections below with a horizontal rule
+  st.y+=8; stroke(GREEN); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2;
   /* ===== Section 1: Project Scope of Work ===== */
   sh('Project Scope of Work');
   /* items table — narrow Contractor/Measure columns, wide readable Description;
