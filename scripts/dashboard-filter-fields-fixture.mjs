@@ -7,6 +7,7 @@
 
 import {
   filterColumnForObject, fieldMeaning, proposeEquivalentColumn, filterCoverage, buildFieldMap,
+  resolveOverrideColumns, resolveExtraFilters, unappliedFilters,
 } from '../src/lib/dashboardFilterFields.js'
 
 let pass = 0, fail = 0
@@ -95,6 +96,123 @@ ok('a proposal is never a column absent from the target',
   ok('an object with no equivalent is left out entirely', !('vehicles' in map))
 }
 check('no objects, no map', buildFieldMap('property_state', 'properties', []), {})
+
+// ── "Not on this object" is a real answer ─────────────────────────────────
+{
+  // The editor's per-object "not filtered" choice writes an empty entry. It
+  // must not fall back to the filter's own column: an object that happens to
+  // spell the column the same way would get filtered after someone explicitly
+  // said not to.
+  const f = { field_name: 'state', field_map: { properties: 'property_state', work_orders: null } }
+  check('an explicitly excluded object resolves to nothing', filterColumnForObject(f, 'work_orders'), null)
+  check('an empty string is excluded too',
+    filterColumnForObject({ field_name: 'state', field_map: { work_orders: '' } }, 'work_orders'), null)
+  check('an object the map never mentions still falls back',
+    filterColumnForObject(f, 'opportunities'), 'state')
+  check('a mapped object uses its own column', filterColumnForObject(f, 'properties'), 'property_state')
+  const cov = filterCoverage(f, [
+    { table: 'properties',  columns: ['property_state'] },
+    { table: 'work_orders', columns: ['state'] },
+  ])
+  check('coverage reports an excluded object as uncovered', cov.uncovered, ['work_orders'])
+}
+
+// ── Which columns a dashboard's controls own, per object ──────────────────
+{
+  const filters = [
+    { field_name: 'property_state', field_map: { opportunities: 'opportunity_state' } },
+    { field_name: 'property_status' },
+  ]
+  const onProperties = resolveOverrideColumns(filters, 'properties')
+  ok('a filter owns its own column on its own object', onProperties.has('property_state'))
+  ok('and every other column it names there', onProperties.has('property_status'))
+  const onOpps = resolveOverrideColumns(filters, 'opportunities')
+  ok('on another object it owns the mapped column', onOpps.has('opportunity_state'))
+  ok('and not the source object\'s column', !onOpps.has('property_state'))
+}
+{
+  // On-canvas filter widgets name one column and arrive as plain strings.
+  const set = resolveOverrideColumns(['property_state', null, undefined], 'anything')
+  check('a bare column name is owned as-is', Array.from(set), ['property_state'])
+}
+{
+  const excluded = resolveOverrideColumns(
+    [{ field_name: 'state', field_map: { work_orders: null } }], 'work_orders')
+  check('an excluded object has nothing overridden — the report keeps its own filter',
+    excluded.size, 0)
+}
+check('no controls, nothing owned', resolveOverrideColumns(null, 'properties').size, 0)
+
+// ── Which filters actually reach one object, and under which column ───────
+{
+  const extras = [
+    { field_name: 'property_state', field_map: { opportunities: 'opportunity_state' }, operator: 'equals', value: 'NC' },
+    { field_name: 'property_status', operator: 'equals', value: 'Active' },
+  ]
+  const onOpps = resolveExtraFilters(extras, 'opportunities', ['id', 'opportunity_state'])
+  check('the filter is rewritten to the column it uses here',
+    onOpps.map(f => f.field_name), ['opportunity_state'])
+  check('and keeps its operator and value', [onOpps[0].operator, onOpps[0].value], ['equals', 'NC'])
+  check('a filter with no equivalent here is dropped, not guessed at', onOpps.length, 1)
+}
+{
+  // The regression this whole mechanism exists to stop: before the map, a
+  // state filter simply was not a column on the opportunity report, so it was
+  // skipped and that widget answered a different question from its neighbour.
+  const extras = [{ field_name: 'property_state', operator: 'equals', value: 'NC' }]
+  check('without a map the filter still misses the other object',
+    resolveExtraFilters(extras, 'opportunities', ['opportunity_state']).length, 0)
+  check('with one it lands', resolveExtraFilters(
+    [{ ...extras[0], field_map: { opportunities: 'opportunity_state' } }],
+    'opportunities', ['opportunity_state']).length, 1)
+}
+{
+  const src = { field_name: 'property_state', field_map: { properties: 'property_state' }, value: 'NC' }
+  const out = resolveExtraFilters([src], 'properties', ['property_state'])
+  ok('the caller\'s filter object is not mutated', src.field_name === 'property_state' && out[0] !== src)
+}
+check('nothing in, nothing out', resolveExtraFilters(null, 'properties', []).length, 0)
+
+// ── Columns arrive in two shapes, and both are real ───────────────────────
+{
+  // The editor and the service hand over field descriptors, not bare names.
+  // Taking only the string form made every lookup miss, so a filter reported
+  // itself as reaching nothing while the picker showed the field right there.
+  // A browser check caught it; nothing written in one shape ever would.
+  const objects = [
+    { table: 'properties',    columns: [{ name: 'property_state', label: 'State', type: 'text' }] },
+    { table: 'opportunities', columns: [{ name: 'opportunity_state', label: 'State', type: 'text' }] },
+    { table: 'work_orders',   columns: [{ name: 'work_order_status', label: 'Status', type: 'uuid' }] },
+  ]
+  check('a map is built from field descriptors', buildFieldMap('property_state', 'properties', objects),
+    { opportunities: 'opportunity_state' })
+  check('an equivalent is proposed from descriptors',
+    proposeEquivalentColumn('property_state', 'properties', 'opportunities', objects[1].columns),
+    'opportunity_state')
+  const cov = filterCoverage(
+    { field_name: 'property_state', field_map: { properties: 'property_state', opportunities: 'opportunity_state' } },
+    objects)
+  check('coverage reads descriptors', cov.covered.map(c => c.table), ['properties', 'opportunities'])
+  check('and still names the miss', cov.uncovered, ['work_orders'])
+  check('extras resolve against descriptors', resolveExtraFilters(
+    [{ field_name: 'property_state', field_map: { opportunities: 'opportunity_state' }, value: 'NC' }],
+    'opportunities', objects[1].columns).map(f => f.field_name), ['opportunity_state'])
+  check('unapplied reads descriptors too', unappliedFilters(
+    [{ label: 'State', field_name: 'property_state' }], 'work_orders', objects[2].columns), ['State'])
+}
+
+// ── What a widget has to say when a filter cannot reach it ────────────────
+{
+  const extras = [
+    { label: 'State', field_name: 'property_state', field_map: { opportunities: 'opportunity_state' } },
+    { label: 'Status', field_name: 'property_status' },
+  ]
+  check('a filter that lands is not reported', unappliedFilters(extras, 'opportunities', ['opportunity_state']), ['Status'])
+  check('both land, nothing reported', unappliedFilters(extras, 'properties', ['property_state', 'property_status']), [])
+  check('a filter with no label is named by its column',
+    unappliedFilters([{ field_name: 'property_state' }], 'work_orders', []), ['property_state'])
+  check('nothing set, nothing reported', unappliedFilters(null, 'properties', []), [])
+}
 
 console.log(`dashboard-filter-fields fixture: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

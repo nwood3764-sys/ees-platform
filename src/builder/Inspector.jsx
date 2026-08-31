@@ -27,7 +27,10 @@ export default function Inspector({ registry, components, selectedId, settingsPa
               onChange={(patch) => onChange(selected.id, patch)} onRemove={() => onRemove(selected.id)} />
           : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              {settingsPanel}
+              {/* A render function gets the LIVE component list, so a surface
+                  panel (the dashboard's filter editor) can author against
+                  widgets added in this session, not just the loaded set. */}
+              {typeof settingsPanel === 'function' ? settingsPanel({ components }) : settingsPanel}
               <LayersPanel registry={registry} components={components} onSelect={onSelect}
                 onReorder={(next) => onChange('__reorder__', next)} />
             </div>
