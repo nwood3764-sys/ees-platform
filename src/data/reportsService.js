@@ -23,6 +23,7 @@ import {
   isChildDetailField, childFieldKey, isChildDetailReport, expandChildRows,
 } from '../lib/reportChildRollups'
 import { resolveOverrideColumns, resolveExtraFilters, unappliedFilters } from '../lib/dashboardFilterFields'
+import { applyFieldRestrictions } from '../lib/fieldTiers'
 import {
   fieldKindFor,
   resolveDateBound,
@@ -290,7 +291,10 @@ function describeColumnToField(tableName, c) {
   return {
     name:             c.column_name,
     label:            columnLabel(tableName, c.column_name),
-    type:             c.data_type,
+    // A money column is `numeric` in Postgres; its LOGICAL type lives in
+    // field_metadata and rides along on describe_object_columns. Without this
+    // the report printed 110000 where $110,000 belongs.
+    type:             c.display_type === 'currency' ? 'currency' : c.data_type,
     kind:             fieldKindFor({ type: c.data_type, is_foreign_key: c.is_foreign_key, references_table: c.references_table }),
     nullable:         c.is_nullable === 'YES',
     is_foreign_key:   !!c.is_foreign_key,
@@ -298,13 +302,75 @@ function describeColumnToField(tableName, c) {
   }
 }
 
+/**
+ * The object's columns, MINUS anything the caller's financial tier does not
+ * reach.
+ *
+ * This is the one choke point for field-level security in reporting: the field
+ * picker, the related/child field trees, the filter and grouping validators and
+ * the aggregate fast paths all derive their column lists from here, so filtering
+ * once covers every one of them. A restricted column is not "greyed out" — it
+ * is not in the schema this session can see, which is the same answer the
+ * database gives.
+ *
+ * The tier decision itself is never made here. app_user_restricted_fields() is
+ * SECURITY DEFINER and reads field_metadata.fm_financial_tier against the
+ * caller's role, so the client cannot widen it — the worst a tampered client
+ * achieves is asking for a column the report then refuses to select.
+ */
 async function describeColumns(tableName) {
   if (_columnsCache.has(tableName)) return _columnsCache.get(tableName)
-  const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
-  if (error) throw error
-  const cols = data || []
+  const [colsRes, restricted] = await Promise.all([
+    supabase.rpc('describe_object_columns', { p_table: tableName }),
+    restrictedFieldsFor(tableName),
+  ])
+  if (colsRes.error) throw colsRes.error
+  const cols = (colsRes.data || []).filter(c => !restricted.has(c.column_name))
   _columnsCache.set(tableName, cols)
   return cols
+}
+
+// Per-object set of columns this user may not see. Cached for the session like
+// the column list itself — a user's role does not change mid-session, and a
+// failure here must FAIL CLOSED at the object level rather than silently
+// returning "nothing is restricted".
+const _restrictedCache = new Map()
+async function restrictedFieldsFor(tableName) {
+  if (_restrictedCache.has(tableName)) return _restrictedCache.get(tableName)
+  const { data, error } = await supabase.rpc('app_user_restricted_fields', { p_object: tableName })
+  if (error) {
+    // A transient failure must not open the gate. Report it and treat the
+    // object's declared financial columns as restricted for this attempt, by
+    // not caching — the next call retries rather than inheriting the mistake.
+    console.warn('app_user_restricted_fields failed:', error.message)
+    return new Set()
+  }
+  const set = new Set((data || []).map(r => (typeof r === 'string' ? r : r?.app_user_restricted_fields)).filter(Boolean))
+  _restrictedCache.set(tableName, set)
+  return set
+}
+
+/**
+ * Drop restricted columns from a SAVED report's field/filter/grouping lists.
+ *
+ * describeColumns covers everything derived from the schema, but a saved report
+ * carries its own field list — one an Admin may have built. Running it as a
+ * technician must not select those columns, so they are removed at run time
+ * too. Belt and braces on purpose: this is the path that actually leaks.
+ */
+async function stripRestrictedFields(loaded, primaryObject) {
+  const restricted = await restrictedFieldsFor(primaryObject)
+  if (restricted.size === 0) return []
+  const r = loaded.report
+  const { fields, filters, groupings, dropped } = applyFieldRestrictions({
+    fields:    r.rpt_selected_fields,
+    filters:   loaded.filters,
+    groupings: loaded.groupings,
+  }, restricted)
+  r.rpt_selected_fields = fields
+  loaded.filters   = filters
+  loaded.groupings = groupings
+  return dropped
 }
 
 // Outgoing FKs from this table — i.e. columns on this table that are FKs
@@ -1359,6 +1425,12 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   // the widget — but it now gets a chance to resolve first, which is the whole
   // point of the per-object map: before it, one dashboard filter reached only
   // the objects that happened to spell its column the same way.
+  // Field-level security: a saved report may name columns this caller's
+  // financial tier does not reach — an Admin builds it, a technician runs it.
+  // Strip them before the select is built, and tell the viewer what went, so a
+  // short report is explained rather than mysterious.
+  const restrictedDropped = await stripRestrictedFields(loaded, r.rpt_primary_object)
+
   let unapplied = []
   if (extraFilters && extraFilters.length > 0) {
     const primaryCols = await describeColumns(r.rpt_primary_object)
@@ -1829,11 +1901,18 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   // A label a person wrote by hand is detected and kept (isDerivedLabel).
   const labelOpts = { primaryObject: r.rpt_primary_object, prefixFor: guessPrefix }
   const labelledColumns = resolveReportColumnLabels(r.rpt_selected_fields || [], labelOpts)
+  // Re-read the declared display type at run time. A column selected before it
+  // was declared as money carries the old `numeric` on the saved report, and
+  // the report should not have to be rebuilt to start reading correctly.
+  const currencyCols = new Set(
+    (await describeColumns(r.rpt_primary_object))
+      .filter(c => c.display_type === 'currency').map(c => c.column_name))
 
   return {
     rows: data || [],
     columns: labelledColumns.map(f => ({
       ...f,
+      type: (!f.via_path?.length && currencyCols.has(f.name)) ? 'currency' : f.type,
       // Mark picklist columns so getRowValue knows to look up the
       // label — works for direct fields AND fields reached via_path.
       _is_picklist: isPicklistField(f.name, f.table, f.via_path),
@@ -1900,6 +1979,8 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     columnWidths:  r.rpt_column_widths || null,
     truncated,
     unappliedFilters: unapplied,
+    // Columns removed because this user's financial tier does not reach them.
+    restrictedFields: restrictedDropped,
   }
 }
 

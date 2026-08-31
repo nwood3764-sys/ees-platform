@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { C } from '../data/constants'
+import { formatCurrency } from '../lib/currencyFormat'
 import {
   PINNED_TABLE, ROW_RULE, TOTAL_RULE, pinnedHeaderCell, pinnedFirstColumn,
 } from '../lib/pinnedTableHeader'
@@ -1506,6 +1507,9 @@ function formatCellValue(v, type) {
   if (type === 'date') {
     try { return new Date(v).toLocaleDateString() } catch { return String(v) }
   }
+  // A money column reads as money here too — the report is the surface where a
+  // bare 110000 is most likely to be mistaken for a count.
+  if (type === 'currency') return formatCurrency(v)
   if (typeof v === 'number') {
     return v.toLocaleString()
   }
