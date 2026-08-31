@@ -30,15 +30,29 @@ are struck through as they ship, with the PR that did it.
       responsive row/column layout measured from the tile, and a tail that folds
       into "Other" past six wedges. **PR #675.**
 - [ ] Same audit for bar/line: axis titles, label density, legend placement.
-- [ ] **The chart palette fails the dataviz validator** and needs a decision.
-      `CHART_COLORS` = `#3ecf8e,#7eb3e8,#1e466b,#a78bfa,#2aab72,#5eead4,#8fa0b8`
-      returns FAIL on the lightness band (`#1e466b` too dark at 0.384,
-      `#5eead4` too light at 0.855), FAIL on the chroma floor (`#7eb3e8`,
-      `#1e466b` and `#8fa0b8` read as gray), and WARN on contrast (six of seven
-      below 3:1 against the surface). CVD separation passes. Fixing it means
-      re-stepping the series hues platform-wide, inside the no-red/orange rule —
-      a visible change to every chart, so it is Nicholas's call, not a silent
-      one.
+- [x] **The chart palette re-stepped.** DECIDED 2026-08-31 (Nicholas: "re-step
+      all seven"). The old set
+      `#3ecf8e,#7eb3e8,#1e466b,#a78bfa,#2aab72,#5eead4,#8fa0b8` failed every
+      computable check: two colours outside the OKLCH lightness band, three
+      below the chroma floor (they read as gray), six under 3:1 against the
+      white card. Now
+      `#009c65,#623e96,#1398e2,#813075,#7a89e7,#008d9b,#b776d4` — all seven
+      clear 3:1 on both card surfaces, sit in the band and above the floor, and
+      every adjacent pair AND every pie ring from 2 to 7 slices separates by at
+      least ΔE 9.2 under simulated protanopia and deuteranopia. Guarded by
+      `scripts/chart-palette-fixture.mjs` (66 checks, with the old palette as a
+      positive control that must fail).
+      Three findings worth keeping: seven identities cannot ride on hue alone
+      (deuteranopia collapses red-green, so the set alternates a light and a
+      deep tier); a pie is a RING, so slot 1 borders every other slot at some
+      series count, which is why only one green is allowed and why it must be
+      slot 1; and the emerald had to go deeper than the `#3ecf8e` UI accent,
+      which cannot clear 3:1 on white at its own lightness.
+- [ ] **`CHART_COLORS[i % length]` cycles.** An 8th series wraps to slot 1 and
+      gets an identical colour to the first — the palette is meant to be
+      assigned in fixed order and never cycled. Six modules do this inline. The
+      pie widget already folds its tail into "Other"; the others should either
+      fold too or render the overflow as a neutral, never as a duplicate.
 
 ## 3. Column widths that stay
 
