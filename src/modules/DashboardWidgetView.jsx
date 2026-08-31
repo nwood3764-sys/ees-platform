@@ -533,35 +533,106 @@ function LineWidget({ result, widget, canDrill, drillTo }) {
   return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
 }
 
+// A pie you can actually read.
+//
+// Nicholas, 2026-08-31: "The legend needs to be on the right. Look at this
+// screenshot. You can't read anything."
+//
+// Three things were wrong with the old one, and they compounded:
+//
+//   1. Every slice drew its own leader-lined label around the circle. At five
+//      slices those labels collide — "Housing Authority of the City of Ro…"
+//      landing on top of "Community Management …" — and two of them rendered as
+//      a bare em dash because the name had been clipped away entirely.
+//   2. The legend was a BOTTOM scroll legend, which in a widget-height tile
+//      shows one entry at a time behind a "1/5" pager. A legend you page
+//      through one item at a time is not a legend.
+//   3. Nothing carried the value. The label showed a percentage, the legend
+//      showed a name, and the number was only in the tooltip.
+//
+// Now: the legend sits on the RIGHT, vertical, one line per slice, carrying the
+// name AND its value and share — which is the Power BI / Salesforce layout and
+// the only one that survives long organisation names. The circle keeps only the
+// labels that fit inside a slice, so nothing is drawn on top of anything else.
+const PIE_LEGEND_WIDTH = 250          // px reserved for the legend column
+// A character budget, in the legend's monospace face, so the name column and
+// the number column line up down the legend without ECharts measuring anything.
+const PIE_LEGEND_NAME_CHARS = 22
+const PIE_INSIDE_LABEL_MIN_PCT = 8    // below this a slice has no room for text
+
 function PieWidget({ result, widget, donut, canDrill, drillTo }) {
   const data = buildChartData(result, widget)
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
   const showLabels = cfg.show_data_labels !== false
   const showLegend = cfg.show_legend !== false
+  // Right is the default because it is the one that reads; bottom stays
+  // available for a short-and-wide tile.
+  const legendRight = showLegend && (cfg.legend_position || 'right') === 'right'
   const total = data.reduce((a, d) => a + (Number(d.value) || 0), 0)
   const byName = Object.fromEntries(data.map(d => [d.name, d]))
+  const share = (v) => (total > 0 ? (Number(v) || 0) / total * 100 : 0)
 
   const option = {
     animationDuration: 250,
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b> · ${p.percent}%` },
-    legend: showLegend ? { type: 'scroll', bottom: 0, left: 'center' } : { show: false },
-    // Donuts carry the total in the hole — the Salesforce donut pattern.
+    legend: showLegend
+      ? {
+          type: 'scroll',
+          ...(legendRight
+            ? { orient: 'vertical', right: 6, top: 'middle', align: 'left', width: PIE_LEGEND_WIDTH }
+            : { bottom: 0, left: 'center' }),
+          itemGap: 9, itemWidth: 10, itemHeight: 10, icon: 'circle',
+          // The name is truncated HERE, in JS, to a character budget — not by
+          // ECharts. A rich-text column with `overflow: truncate` does not
+          // constrain a legend entry: the names ran their full length, straight
+          // across the pie and through the value column. A character budget is
+          // predictable and cannot overlap anything.
+          formatter: (name) => {
+            const d = byName[name]
+            const short = name.length > PIE_LEGEND_NAME_CHARS
+              ? `${name.slice(0, PIE_LEGEND_NAME_CHARS - 1)}…`
+              : name
+            if (!d) return short
+            return `${short.padEnd(PIE_LEGEND_NAME_CHARS + 1)}${fmt(d.value)} · ${share(d.value).toFixed(1)}%`
+          },
+          textStyle: { fontSize: 11, color: C.textSecondary, fontFamily: "'JetBrains Mono', monospace" },
+          // The full name on hover, for the ones the column has to truncate.
+          tooltip: { show: true },
+        }
+      : { show: false },
+    // Donuts carry the total in the hole — the Salesforce donut pattern. It
+    // follows the circle when the legend takes the right-hand column.
     title: donut ? {
-      text: fmt(total), subtext: 'Total', left: 'center', top: '38%',
-      textStyle: { fontSize: 22, fontWeight: 700, color: C.textPrimary, fontFamily: "'JetBrains Mono', monospace" },
+      text: fmt(total), subtext: 'Total',
+      left: legendRight ? '28%' : 'center', top: legendRight ? '42%' : '38%',
+      textAlign: 'center',
+      textStyle: { fontSize: 20, fontWeight: 700, color: C.textPrimary, fontFamily: "'JetBrains Mono', monospace" },
       subtextStyle: { fontSize: 11, color: C.textMuted },
     } : undefined,
     series: [{
       type: 'pie', data: data.map(d => ({ name: d.name, value: d.value })),
       radius: donut ? ['52%', '76%'] : '72%',
-      center: ['50%', showLegend ? '44%' : '50%'],
+      // The circle moves left to make room for the legend column rather than
+      // being squashed under it.
+      center: legendRight ? ['28%', '50%'] : ['50%', showLegend ? '44%' : '50%'],
       // 2px white ring between slices keeps adjacent fills separated.
       itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 3 },
+      // Labels go INSIDE the slice, and only where they fit. No leader lines:
+      // they are what collided, and every name is in the legend anyway.
       label: showLabels
-        ? { show: true, color: C.textSecondary, fontSize: 11, formatter: (p) => `${p.name} · ${p.percent}%` }
+        ? {
+            show: true, position: 'inside', color: '#ffffff', fontSize: 10.5, fontWeight: 600,
+            formatter: (p) => (p.percent >= PIE_INSIDE_LABEL_MIN_PCT ? `${Math.round(p.percent)}%` : ''),
+          }
         : { show: false },
-      labelLine: { show: showLabels, length: 10, length2: 8, lineStyle: { color: C.borderDark } },
+      labelLine: { show: false },
+      // A hovered slice lifts slightly and names itself in full — the one place
+      // a long organisation name is readable in its entirety.
+      emphasis: {
+        scaleSize: 6,
+        label: { show: true, position: 'inside', formatter: (p) => `${Math.round(p.percent)}%` },
+      },
       cursor: canDrill ? 'pointer' : 'default',
     }],
   }

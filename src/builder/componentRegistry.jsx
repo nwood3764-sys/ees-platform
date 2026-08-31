@@ -89,6 +89,17 @@ const DECIMALS_FIELD = {
 }
 const DATA_LABELS_FIELD = { key: 'show_data_labels', label: 'Show data labels', type: 'boolean' }
 const LEGEND_FIELD      = { key: 'show_legend', label: 'Show legend', type: 'boolean' }
+// Where the legend sits. Right by default: a bottom legend in a tile-height
+// widget collapses into a one-item-at-a-time pager, and a pie's categories are
+// exactly the thing the reader needs to see all of at once.
+const LEGEND_POSITION_FIELD = {
+  key: 'legend_position', label: 'Legend position', type: 'select',
+  options: [
+    { value: 'right',  label: 'Right (recommended)' },
+    { value: 'bottom', label: 'Bottom' },
+  ],
+  dependsOn: { key: 'show_legend', notEquals: false },
+}
 const SERIES_BY_FIELD = {
   key: 'series_by', label: 'Series (split by)', type: 'field',
   help: 'Second grouping — its values become the stacked/clustered series.',
@@ -224,16 +235,16 @@ export const COMPONENT_REGISTRY = [
     id: 'pie', label: 'Pie Chart', category: 'Charts',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM12 2v10l8 4',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(false)),
   },
   {
     id: 'donut', label: 'Donut Chart', category: 'Charts',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 6a4 4 0 100 8 4 4 0 000-8z',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(true)),
   },
   {
