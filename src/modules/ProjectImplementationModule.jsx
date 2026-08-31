@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
 import { useRecharts } from '../lib/RechartsLazy'
-import { C, CHART_COLORS, fmt } from '../data/constants'
+import { C, CHART_COLORS, seriesColor, fmt } from '../data/constants'
 import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
@@ -120,14 +120,14 @@ function Dashboard({ workOrders, projects, opportunities, onDrill }) {
             <R.ResponsiveContainer width={100} height={120}>
               <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}
                 cursor="pointer"
-                onClick={(d) => onDrill('workorders', woStatusFilter(d?.payload?.raw ?? d?.raw))}>{woByStatus.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</R.Pie><R.Tooltip /></R.PieChart>
+                onClick={(d) => onDrill('workorders', woStatusFilter(d?.payload?.raw ?? d?.raw))}>{woByStatus.map((_, i) => <R.Cell key={i} fill={seriesColor(i)} />)}</R.Pie><R.Tooltip /></R.PieChart>
             </R.ResponsiveContainer>
             <div style={{ flex: 1, fontSize: 11, color: C.textSecondary }}>
               {woByStatus.map((d, i) => (
                 <div key={d.raw}
                   onClick={() => onDrill('workorders', woStatusFilter(d.raw))}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, cursor: 'pointer' }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: seriesColor(i), flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>{d.name}</span>
                   <span style={{ fontWeight: 600, color: C.textPrimary }}>{d.value}</span>
                 </div>

@@ -21,7 +21,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
-import { C, CHART_COLORS, STATUS_CFG } from '../data/constants'
+import { C, CHART_COLORS, seriesColor, STATUS_CFG } from '../data/constants'
 import {
   fetchPortalUserSelf,
   fetchProjectTracker,
@@ -49,7 +49,7 @@ import {
 function makeColorOf(programs) {
   return (program) => {
     const i = programs.indexOf(program)
-    return CHART_COLORS[(i < 0 ? 0 : i) % CHART_COLORS.length]
+    return seriesColor(i < 0 ? 0 : i)
   }
 }
 
@@ -840,7 +840,7 @@ function CalendarView({ appointments, onOpenVisit }) {
   const bldgOptions = Array.from(bldgMap.values())
   const statuses = Array.from(new Set(appointments.map((a) => a.status).filter(Boolean)))
   const types = Array.from(new Set(appointments.map((a) => a.workOrderType).filter(Boolean))).sort()
-  const typeColor = (t) => CHART_COLORS[Math.max(0, types.indexOf(t)) % CHART_COLORS.length]
+  const typeColor = (t) => seriesColor(Math.max(0, types.indexOf(t)))
   const colorFor = (a) => colorBy === 'type' ? typeColor(a.workOrderType) : apptStatusColor(a.status)
 
   const filtered = appointments.filter((a) => a.start &&

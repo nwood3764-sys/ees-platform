@@ -71,6 +71,26 @@ export const C = {
 // system's rule — and clear of the amber that means "warning".
 export const CHART_COLORS = ['#009c65','#623e96','#1398e2','#813075','#7a89e7','#008d9b','#b776d4'];
 
+// A slot beyond the palette. The colours are assigned in fixed order and must
+// NEVER be cycled: `CHART_COLORS[i % length]` paints the 8th series the same
+// emerald as the 1st, which is not a near-miss — it is two different things
+// wearing one identity. Caught on a live 8-row funnel where "Westminster
+// Company" came out the same colour as "Lutheran Social Services".
+//
+// There is no 8th hue to invent: seven is what the legal window (no red, no
+// orange) holds at the separation the checks demand. So an overflow slot is
+// drawn in a deliberate neutral — visibly NOT one of the seven, which is the
+// truth — and the widget should be folding its tail into "Other" instead. The
+// pie already does; this is the backstop for the ones that do not.
+export const CHART_COLOR_OVERFLOW = '#8fa0b8';
+
+/** The colour for series `i`. Never cycles — see CHART_COLOR_OVERFLOW. */
+export function seriesColor(i) {
+  const n = Number(i)
+  if (!Number.isFinite(n) || n < 0) return CHART_COLOR_OVERFLOW
+  return n < CHART_COLORS.length ? CHART_COLORS[n] : CHART_COLOR_OVERFLOW
+}
+
 export const STATUS_CFG = {
   // Opportunity
   'Property Identified':          { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },

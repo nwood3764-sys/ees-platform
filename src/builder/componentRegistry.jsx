@@ -39,7 +39,7 @@
 //   `dependsOn` names a config key whose truthiness gates this field's display.
 // =============================================================================
 
-import { C, CHART_COLORS } from '../data/constants'
+import { C, CHART_COLORS, seriesColor } from '../data/constants'
 
 // ─── Shared config-field fragments ───────────────────────────────────────────
 const MEASURE_FIELD = {
@@ -111,6 +111,31 @@ const LEGEND_POSITION_FIELD = {
   options: [
     { value: 'right',  label: 'Right (recommended)' },
     { value: 'bottom', label: 'Bottom' },
+    { value: 'auto',   label: 'Auto — move under on a narrow tile' },
+  ],
+  dependsOn: { key: 'show_legend', notEquals: false },
+}
+// What each legend row carries, and where. Independent switches, not one
+// combined mode (Nicholas, 2026-08-31: "I don't see any kind of radio buttons
+// to remove the quantities or the percentages. They need to be independent,
+// with full control over how these elements are displayed") — turning the
+// count off must not also take the share with it.
+const LEGEND_VALUE_FIELD = {
+  key: 'legend_show_value', label: 'Count in legend', type: 'boolean',
+  dependsOn: { key: 'show_legend', notEquals: false },
+}
+const LEGEND_PERCENT_FIELD = {
+  key: 'legend_show_percent', label: 'Percentage in legend', type: 'boolean',
+  dependsOn: { key: 'show_legend', notEquals: false },
+}
+// Numbers before the name gives them a clean left column to line up in and
+// hands the whole remaining width to the name — which is the readable choice
+// when the categories are long (property owner names, programs).
+const LEGEND_VALUE_POSITION_FIELD = {
+  key: 'legend_value_position', label: 'Numbers', type: 'select',
+  options: [
+    { value: 'right', label: 'After the name' },
+    { value: 'left',  label: 'Before the name' },
   ],
   dependsOn: { key: 'show_legend', notEquals: false },
 }
@@ -163,7 +188,7 @@ function fakeBars(vertical) {
     return (
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: '100%', padding: '6px 2px' }}>
         {heights.map((h, i) => (
-          <div key={i} style={{ flex: 1, height: `${h}%`, background: CHART_COLORS[i % CHART_COLORS.length], borderRadius: '3px 3px 0 0' }} />
+          <div key={i} style={{ flex: 1, height: `${h}%`, background: seriesColor(i), borderRadius: '3px 3px 0 0' }} />
         ))}
       </div>
     )
@@ -171,7 +196,7 @@ function fakeBars(vertical) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center', height: '100%', padding: '4px 2px' }}>
       {heights.map((h, i) => (
-        <div key={i} style={{ width: `${h}%`, height: 10, background: CHART_COLORS[i % CHART_COLORS.length], borderRadius: 3 }} />
+        <div key={i} style={{ width: `${h}%`, height: 10, background: seriesColor(i), borderRadius: 3 }} />
       ))}
     </div>
   )
@@ -249,28 +274,28 @@ export const COMPONENT_REGISTRY = [
     id: 'pie', label: 'Pie Chart', category: 'Charts',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM12 2v10l8 4',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', legend_show_value: true, legend_show_percent: true, legend_value_position: 'right', number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, LEGEND_VALUE_FIELD, LEGEND_PERCENT_FIELD, LEGEND_VALUE_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(false)),
   },
   {
     id: 'donut', label: 'Donut Chart', category: 'Charts',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 6a4 4 0 100 8 4 4 0 000-8z',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, legend_position: 'right', legend_show_value: true, legend_show_percent: true, legend_value_position: 'right', number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, LEGEND_VALUE_FIELD, LEGEND_PERCENT_FIELD, LEGEND_VALUE_POSITION_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(true)),
   },
   {
     id: 'funnel', label: 'Funnel', category: 'Charts',
     icon: 'M3 4h18l-7 8v6l-4 2v-8z',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, number_format: 'number', show_legend: true, legend_position: 'right', legend_show_value: true, legend_show_percent: true, legend_value_position: 'right'},
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, LEGEND_VALUE_FIELD, LEGEND_PERCENT_FIELD, LEGEND_VALUE_POSITION_FIELD],
     Preview: () => previewBox((
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, justifyContent: 'center', height: '100%' }}>
         {[100, 76, 52, 30].map((w, i) => (
-          <div key={i} style={{ width: `${w}%`, height: 12, background: CHART_COLORS[i % CHART_COLORS.length], borderRadius: 2 }} />
+          <div key={i} style={{ width: `${w}%`, height: 12, background: seriesColor(i), borderRadius: 2 }} />
         ))}
       </div>
     )),
@@ -451,12 +476,12 @@ export const COMPONENT_REGISTRY = [
     id: 'pyramid', label: 'Pyramid', category: 'Charts',
     icon: 'M12 3l9 18H3zM7.5 12h9M5.5 16.5h13',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, number_format: 'number' },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, number_format: 'number', show_legend: true, legend_position: 'right', legend_show_value: true, legend_show_percent: true, legend_value_position: 'right'},
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABEL_MODE_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD, LEGEND_FIELD, LEGEND_POSITION_FIELD, LEGEND_VALUE_FIELD, LEGEND_PERCENT_FIELD, LEGEND_VALUE_POSITION_FIELD],
     Preview: () => previewBox((
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, justifyContent: 'center', height: '100%' }}>
         {[28, 52, 76, 100].map((w, i) => (
-          <div key={i} style={{ width: `${w}%`, height: 12, background: CHART_COLORS[i % CHART_COLORS.length], borderRadius: 2 }} />
+          <div key={i} style={{ width: `${w}%`, height: 12, background: seriesColor(i), borderRadius: 2 }} />
         ))}
       </div>
     )),

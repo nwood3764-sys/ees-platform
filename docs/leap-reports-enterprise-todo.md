@@ -48,7 +48,30 @@ are struck through as they ship, with the PR that did it.
       series count, which is why only one green is allowed and why it must be
       slot 1; and the emerald had to go deeper than the `#3ecf8e` UI accent,
       which cannot clear 3:1 on white at its own lightness.
-- [ ] **`CHART_COLORS[i % length]` cycles.** An 8th series wraps to slot 1 and
+- [x] **Cycling removed.** `seriesColor(i)` in `src/data/constants.js` returns
+      the slot colour and, past the seventh, a deliberate neutral — never a
+      wrap. Caught live on an 8-row funnel where "Westminster Company" came out
+      the same emerald as "Lutheran Social Services". All 43 call sites across
+      9 files route through it; pinned in the palette fixture.
+- [x] **Pie/funnel legend grows with the tile.** It was a hard 210px column, so
+      widening a widget widened the CHART and the names stayed truncated
+      forever (Nicholas: "even when I made the element way wider, it's still
+      cutting off the names").
+- [x] **Legend layout is honoured literally.** "Right" set in the editor was
+      arriving at the BOTTOM on the rendered page, because a width threshold
+      silently re-laid the widget out and the runner's tile is narrower than
+      the canvas tile. `right`/`bottom` are now literal everywhere; responsive
+      behaviour is an explicit third choice (`auto`).
+- [x] **Independent legend switches** — count and percentage are separate
+      toggles, and the numbers can sit before or after the name.
+- [x] **Funnel rebuilt.** Labels inside the bands in contrast-picked ink, no
+      leader lines (they were what ran off the tile), a 38% floor so a small
+      stage is a visible band rather than a hairline stem, and the names in the
+      shared legend. One legend definition (`SeriesLegend`) now serves the pie,
+      donut and funnel.
+- [ ] **Same audit for bar/line** — axis titles, label density, legend
+      placement, and the same literal-layout rule.
+- [ ] ~~`CHART_COLORS[i % length]` cycles.~~ An 8th series wraps to slot 1 and
       gets an identical colour to the first — the palette is meant to be
       assigned in fixed order and never cycled. Six modules do this inline. The
       pie widget already folds its tail into "Other"; the others should either
