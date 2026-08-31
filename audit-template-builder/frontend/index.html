@@ -3821,7 +3821,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      logo badge, no bubbly meta panel. ---- */
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
-  const dlab=isAudit?'Audit Invoice':(isInv?'Project Invoice':'Project Proposal');
+  const dlab=isAudit?'Multifamily Energy Assessment':(isInv?'Project Invoice':'Project Proposal');
   /* ---- party blocks: EES contractor / project / customer. Drawn as part of the
      header so the WHOLE header — not just the title — repeats on any page 2. ---- */
   // Three balanced columns matching the Sealed layout: on the generic proposal
@@ -3890,12 +3890,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     gridHeader(CA);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const rows=[['1','Whole-Building Energy Audit \u2014 Multifamily','1','Building','$2,000.00','$2,000.00'],
-      ['2','Whole Building Blower Door and Diagnostic Testing','1','Building','','Included'],
-      ['3','Common Area and Building Envelope Assessment','1','Building','','Included'],
-      ['4','Mechanical Systems Survey','1','Building','','Included'],
-      ['5','Energy Modeling — Asset Score (HPXML / BuildingSync)','1','Building','','Included'],
-      ['6','Program Energy Audit Report (ASHRAE Level II)','1','Building','','Included'],
-      ['7','Customer Report / Building Assessment Tool Report','1','Building','','Included']];
+      ['2','Whole Building Blower Door and Diagnostic Testing','1','Building','Included','Included'],
+      ['3','Common Area and Building Envelope Assessment','1','Building','Included','Included'],
+      ['4','Mechanical Systems Survey','1','Building','Included','Included'],
+      ['5','Energy Modeling — Asset Score (HPXML / BuildingSync)','1','Building','Included','Included'],
+      ['6','Program Energy Audit Report (ASHRAE Level II)','1','Building','Included','Included'],
+      ['7','Customer Report / Building Assessment Tool Report','1','Building','Included','Included']];
     rows.forEach((r,i)=>{const h=16;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}
       if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
@@ -3983,7 +3983,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
    rlineE('Total Project Cost',_money(gross),true); st.y+=14;
    stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   const credits=[];
-  if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
+  if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','Income-Qualified Multifamily Energy Assessment Rebate per Building',iraAmt]);
   else{
     if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
     if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+'  \u00b7  '+(m.units||0)+' units \u00d7 '+_money(m.tier.perUnit)+' per unit = '+_money(iraAmt),iraAmt]);
