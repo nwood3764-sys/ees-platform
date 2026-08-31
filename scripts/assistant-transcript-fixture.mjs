@@ -19,6 +19,8 @@ import {
   relaxedSearchTerms, isModelUnavailable, HISTORY_CHAR_BUDGET,
   pricingFor, addUsage, costOf, totalInputTokens, emptySpend,
   deadlineState, DEADLINE_NOTE, SOFT_DEADLINE_MS, HARD_DEADLINE_MS,
+  isTransientUpstream, upstreamRetryDelayMs, upstreamErrorMessage,
+  MAX_UPSTREAM_RETRIES, RETRY_BACKOFF_MS, MAX_RETRY_WAIT_MS, RETRY_TIME_RESERVE_MS,
 } from '../supabase/functions/ai-assistant/transcript.js'
 
 let failures = 0
@@ -233,6 +235,81 @@ check('a negative elapsed does not abandon the turn', deadlineState(-5), 'contin
 // The note is what stops a cut-short turn being reported as a finished one.
 check('the deadline note forbids further tool calls', /do NOT call any more tools/i.test(DEADLINE_NOTE), true)
 check('…and forbids implying the job finished', /never imply you finished/i.test(DEADLINE_NOTE), true)
+
+
+// ── Transient upstream failures ─────────────────────────────────────────────
+// Nicholas asked the assistant for 25 dwelling units and got
+// "Assistant call failed (529)." A 529 is Anthropic's overloaded_error: the API
+// was momentarily at capacity, which says nothing about the request. Nothing
+// retried it — isModelUnavailable covers only 404/400 model-not-found — so one
+// blip killed the whole turn and discarded every action already proposed in it.
+// A batch is the most exposed shape there is: one turn is up to MAX_TURNS
+// sequential calls, so it gets that many chances to be told "busy".
+check('a 529 overload is transient', isTransientUpstream(529, 'overloaded_error'), true)
+check('a 429 rate limit is transient', isTransientUpstream(429, 'rate_limit_error'), true)
+check('a 503 gateway failure is transient', isTransientUpstream(503, 'Service Unavailable'), true)
+check('a 500 is transient', isTransientUpstream(500, 'internal server error'), true)
+check('a 502 is transient', isTransientUpstream(502, 'bad gateway'), true)
+check('a 504 is transient', isTransientUpstream(504, 'gateway timeout'), true)
+// An overload body is authoritative even behind an odd status.
+check('an overloaded body is transient whatever the status',
+  isTransientUpstream(200, '{"type":"error","error":{"type":"overloaded_error"}}'), true)
+// The permanent failures must NOT be retried: retrying a bad request just
+// wastes the user's time and repeats the same rejection.
+check('a 400 bad request is not retried', isTransientUpstream(400, 'messages: unexpected role'), false)
+check('a 401 bad key is not retried', isTransientUpstream(401, 'authentication_error'), false)
+check('a 403 is not retried', isTransientUpstream(403, 'permission_error'), false)
+check('a 404 missing model is not retried', isTransientUpstream(404, 'not_found_error'), false)
+check('a 413 oversized request is not retried', isTransientUpstream(413, 'request too large'), false)
+check('a 501 not-implemented is a real answer, not congestion',
+  isTransientUpstream(501, 'not implemented'), false)
+// The two error families stay disjoint — a transient failure must never be
+// mistaken for "this model does not exist" and silently change the model.
+check('an overload is still not a model-availability failure',
+  isModelUnavailable(529, 'overloaded_error'), false)
+
+// The backoff ladder: bounded, and it must fit inside the turn.
+check('the first retry waits the first rung', upstreamRetryDelayMs(0, null, 0), RETRY_BACKOFF_MS[0])
+check('the second retry waits longer', upstreamRetryDelayMs(1, null, 0), RETRY_BACKOFF_MS[1])
+check('the third retry waits longer still', upstreamRetryDelayMs(2, null, 0), RETRY_BACKOFF_MS[2])
+check('retries are capped', upstreamRetryDelayMs(MAX_UPSTREAM_RETRIES, null, 0), null)
+check('the whole ladder fits inside the soft deadline',
+  RETRY_BACKOFF_MS.reduce((a, b) => a + b, 0) < SOFT_DEADLINE_MS, true)
+// retry-after is honoured, but never past the cap — a 60s hold would eat the
+// entire turn budget, and failing fast beats a silent two-minute hang.
+check('a retry-after longer than the rung is honoured', upstreamRetryDelayMs(0, 5, 0), 5000)
+check('a retry-after shorter than the rung does not shorten the wait',
+  upstreamRetryDelayMs(1, 1, 0), RETRY_BACKOFF_MS[1])
+check('a huge retry-after is capped', upstreamRetryDelayMs(0, 600, 0), MAX_RETRY_WAIT_MS)
+check('a nonsense retry-after falls back to the ladder',
+  upstreamRetryDelayMs(0, 'soon', 0), RETRY_BACKOFF_MS[0])
+check('an absent retry-after falls back to the ladder',
+  upstreamRetryDelayMs(0, null, 0), RETRY_BACKOFF_MS[0])
+// The clock governs: a wait that outlasts the turn turns a retryable blip into
+// a request that dies with no reply at all.
+check('no retry when the wait would outlast the turn',
+  upstreamRetryDelayMs(0, null, HARD_DEADLINE_MS - RETRY_TIME_RESERVE_MS), null)
+check('a retry early in the turn is fine', upstreamRetryDelayMs(0, null, 5_000), RETRY_BACKOFF_MS[0])
+check('reserve leaves room for the retried call itself',
+  RETRY_TIME_RESERVE_MS > 0 && RETRY_TIME_RESERVE_MS < HARD_DEADLINE_MS, true)
+check('a NaN clock does not block the retry', upstreamRetryDelayMs(0, null, NaN), RETRY_BACKOFF_MS[0])
+check('a negative attempt is refused, not treated as zero', upstreamRetryDelayMs(-1, null, 0), null)
+
+// What the user is told. "Assistant call failed (529)" reads as a LEAP defect;
+// it is capacity upstream, and the useful instruction is to send it again.
+check('an overload is named as upstream capacity',
+  /overloaded/i.test(upstreamErrorMessage(529)), true)
+check('…and says it was not the user\'s data or permissions',
+  /not your data or your permissions/i.test(upstreamErrorMessage(529)), true)
+check('…and tells the user to send it again',
+  /send the message again/i.test(upstreamErrorMessage(529)), true)
+check('…and reports the retries that were already spent',
+  /retried 3 times/i.test(upstreamErrorMessage(529, 3)), true)
+check('one retry reads as singular', /retried 1 time and/i.test(upstreamErrorMessage(529, 1)), true)
+check('a permanent failure is NOT described as worth resending',
+  /send the message again/i.test(upstreamErrorMessage(400)), false)
+check('a permanent failure still names its status',
+  upstreamErrorMessage(400), 'Assistant call failed (400).')
 
 console.log(failures === 0
   ? `assistant-transcript fixture: ${checks} checks passed`

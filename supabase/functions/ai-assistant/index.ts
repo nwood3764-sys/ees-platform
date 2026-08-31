@@ -52,6 +52,7 @@ import {
   trimHistory, compactTranscript, relaxedSearchTerms, isModelUnavailable,
   addUsage, costOf, totalInputTokens, emptySpend,
   deadlineState, DEADLINE_NOTE,
+  isTransientUpstream, upstreamRetryDelayMs, upstreamErrorMessage,
 } from "./transcript.js"
 
 // The Anthropic messages shape. Declared here because transcript.js is plain
@@ -128,6 +129,9 @@ interface ReqBody {
   flow_id?:   string
   run_id?:    string
 }
+
+// Wait, for the transient-failure backoff in callModel. Deno has no built-in.
+const sleep = (ms: number) => new Promise<void>(res => setTimeout(res, ms))
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -828,6 +832,9 @@ Deno.serve(async (req) => {
   // fallback only if the API says that model is unavailable to this key.
   let activeModel = MODEL
   let modelNote: string | null = null
+  // Every transient-failure retry this request made, recorded in the usage log
+  // so a run of overloads is visible rather than merely felt as slowness.
+  const retryNotes: string[] = []
 
   // One Anthropic call, walking the fallback chain if the configured model is
   // unavailable to this key. Returns the parsed body, or throws with the API's
@@ -836,31 +843,62 @@ Deno.serve(async (req) => {
   // that already answered 404.
   const callModel = async (payload: Record<string, unknown>): Promise<any> => {
     const chain = [activeModel, ...FALLBACK_MODELS.filter(m => m !== activeModel)]
+    // Why we moved off the configured model, recorded only once a fallback has
+    // actually answered — claiming it before it serves would put a fiction in
+    // the usage log if the fallback fails too.
+    let fallbackReason = "unavailable"
     for (let i = 0; i < chain.length; i++) {
       const model = chain[i]
       const isLast = i === chain.length - 1
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ...payload, model }),
-      })
-      if (resp.ok) {
-        if (model !== activeModel) {
-          modelNote = `model ${activeModel} unavailable; served on ${model}`
-          activeModel = model
+      // Retry the SAME model while the failure is upstream capacity (529
+      // overloaded, 429 rate limited, a 5xx gateway). Those say nothing about
+      // the request, so the only wrong answer is to give up on the turn.
+      let retried = 0
+      for (;;) {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ...payload, model }),
+        })
+        if (resp.ok) {
+          if (model !== activeModel) {
+            modelNote = `model ${activeModel} ${fallbackReason}; served on ${model}`
+            activeModel = model
+          }
+          if (retried) retryNotes.push(`${model} recovered after ${retried} retr${retried === 1 ? "y" : "ies"}`)
+          return await resp.json()
         }
-        return await resp.json()
+        const errText = await resp.text()
+
+        if (isTransientUpstream(resp.status, errText)) {
+          const wait = upstreamRetryDelayMs(retried, resp.headers.get("retry-after"), Date.now() - startedAt)
+          if (wait !== null) {
+            retried += 1
+            await sleep(wait)
+            continue
+          }
+          // Out of retries or out of clock. A fallback model is a different
+          // pool of capacity, so try it rather than lose the turn — recorded,
+          // never passed off as normal service.
+          if (!isLast) {
+            retryNotes.push(`${model} still failing (${resp.status}) after ${retried} retries; falling back`)
+            fallbackReason = `overloaded (${resp.status})`
+            break
+          }
+        } else if (!isLast && isModelUnavailable(resp.status, errText)) {
+          break
+        }
+
+        const err = new Error(`Anthropic API ${resp.status}: ${errText.slice(0, 300)}`)
+        ;(err as any).status = resp.status
+        ;(err as any).detail = errText.slice(0, 300)
+        ;(err as any).retried = retried
+        throw err
       }
-      const errText = await resp.text()
-      if (!isLast && isModelUnavailable(resp.status, errText)) continue
-      const err = new Error(`Anthropic API ${resp.status}: ${errText.slice(0, 300)}`)
-      ;(err as any).status = resp.status
-      ;(err as any).detail = errText.slice(0, 300)
-      throw err
     }
     throw new Error("Anthropic API: no model available")
   }
@@ -888,9 +926,17 @@ Deno.serve(async (req) => {
         await logUsage(admin, {
           userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
           model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost: costOf(spend, activeModel),
-          outcome: "error", message: (e as Error).message.slice(0, 300),
+          outcome: "error",
+          message: [
+            (e as Error).message.slice(0, 300),
+            (e as any).retried ? `after ${(e as any).retried} retr${(e as any).retried === 1 ? "y" : "ies"}` : null,
+            retryNotes.length ? retryNotes.join("; ") : null,
+          ].filter(Boolean).join("; ").slice(0, 300),
         })
-        return json({ error: `Assistant call failed (${status}).`, detail: (e as any).detail || (e as Error).message }, 502)
+        return json({
+          error: upstreamErrorMessage(status, (e as any).retried || 0),
+          detail: (e as any).detail || (e as Error).message,
+        }, 502)
       }
 
       addUsage(spend, data?.usage)
@@ -995,6 +1041,7 @@ Deno.serve(async (req) => {
   const outcomeParts = [
     proposedActions.length ? `${proposedActions.length} action(s) proposed` : null,
     modelNote,
+    retryNotes.length ? retryNotes.join("; ") : null,
     ranOutOfTime ? `tool loop cut short at ${Math.round((Date.now() - startedAt) / 1000)}s (turn deadline)` : null,
     cacheNote,
   ].filter(Boolean)
