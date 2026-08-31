@@ -18,6 +18,9 @@ import {
 } from '../lib/reportColumnLabels'
 import { recordLinkForField } from '../lib/reportRecordLinks'
 import {
+  childRollupKey, isChildRollupField, childRollupValue, isRelationshipFk,
+} from '../lib/reportChildRollups'
+import {
   fieldKindFor,
   resolveDateBound,
   resolveDateLiteral,
@@ -338,10 +341,11 @@ async function describeOutgoingFKs(tableName) {
  * one calls loadRelatedObjectFields() to pull that object's columns.
  */
 export async function loadFieldTree(primaryObject) {
-  if (!primaryObject) return { primary: null, related: [] }
-  const [columns, fks] = await Promise.all([
+  if (!primaryObject) return { primary: null, related: [], children: [] }
+  const [columns, fks, children] = await Promise.all([
     describeColumns(primaryObject),
     describeOutgoingFKs(primaryObject),
+    describeChildObjects(primaryObject),
   ])
   return {
     primary: {
@@ -353,8 +357,46 @@ export async function loadFieldTree(primaryObject) {
       table: f.references_table,
       label: humanizeFkLabel(f.column_name, f.references_table),
     })),
+    children,
   }
 }
+
+// ─── Child objects (incoming FKs) ─────────────────────────────────────────
+// Everything that points AT this object: a building's units, work orders and
+// assessments. A child cannot be a plain column — a parent with twelve children
+// is not one row — so a child field is an AGGREGATE over those children,
+// carried on the parent's own row (see report_child_rollup).
+const _childObjectsCache = new Map()
+export async function describeChildObjects(tableName) {
+  if (!tableName) return []
+  if (_childObjectsCache.has(tableName)) return _childObjectsCache.get(tableName)
+  const promise = (async () => {
+    const { data, error } = await supabase.rpc('describe_object_incoming_fks', { p_table: tableName })
+    if (error) throw error
+    const rows = data || []
+    return rows
+      // An audit stamp is not a parent-child relationship: `created_by` on every
+      // table in the platform points at users, and offering "count of accounts
+      // you created" on a users report is noise, not a relationship.
+      .filter(r => isRelationshipFk(r.referencing_column))
+      .map(r => ({
+        table: r.referencing_table,
+        fk_column: r.referencing_column,
+        label: humanizeChildLabel(r.referencing_table),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label) || a.fk_column.localeCompare(b.fk_column))
+  })()
+  promise.catch(() => _childObjectsCache.delete(tableName))
+  _childObjectsCache.set(tableName, promise)
+  return promise
+}
+
+function humanizeChildLabel(table) {
+  return String(table || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+// Re-exported so the Report Builder keeps one import site for report rules.
+export { childRollupKey, isChildRollupField } from '../lib/reportChildRollups'
 
 /**
  * Pull columns AND outgoing FKs for a related object (lazy-loaded when
@@ -376,6 +418,15 @@ export async function loadRelatedObjectFields(viaTable, viaPath) {
       table: f.references_table,
       label: humanizeFkLabel(f.column_name, f.references_table),
     })),
+  }
+}
+
+/** A child object's own columns — what a roll-up can aggregate over. */
+export async function loadChildObjectFields(childTable) {
+  const columns = await describeColumns(childTable)
+  return {
+    table: childTable,
+    columns: columns.map(c => describeColumnToField(childTable, c)),
   }
 }
 
@@ -1260,6 +1311,9 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   }
 
   for (const f of (r.rpt_selected_fields || [])) {
+    // A child roll-up has no column on this table — it is computed from a
+    // separate grouped query once the rows are in.
+    if (isChildRollupField(f)) continue
     if (!f.via_path || f.via_path.length === 0) {
       directFields.push(f.name)
       const fkInfo = fkLookup[`${r.rpt_primary_object}.${f.name}`]
@@ -1496,6 +1550,40 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     truncated = true
   }
 
+  // ── Child roll-ups ───────────────────────────────────────────────────────
+  // A field that aggregates the report object's CHILDREN (count of units, sum
+  // of their square feet) is resolved after the rows are in: one grouped query
+  // per roll-up column, keyed by the parent id, merged onto the rows. One round
+  // trip per COLUMN, never per row — a 500-row report costs the same as a
+  // 5-row one. RLS applies (the RPC is SECURITY INVOKER), so a roll-up counts
+  // exactly the children the reader is allowed to see.
+  const childRollupFields = (r.rpt_selected_fields || []).filter(isChildRollupField)
+  if (childRollupFields.length > 0 && data && data.length > 0) {
+    const parentIds = Array.from(new Set(data.map(row => row.id).filter(Boolean)))
+    await Promise.all(childRollupFields.map(async (f) => {
+      const key = f.name || childRollupKey(f)
+      try {
+        const { data: rollup, error: rollupErr } = await supabase.rpc('report_child_rollup', {
+          p_child_table:  f.child_table,
+          p_fk_column:    f.child_fk,
+          p_parent_ids:   parentIds,
+          p_agg:          f.agg || 'count',
+          p_value_column: f.value_column || null,
+        })
+        // Never swallow this: a failed roll-up looks exactly like a parent with
+        // no children, which is a wrong number rather than a missing one.
+        if (rollupErr) {
+          console.error(`[report] roll-up ${f.label || key} failed —`, rollupErr.message || rollupErr)
+          return
+        }
+        const byParent = new Map((rollup || []).map(x => [x.parent_id, x.value]))
+        for (const row of data) row[key] = byParent.has(row.id) ? byParent.get(row.id) : null
+      } catch (e) {
+        console.error(`[report] roll-up ${f.label || key} failed —`, e?.message || e)
+      }
+    }))
+  }
+
   // Picklist label resolution — second pass. Every field the report renders
   // as a picklist FK gets its label rows batch-fetched: selected columns,
   // row groupings, AND matrix column groupings. Groupings were the gap that
@@ -1510,6 +1598,7 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
 
   const picklistPairs = []
   for (const f of (r.rpt_selected_fields || [])) {
+    if (isChildRollupField(f)) continue
     if (isPicklistField(f.name, f.table, f.via_path)) {
       picklistPairs.push({ object: tableForField(f.table, f.via_path), field: f.name })
     }
@@ -1647,6 +1736,9 @@ function groupingLabel(g, primaryObject) {
  */
 export function getRowValue(row, field, ctx = null) {
   if (!row || !field) return null
+  // A child roll-up is computed after the rows are fetched and written onto the
+  // row under its own key — there is no column to read.
+  if (isChildRollupField(field)) return childRollupValue(field, row[field.name])
   if (!field.via_path || field.via_path.length === 0) {
     // Direct field
 
