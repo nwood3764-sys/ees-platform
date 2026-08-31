@@ -666,8 +666,21 @@ function FieldsTab({
             style={inputStyle()}
           >
             <option value="">— Select —</option>
-            {primaryOptions.map(o => (
-              <option key={o.table} value={o.table}>{o.label}</option>
+            {/* Grouped by module, because the list is now every object the
+                platform has rather than a curated handful — a flat list of 114
+                is a list nobody can find anything in. */}
+            {Object.entries(
+              primaryOptions.reduce((groups, o) => {
+                const m = o.module || 'Other'
+                ;(groups[m] = groups[m] || []).push(o)
+                return groups
+              }, {})
+            ).map(([moduleName, objects]) => (
+              <optgroup key={moduleName} label={moduleName}>
+                {objects.map(o => (
+                  <option key={o.table} value={o.table}>{o.label}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
 

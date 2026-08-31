@@ -150,6 +150,13 @@ export const OBJECT_CATALOG = [
   { table: 'activities',                    label: 'Activity',                    pluralLabel: 'Activities',                   module: 'Data',                  description: 'Call, email, meeting, or status change activity.' },
   { table: 'notifications',                 label: 'Notification',                pluralLabel: 'Notifications',                module: 'Data',                  description: 'User-facing notification.' },
   { table: 'record_audit_column_overrides', label: 'Record Audit Column Override', pluralLabel: 'Record Audit Column Overrides', module: 'Data',                 description: 'Which columns hold an object\'s created / last-modified stamps when they are not named by convention. Only objects that need an exception have a row; everything else resolves automatically.' },
+  // Registered 2026-08-31: both are real objects that were missing here, and
+  // the omission only surfaced when the report picker stopped keeping its own
+  // hand-written list and started reading this catalog. Anything absent here is
+  // absent from Object Manager, from module tabs, and now from reports.
+  { table: 'envelopes',                     label: 'Envelope',                    pluralLabel: 'Envelopes',                    module: 'Data',                  description: 'E-signature envelope — a document sent for signature, with its recipients and signing status.' },
+  { table: 'chat_threads',                  label: 'Chat Thread',                 pluralLabel: 'Chat Threads',                 module: 'Data',                  description: 'Internal chat conversation.' },
+  { table: 'chat_messages',                 label: 'Chat Message',                pluralLabel: 'Chat Messages',                module: 'Data',                  description: 'One message within a chat thread.' },
 ]
 
 // Module order for sidebar / list grouping
