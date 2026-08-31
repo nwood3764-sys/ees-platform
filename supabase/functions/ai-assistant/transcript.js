@@ -127,6 +127,81 @@ export function isModelUnavailable(status, body) {
   return /model/i.test(body) && /(not_found|not found|does not exist|unavailable|invalid)/i.test(body)
 }
 
+// ── Transient upstream failures ─────────────────────────────────────────────
+// A 529 is Anthropic's overloaded_error: the API is momentarily at capacity.
+// It says nothing about the request — the identical call a second later
+// succeeds. Same for 429 (rate limited) and the 5xx gateway family.
+//
+// Before 2026-08-31 none of these were retried: isModelUnavailable covers only
+// 404/400 "model not found", so a 529 fell straight through and killed the
+// whole turn. Nicholas hit it asking for 25 dwelling units in one go — a batch
+// like that is up to MAX_TURNS sequential calls, so it is the shape most
+// exposed to a single blip, and every action already proposed in that request
+// is discarded with it. Waiting a second is always better than losing the turn.
+export function isTransientUpstream(status, body) {
+  const s = Number(status)
+  if (s === 429 || s === 529) return true
+  // 5xx from the API or the gateway in front of it. 501 is excluded: "not
+  // implemented" is a real, permanent answer, not congestion.
+  if (s >= 500 && s <= 599 && s !== 501) return true
+  // Some overload responses arrive with a non-standard status; the body is
+  // authoritative about what happened.
+  return /overloaded_error/i.test(String(body ?? ""))
+}
+
+export const MAX_UPSTREAM_RETRIES = 3
+// Worst case 11s of waiting, which fits inside the soft deadline with room for
+// the retried call itself. Deliberately not jittered: LEAP's assistant is one
+// user at a time, so there is no herd to spread out, and a fixed ladder is
+// testable.
+export const RETRY_BACKOFF_MS = [1_000, 3_000, 7_000]
+// A retry-after header is honoured, but never past this — a 60s hold would eat
+// the whole turn budget, and failing fast is better than a silent two-minute
+// hang.
+export const MAX_RETRY_WAIT_MS = 20_000
+// Headroom left for the retried call to actually complete before the edge
+// function's own timeout. A wait that outlasts the turn turns a retryable blip
+// into a request that dies with no reply at all.
+export const RETRY_TIME_RESERVE_MS = 20_000
+
+/**
+ * How long to wait before retrying a transient upstream failure, or null when
+ * it should not be retried — attempts exhausted, or no time left in the turn.
+ *
+ * @param attempt     0-based count of retries already made for this call.
+ * @param retryAfter  the response's retry-after header, if any (seconds).
+ * @param elapsedMs   how long this request has been running.
+ */
+export function upstreamRetryDelayMs(attempt, retryAfter, elapsedMs) {
+  const n = Number(attempt)
+  if (!Number.isFinite(n) || n < 0 || n >= MAX_UPSTREAM_RETRIES) return null
+  const ladder = RETRY_BACKOFF_MS[Math.min(n, RETRY_BACKOFF_MS.length - 1)]
+  const asked = Number(retryAfter)
+  const wait = Number.isFinite(asked) && asked > 0
+    ? Math.min(Math.max(asked * 1000, ladder), MAX_RETRY_WAIT_MS)
+    : ladder
+  const elapsed = Number(elapsedMs)
+  const spent = Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0
+  if (spent + wait + RETRY_TIME_RESERVE_MS >= HARD_DEADLINE_MS) return null
+  return wait
+}
+
+/**
+ * What the user is told when a call fails. A transient failure is upstream
+ * capacity and is worth sending again; anything else is not, and saying "try
+ * again" about it would just waste the person's time.
+ */
+export function upstreamErrorMessage(status, retried = 0) {
+  const s = Number(status)
+  if (isTransientUpstream(s, "")) {
+    const tried = retried > 0
+      ? ` It was retried ${retried} time${retried === 1 ? "" : "s"} and stayed busy.`
+      : ""
+    return `The AI service is temporarily overloaded (${s}) — this is capacity on Anthropic's side, not your data or your permissions.${tried} Nothing was saved; send the message again.`
+  }
+  return `Assistant call failed (${s}).`
+}
+
 // Per-model list price ($ per megatoken), from the Anthropic model reference —
 // NOT from memory. Getting these wrong is not a rounding error: the first cut
 // of this file priced Opus 5 at $15/$75 (3x its real rate) and Sonnet 5 at
