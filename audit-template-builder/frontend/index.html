@@ -3807,14 +3807,13 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
   const drawHead=()=>{
-    tc(NAVY); font(12,'bold');    t(M,st.y+10,'Energy Efficiency Services');
-    tc(INKM); font(8.5,'normal'); t(M,st.y+21,'of '+_state);
-    tc(NAVY); font(12,'bold');    t(W-M,st.y+10,_dt,{align:'right'});
-    tc(INKM); font(8,'normal');   t(W-M,st.y+20,'Inflation Reduction Act  \u00b7  HOMES Program',{align:'right'});
+    tc(NAVY); font(12,'bold');  t(M,st.y+13,'Energy Efficiency Services of '+_state);
+    tc(NAVY); font(12,'bold');  t(W-M,st.y+13,_dt,{align:'right'});
+    tc(INKM); font(8,'normal'); t(W-M,st.y+24,'Inflation Reduction Act  \u00b7  HOMES Program',{align:'right'});
     {const meta=[]; if((isAudit||isInv)&&docNo) meta.push((isAudit?'Audit Invoice No. ':'Invoice No. ')+docNo);
      meta.push('Date: '+pv(F.pjInvDate)); if(isInv) meta.push('Terms: Net 30');
-     tc(INKM); font(8,'normal'); t(W-M,st.y+29,meta.join('      '),{align:'right'});}
-    st.y+=35; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16; };
+     tc(INKM); font(8,'normal'); t(W-M,st.y+34,meta.join('      '),{align:'right'});}
+    st.y+=41; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16; };
   const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the letterhead
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
   drawHead();
@@ -3827,15 +3826,14 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
   {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT INFORMATION'); t(rX,pT+8,'CUSTOMER INFORMATION');
-   stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
+   tc(EMd); font(8.5,'bold'); t(M,pT+8,'PROJECT INFORMATION'); t(rX,pT+8,'CUSTOMER INFORMATION');
    let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
    for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
    st.y=Math.max(ly,ry)+6;}
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
-  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
-    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
+    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader=(cols)=>{ // cols: [{x0,x1,lbl,align}]
@@ -3852,7 +3850,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     for(const c of cols) d.line(c.x0,st.y,c.x0,st.y+h);
     d.line(M,st.y+h,W-M,st.y+h);};
   /* ---- line items ---- */
-  head(isAudit?'Audit Services':(isInv?'Installed Scope of Work \u2014 HOMES Project':'Proposed Scope of Work \u2014 HOMES Project'),12);
+  head(isAudit?'Audit Services':'Project Scope of Work',12);
   if(isAudit){
     const CA=[{x0:M+22,x1:M+300,lbl:'SERVICE DESCRIPTION'},{x0:M+300,x1:M+340,lbl:'QTY',align:'right'},
       {x0:M+340,x1:M+400,lbl:'UNIT'},{x0:M+400,x1:M+466,lbl:'RATE',align:'right'},
@@ -3954,7 +3952,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   // clean rebate rows (matching the line-item table), heading kept with the
   // column header and first credit line so a title is never orphaned.
   needH((m.foe?250:190));   // keep rebates + totals together on one page
-  head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',12);
+  head(isAudit?'Rebates & Incentives Applied':'Available Rebates & Incentives',12);
   {stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
    st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
@@ -3967,30 +3965,23 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
      if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2;
        dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
-     tc(EMd); font(10,'bold'); t(W-M,y0+h/2+3,'('+_money(amt)+')',{align:'right'});
+     tc(EMd); font(10,'bold'); t(W-M,y0+h/2+3,_money(amt),{align:'right'});
      st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;});}
-  /* ---- totals: a right-aligned summary anchored by a hero Total Due panel.
-     Deposits + Due make it explicit that the incentives cover the job and nothing
-     else funds it — no deposit, no balance owed by the owner. ---- */
-  const reb=foeAmt+iraAmt, deposits=0, due=Math.round((gross-reb-deposits)*100)/100;
+  const reb=foeAmt+iraAmt, due=Math.round((gross-reb)*100)/100;
   const dueVal=Math.abs(due)<0.005?0:due;
-  need(112); st.y+=16;
-  {const SUMW=248, x0=W-M-SUMW;
-   // note beside the summary
-   tc(INKM); font(8.5,'italic');
-   const note=wrap('All eligible program incentives are applied as an instant discount at the point of service. No deposit is required and no balance is due from the property owner.',x0-M-16);
-   note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
-   // plain right-aligned totals (no color block)
-   let sy=st.y;
-   const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
-     tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
-     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
-   trow('Total Project Cost',_money(gross));
-   trow('Rebates & Incentives Applied','('+_money(reb)+')');
-   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
-   tc(NAVY); font(11,'bold'); t(x0,sy+11,isInv?'Total Due':'Total Remaining Amount'); t(W-M,sy+11,_money(dueVal),{align:'right'});
-   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
-   st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
+  // close the rebate section with its total (positive — a contribution)
+  {st.y+=4; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
+   tc(C.ink); font(9,'bold'); t(M,st.y+11,'Total Rebate Amount'); t(W-M,st.y+11,_money(reb),{align:'right'}); st.y+=14;
+   stroke([120,130,144]); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
+  /* ---- Project Summary: a full-width section mirroring the Sealed layout ---- */
+  head('Project Summary',16);
+  {const trows=[['Total Project Cost',_money(gross),false],
+     ['Total Rebate Amount Applied as Instant Discount','('+_money(reb)+')',false],
+     [isInv?'Total Due':'Total Remaining Amount',_money(dueVal),true]];
+   for(const [lb,v,strong] of trows){
+     tc(C.ink); font(9,strong?'bold':'normal');
+     t(M,st.y+11,lb); t(W-M,st.y+11,v,{align:'right'});
+     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+15,W-M,st.y+15); st.y+=16;}}
   /* ---- deliverables (audit only) ---- */
   if(isAudit){
     head('Deliverables',10);
@@ -4111,8 +4102,8 @@ function buildHearPdfBlob(){
    for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
    for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
    st.y=Math.max(ly,ry)+6;}
-  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10,'bold');
-    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
+    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   /* scope table: measure/system/model/eff/description (left) + numbers (right).
      NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
@@ -4161,7 +4152,7 @@ function buildHearPdfBlob(){
   /* Applicable Rebates & Incentives — the IRA HEAR instant discount (mirrors HOMES) */
   const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
   need(90);
-  head('Applicable Rebates & Incentives',12);
+  head('Available Rebates & Incentives',12);
   {stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
    st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
@@ -4274,7 +4265,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
   needH((m.foe?196:150)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
-  sh('Rebates & Incentives');
+  sh('Available Rebates & Incentives');
   const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
     st.y+=4; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     const dl=wrap(desc,270), h=Math.max(dl.length*9,18)+8; need(h);
