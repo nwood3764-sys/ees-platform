@@ -3808,17 +3808,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
   const dlab=isAudit?'Audit Invoice':(isInv?'Project Invoice':'Project Proposal');
-  const drawHead=()=>{
-    tc(NAVY); font(14,'bold'); t(W/2,st.y+12,dlab,{align:'center'});
-    tc(NAVY); font(11,'bold'); t(W/2,st.y+27,_state+' IRA Multifamily HOMES Program',{align:'center'});
-    st.y+=34; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16; };
-  const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the letterhead
-  const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
-  drawHead();
-  /* ---- party blocks: PROPERTY (left) and BILL TO (right), accent labels ---- */
-  const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
-  const _pn=String(F.pjPropName||'').trim();
-  const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
+  /* ---- party blocks: EES contractor / project / customer. Drawn as part of the
+     header so the WHOLE header — not just the title — repeats on any page 2. ---- */
   // Three balanced columns matching the Sealed layout: on the generic proposal
   // EES is the Primary IRA Contractor (name + phone follow the document's state,
   // like the footer), so the contractor block is Energy Efficiency Services'.
@@ -3828,16 +3819,25 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail]
     .filter(v=>v&&String(v).trim());
-  {const pT=st.y, CX2=M+180, cW=CX2-M-14, pW=185, rW=150;
-   tc(EMd); font(8.5,'bold');
-   t(M,pT+8,'PRIMARY IRA CONTRACTOR');
-   t(CX2,pT+8,'PROJECT INFORMATION');
-   t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
-   let cy=pT+25,ly=pT+25,ry=pT+25; tc(C.ink); font(9);
-   for(const v of cLines) for(const ln of wrap(v,cW)){t(M,cy,ln); cy+=11.5;}
-   for(const v of lLines) for(const ln of wrap(v,pW)){t(CX2,ly,ln); ly+=11.5;}
-   for(const v of rLines) for(const ln of wrap(v,rW)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
-   st.y=Math.max(cy,ly,ry)+6;}
+  const drawParties=()=>{
+    const pT=st.y, CX2=M+180, cW=CX2-M-14, pW=185, rW=150;
+    tc(EMd); font(8.5,'bold');
+    t(M,pT+8,'PRIMARY IRA CONTRACTOR');
+    t(CX2,pT+8,'PROJECT INFORMATION');
+    t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
+    let cy=pT+25,ly=pT+25,ry=pT+25; tc(C.ink); font(9);
+    for(const v of cLines) for(const ln of wrap(v,cW)){t(M,cy,ln); cy+=11.5;}
+    for(const v of lLines) for(const ln of wrap(v,pW)){t(CX2,ly,ln); ly+=11.5;}
+    for(const v of rLines) for(const ln of wrap(v,rW)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
+    st.y=Math.max(cy,ly,ry)+6; };
+  const drawHead=()=>{
+    tc(NAVY); font(14,'bold'); t(W/2,st.y+12,dlab,{align:'center'});
+    tc(NAVY); font(11,'bold'); t(W/2,st.y+27,_state+' IRA Multifamily HOMES Program',{align:'center'});
+    st.y+=34; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16;
+    drawParties(); };
+  const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the FULL header
+  const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
+  drawHead();
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
   const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
     t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
@@ -3950,6 +3950,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   }
   /* ---- rebates as credit lines in a gridded table ---- */
   const gross=isAudit?2000:m.total, foeAmt=isAudit?0:m.foeAmt, iraAmt=isAudit?2000:m.homesAmt;
+  // close the Scope of Work with its total — the full cost of the work above
+  {needH(34); st.y+=6; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
+   tc(C.ink); font(9,'bold'); t(M,st.y+11,'Total Project Cost'); t(W-M,st.y+11,_money(gross),{align:'right'}); st.y+=14;
+   stroke([120,130,144]); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   const credits=[];
   if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
   else{
