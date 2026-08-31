@@ -1,6 +1,11 @@
 import { C } from '../data/constants'
 import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell, pinnedFooterCell } from '../lib/pinnedTableHeader'
-import { getRowValue } from '../data/reportsService'
+import { useState, useRef } from 'react'
+import { getRowValue, saveWidgetColumnWidths } from '../data/reportsService'
+import { useColumnResize, resizeGripStyle } from '../lib/columnWidths'
+import {
+  reportColumnKey, resolveReportColumnWidths, totalWidth, withColumnWidth, withoutColumnWidth,
+} from '../lib/reportColumnWidths'
 import { LeapEChart } from '../builder/chartKit/EChartsLazy'
 import { TOOLTIP_ITEM, TOOLTIP_AXIS } from '../builder/chartKit/leapEchartsTheme'
 import { formatNumber, formatAxisTick } from '../builder/chartKit/formatNumber'
@@ -232,6 +237,28 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
   const { rows, columns } = result
   const cfg = widget?.dw_widget_config || {}
 
+  // Column widths, same rules as a report's: laid out FIXED with an explicit
+  // width per column, so re-running the dashboard, changing a filter or a value
+  // longer than its column cannot re-measure the table. Dragged on the header
+  // edge, saved onto the WIDGET so the layout belongs to the dashboard rather
+  // than to one browser (Nicholas, 2026-08-31: "I need to be able to adjust its
+  // column widths, and they need to stay at those widths").
+  const [widths, setWidths] = useState(() => cfg.column_widths || {})
+  const [widthError, setWidthError] = useState(false)
+  const widthsRef = useRef(widths)
+  widthsRef.current = widths
+  const persistWidths = (next) => {
+    setWidths(next)
+    if (!widget?.id) return          // an unsaved widget in the editor preview
+    saveWidgetColumnWidths(widget.id, next)
+      .then(() => setWidthError(false))
+      .catch(() => setWidthError(true))
+  }
+  const onResizeStart = useColumnResize({
+    setWidth: (key, px) => setWidths(prev => withColumnWidth(prev, key, px)),
+    onCommit: (key, px) => persistWidths(withColumnWidth(widthsRef.current, key, px)),
+  })
+
   // Visible columns: the configured ordered subset when present, else all.
   const picked = Array.isArray(cfg.columns) && cfg.columns.length
     ? cfg.columns.map(n => columns.find(c => c.name === n)).filter(Boolean)
@@ -265,12 +292,22 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
   }) : null
   const fmtTotal = widgetFmt(cfg)
 
+  const colWidths = resolveReportColumnWidths(picked, widths)
+
   return (
     <div
       onClick={canDrill ? () => drillWhole?.() : undefined}
       style={{ overflow:'auto', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
+      {widthError && (
+        <div style={{ fontSize:10, color:C.textSecondary, background:'#e8f1fb', padding:'3px 8px' }}>
+          Column width not saved to the dashboard — it holds until this is reopened.
+        </div>
+      )}
       {/* One definition of a header that stays put — src/lib/pinnedTableHeader.js. */}
-      <table style={{ ...PINNED_TABLE, fontSize:11 }}>
+      <table style={{ ...PINNED_TABLE, fontSize:11, tableLayout:'fixed', width: totalWidth(colWidths) }}>
+        <colgroup>
+          {colWidths.map((w, idx) => <col key={idx} style={{ width: w }} />)}
+        </colgroup>
         <thead>
           <tr>
             {picked.map((c, idx) => (
@@ -278,7 +315,20 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
                 padding:'4px 8px', fontSize:10, fontWeight:600, color:C.textSecondary,
                 textTransform:'uppercase', textAlign:'left', whiteSpace:'nowrap',
                 ...pinnedHeaderCell(),
-              }}>{c.label}</th>
+                overflow:'hidden', textOverflow:'ellipsis',
+              }}>
+                {c.label}
+                <div
+                  onPointerDown={(e) => { e.stopPropagation(); onResizeStart(reportColumnKey(c), e, colWidths[idx]) }}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => {
+                    e.preventDefault(); e.stopPropagation()
+                    persistWidths(withoutColumnWidth(widthsRef.current, reportColumnKey(c)))
+                  }}
+                  title="Drag to set this column's width · double-click to reset it"
+                  style={resizeGripStyle()}
+                />
+              </th>
             ))}
           </tr>
         </thead>
@@ -288,7 +338,7 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
               {picked.map((c, ci) => {
                 const v = getRowValue(row, c, result)
                 return (
-                  <td key={ci} style={{ padding:'4px 8px', whiteSpace:'nowrap', ...ROW_RULE }}>
+                  <td key={ci} style={{ padding:'4px 8px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', ...ROW_RULE }}>
                     {v == null ? '—' : (typeof v === 'object' ? '[obj]' : String(v))}
                   </td>
                 )
