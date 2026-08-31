@@ -3864,9 +3864,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   // A section total drawn on the RIGHT: label right-aligned just left of its
   // figure, both anchored to the right edge, so the eye lands on the money.
-  const AMTW=92;
   const rlineE=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
-    t(W-M-AMTW,st.y+11,lbl,{align:'right'}); t(W-M,st.y+11,val,{align:'right'});};
+    const vw=d.getTextWidth(String(val));               // label sits a fixed gap left of the ACTUAL figure, so it never floats mid-page
+    t(W-M,st.y+11,val,{align:'right'}); t(W-M-vw-14,st.y+11,lbl,{align:'right'});};
   /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader=(cols)=>{ // cols: [{x0,x1,lbl,align}]
     const h=16; need(h+4);
@@ -3890,9 +3890,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     gridHeader(CA);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const rows=[['1','Whole-Building Energy Audit \u2014 Multifamily','1','Building','$2,000.00','$2,000.00'],
-      ['2','Per-Unit Blower Door and Diagnostic Testing','','Unit','','Included'],
-      ['3','Common Area and Building Envelope Assessment','1','Lump Sum','','Included'],
-      ['4','Mechanical Systems Survey','1','Lump Sum','','Included']];
+      ['2','Whole Building Blower Door and Diagnostic Testing','1','Building','','Included'],
+      ['3','Common Area and Building Envelope Assessment','1','Building','','Included'],
+      ['4','Mechanical Systems Survey','1','Building','','Included'],
+      ['5','Energy Modeling — Asset Score (HPXML / BuildingSync)','1','Building','','Included'],
+      ['6','Program Energy Audit Report (ASHRAE Level II)','1','Building','','Included'],
+      ['7','Customer Report / Building Assessment Tool Report','1','Building','','Included']];
     rows.forEach((r,i)=>{const h=16;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}
       if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
@@ -4018,14 +4021,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      if(strong){ rlineE(lb,v,true); }
      else{ tc(C.ink); font(9,'normal'); t(M,st.y+11,lb); t(W-M,st.y+11,v,{align:'right'}); }
      stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+15,W-M,st.y+15); st.y+=16;}}
-  /* ---- deliverables (audit only) ---- */
-  if(isAudit){
-    head('Deliverables',20);
-    ['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
-     'HPXML v4 / BuildingSync file from Asset Score',
-     'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
-      need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
-  }
+  /* deliverables now appear as line items in the audit service table above */
   /* ---- acknowledgment + signature: INVOICES ONLY. Proposals carry no
      acknowledgment/signature block (Nicholas). ---- */
   if(isAudit||isInv){
@@ -4033,7 +4029,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const _ees='EES-'+(m.state||'WI');
     const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
     {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
-     al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
+     al.forEach((ln,k)=>t(W/2,st.y+9+k*10,ln,{align:'center'})); st.y+=al.length*10+4;}
     need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
     d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
@@ -4240,9 +4236,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   // A total drawn on the RIGHT: the label right-aligns just left of its figure,
   // both anchored to the page's right edge, so the reader's eye lands on the money.
-  const AMTW=92;
   const rline=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
-    t(W-M-AMTW,st.y+10,lbl,{align:'right'}); t(W-M,st.y+10,val,{align:'right'});};
+    const vw=d.getTextWidth(String(val));               // label sits a fixed gap left of the ACTUAL figure, so it never floats mid-page
+    t(W-M,st.y+10,val,{align:'right'}); t(W-M-vw-14,st.y+10,lbl,{align:'right'});};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
@@ -4334,7 +4330,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     sh('Acknowledgment & Acceptance');
     const _ees='EES-'+(m.state||'WI');
     const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
-    const al=wrap(ack,CW); tc(C.ink); font(9); al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;
+    const al=wrap(ack,CW); tc(C.ink); font(9); al.forEach((ln,k)=>t(W/2,st.y+9+k*10,ln,{align:'center'})); st.y+=al.length*10+4;
     st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
     d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
