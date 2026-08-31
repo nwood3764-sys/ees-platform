@@ -1,6 +1,6 @@
-import { C } from '../data/constants'
+import { C, CHART_COLORS } from '../data/constants'
 import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell, pinnedFooterCell } from '../lib/pinnedTableHeader'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { getRowValue, saveWidgetColumnWidths } from '../data/reportsService'
 import { useColumnResize, resizeGripStyle } from '../lib/columnWidths'
 import {
@@ -585,109 +585,190 @@ function LineWidget({ result, widget, canDrill, drillTo }) {
 
 // A pie you can actually read.
 //
-// Nicholas, 2026-08-31: "The legend needs to be on the right. Look at this
-// screenshot. You can't read anything."
+// Nicholas, 2026-08-31: "There's no way this should look like this, and the text
+// is so goofy. What kind of font is that?"
 //
-// Three things were wrong with the old one, and they compounded:
+// The legend is HTML, not an ECharts legend, and that is the whole difference.
+// ECharts lays a legend out in its own canvas coordinate space: it does not know
+// the tile's width, its rich-text column widths do not constrain an entry, and
+// the only way to make a value column line up inside it was to set the whole
+// thing in a monospace face — which is what read as "goofy", and was a straight
+// violation of the design system (Inter for UI, JetBrains Mono for numbers
+// ONLY). At a narrow tile width its fixed pixel legend also sat on top of the
+// circle.
 //
-//   1. Every slice drew its own leader-lined label around the circle. At five
-//      slices those labels collide — "Housing Authority of the City of Ro…"
-//      landing on top of "Community Management …" — and two of them rendered as
-//      a bare em dash because the name had been clipped away entirely.
-//   2. The legend was a BOTTOM scroll legend, which in a widget-height tile
-//      shows one entry at a time behind a "1/5" pager. A legend you page
-//      through one item at a time is not a legend.
-//   3. Nothing carried the value. The label showed a percentage, the legend
-//      showed a name, and the number was only in the tooltip.
-//
-// Now: the legend sits on the RIGHT, vertical, one line per slice, carrying the
-// name AND its value and share — which is the Power BI / Salesforce layout and
-// the only one that survives long organisation names. The circle keeps only the
-// labels that fit inside a slice, so nothing is drawn on top of anything else.
-const PIE_LEGEND_WIDTH = 250          // px reserved for the legend column
-// A character budget, in the legend's monospace face, so the name column and
-// the number column line up down the legend without ECharts measuring anything.
-const PIE_LEGEND_NAME_CHARS = 22
-const PIE_INSIDE_LABEL_MIN_PCT = 8    // below this a slice has no room for text
+// So the widget is a flex row: the chart takes the space it has, and the legend
+// is a real list beside it — names in Inter truncating with CSS, values in mono,
+// right-aligned, scrolling when there are more than fit. Below a threshold width
+// the row becomes a column and the legend sits under the chart. Both are checked
+// by screenshotting the real widget at real tile sizes
+// (tools/pie-legend-check).
+const PIE_LEGEND_MIN_WIDTH = 400   // px of TILE below which the legend goes under
+const PIE_LEGEND_WIDTH     = 210   // px the legend column takes when beside
+const PIE_INSIDE_LABEL_MIN_PCT = 9 // a slice smaller than this has no room for text
+// Part-to-whole reads at a glance up to about six wedges; past that adjacent
+// slices blur and the chart stops answering anything. The tail folds into one
+// "Other" wedge, which the legend still names.
+const PIE_MAX_SLICES = 6
+
+// The element's own width, so the widget lays itself out from the space it
+// actually has rather than from a guess. A dashboard tile is resized by
+// dragging, so this has to follow it, not sample it once.
+function useElementWidth(ref) {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) setWidth(e.contentRect.width)
+    })
+    ro.observe(el)
+    setWidth(el.getBoundingClientRect().width)
+    return () => ro.disconnect()
+  }, [ref])
+  return width
+}
 
 function PieWidget({ result, widget, donut, canDrill, drillTo }) {
-  const data = buildChartData(result, widget)
+  const raw = buildChartData(result, widget)
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
   const showLabels = cfg.show_data_labels !== false
   const showLegend = cfg.show_legend !== false
-  // Right is the default because it is the one that reads; bottom stays
-  // available for a short-and-wide tile.
-  const legendRight = showLegend && (cfg.legend_position || 'right') === 'right'
+  const hostRef = useRef(null)
+  const width = useElementWidth(hostRef)
+  // Until the first measurement lands, assume there is room: a tile that starts
+  // as a column and jumps to a row on the next frame reads as a flicker.
+  const legendBeside = showLegend && (cfg.legend_position || 'right') === 'right' && (width === 0 || width >= PIE_LEGEND_MIN_WIDTH)
+
+  // Fold the tail into one wedge, keeping its parts for the tooltip.
+  const sorted = [...raw].sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0))
+  const head = sorted.slice(0, PIE_MAX_SLICES)
+  const tail = sorted.slice(PIE_MAX_SLICES)
+  const data = tail.length > 0
+    ? [...head, {
+        name: `Other (${tail.length})`,
+        value: tail.reduce((a, d) => a + (Number(d.value) || 0), 0),
+        _tail: tail,
+      }]
+    : head
+
   const total = data.reduce((a, d) => a + (Number(d.value) || 0), 0)
   const byName = Object.fromEntries(data.map(d => [d.name, d]))
   const share = (v) => (total > 0 ? (Number(v) || 0) / total * 100 : 0)
 
   const option = {
     animationDuration: 250,
-    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b> · ${p.percent}%` },
-    legend: showLegend
-      ? {
-          type: 'scroll',
-          ...(legendRight
-            ? { orient: 'vertical', right: 6, top: 'middle', align: 'left', width: PIE_LEGEND_WIDTH }
-            : { bottom: 0, left: 'center' }),
-          itemGap: 9, itemWidth: 10, itemHeight: 10, icon: 'circle',
-          // The name is truncated HERE, in JS, to a character budget — not by
-          // ECharts. A rich-text column with `overflow: truncate` does not
-          // constrain a legend entry: the names ran their full length, straight
-          // across the pie and through the value column. A character budget is
-          // predictable and cannot overlap anything.
-          formatter: (name) => {
-            const d = byName[name]
-            const short = name.length > PIE_LEGEND_NAME_CHARS
-              ? `${name.slice(0, PIE_LEGEND_NAME_CHARS - 1)}…`
-              : name
-            if (!d) return short
-            return `${short.padEnd(PIE_LEGEND_NAME_CHARS + 1)}${fmt(d.value)} · ${share(d.value).toFixed(1)}%`
-          },
-          textStyle: { fontSize: 11, color: C.textSecondary, fontFamily: "'JetBrains Mono', monospace" },
-          // The full name on hover, for the ones the column has to truncate.
-          tooltip: { show: true },
-        }
-      : { show: false },
-    // Donuts carry the total in the hole — the Salesforce donut pattern. It
-    // follows the circle when the legend takes the right-hand column.
+    tooltip: {
+      ...TOOLTIP_ITEM,
+      formatter: (p) => {
+        const d = byName[p.name]
+        const head2 = `${p.name}<br/><b>${fmt(p.value)}</b> · ${p.percent}%`
+        if (!d?._tail) return head2
+        // "Other" names what it swallowed rather than hiding it.
+        const parts = d._tail.slice(0, 6).map(t => `${t.name} · ${fmt(t.value)}`).join('<br/>')
+        const more = d._tail.length > 6 ? `<br/>… and ${d._tail.length - 6} more` : ''
+        return `${head2}<br/><span style="opacity:.7">${parts}${more}</span>`
+      },
+    },
+    legend: { show: false },   // the legend is HTML, beside this
     title: donut ? {
-      text: fmt(total), subtext: 'Total',
-      left: legendRight ? '28%' : 'center', top: legendRight ? '42%' : '38%',
-      textAlign: 'center',
+      text: fmt(total), subtext: 'Total', left: 'center', top: '40%', textAlign: 'center',
       textStyle: { fontSize: 20, fontWeight: 700, color: C.textPrimary, fontFamily: "'JetBrains Mono', monospace" },
-      subtextStyle: { fontSize: 11, color: C.textMuted },
+      subtextStyle: { fontSize: 11, color: C.textMuted, fontFamily: "'Inter', system-ui, sans-serif" },
     } : undefined,
     series: [{
       type: 'pie', data: data.map(d => ({ name: d.name, value: d.value })),
-      radius: donut ? ['52%', '76%'] : '72%',
-      // The circle moves left to make room for the legend column rather than
-      // being squashed under it.
-      center: legendRight ? ['28%', '50%'] : ['50%', showLegend ? '44%' : '50%'],
-      // 2px white ring between slices keeps adjacent fills separated.
+      radius: donut ? ['54%', '78%'] : '76%',
+      center: ['50%', '50%'],
+      // A 2px surface gap between fills, per the mark spec — adjacent wedges
+      // must not touch.
       itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 3 },
-      // Labels go INSIDE the slice, and only where they fit. No leader lines:
-      // they are what collided, and every name is in the legend anyway.
+      // Selective direct labels: a share, inside, only where there is room for
+      // it. Never a leader line — they are what collided.
       label: showLabels
-        ? {
-            show: true, position: 'inside', color: '#ffffff', fontSize: 10.5, fontWeight: 600,
-            formatter: (p) => (p.percent >= PIE_INSIDE_LABEL_MIN_PCT ? `${Math.round(p.percent)}%` : ''),
-          }
+        ? { show: true, position: 'inside', color: '#ffffff', fontSize: 11, fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            formatter: (p) => (p.percent >= PIE_INSIDE_LABEL_MIN_PCT ? `${Math.round(p.percent)}%` : '') }
         : { show: false },
       labelLine: { show: false },
-      // A hovered slice lifts slightly and names itself in full — the one place
-      // a long organisation name is readable in its entirety.
-      emphasis: {
-        scaleSize: 6,
-        label: { show: true, position: 'inside', formatter: (p) => `${Math.round(p.percent)}%` },
-      },
+      emphasis: { scaleSize: 6 },
       cursor: canDrill ? 'pointer' : 'default',
     }],
   }
   const onSeriesClick = canDrill ? (p) => drillTo?.(byName[p.name]?.rawValue) : undefined
-  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+
+  return (
+    <div ref={hostRef} style={{
+      height: '100%', minHeight: 0, display: 'flex', gap: 10, overflow: 'hidden',
+      flexDirection: legendBeside ? 'row' : 'column',
+    }}>
+      {/* `flex: 1 1 0%` with minHeight/minWidth 0 and overflow hidden: a flex
+          child's default basis is its CONTENT, and a canvas reports the size it
+          was last drawn at — so with `auto` the chart refuses to shrink and
+          spills over the legend under it in a short tile. */}
+      <div style={{ flex: '1 1 0%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        {/* minHeight={0}: LeapEChart defaults to a 200px floor, which in a short
+            tile with the legend underneath leaves the canvas taller than its
+            box — the pie then renders with its bottom sliced off. The flex row
+            above already guarantees a sane size. */}
+        <LeapEChart option={option} onSeriesClick={onSeriesClick} minHeight={0} />
+      </div>
+      {showLegend && (
+        <PieLegend
+          data={data} total={total} fmt={fmt} share={share}
+          beside={legendBeside} onPick={onSeriesClick}
+        />
+      )}
+    </div>
+  )
+}
+
+// The legend, in HTML: a swatch, the name in Inter truncating with an ellipsis,
+// the value and share in mono, right-aligned so the numbers form a column. Text
+// wears text tokens — the swatch carries the identity, never the words.
+function PieLegend({ data, total, fmt, share, beside, onPick }) {
+  return (
+    <div style={{
+      ...(beside
+        ? { width: PIE_LEGEND_WIDTH, flex: '0 0 auto', maxHeight: '100%' }
+        : { width: '100%', flex: '0 1 auto', maxHeight: '42%', minHeight: 0 }),
+      overflowY: 'auto', overflowX: 'hidden',
+      display: 'flex', flexDirection: 'column', gap: 4,
+      alignSelf: beside ? 'center' : 'stretch',
+      paddingRight: 2,
+    }}>
+      {data.map((d, i) => (
+        <div
+          key={d.name}
+          title={`${d.name} · ${fmt(d.value)} · ${share(d.value).toFixed(1)}%`}
+          onClick={onPick ? () => onPick({ name: d.name }) : undefined}
+          style={{
+            display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0,
+            cursor: onPick ? 'pointer' : 'default', lineHeight: 1.35,
+          }}
+        >
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', flex: '0 0 auto',
+            background: CHART_COLORS[i % CHART_COLORS.length], alignSelf: 'center',
+          }} />
+          <span style={{
+            flex: '1 1 auto', minWidth: 0, fontSize: 11.5, color: C.textSecondary,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{d.name}</span>
+          <span style={{
+            flex: '0 0 auto', fontSize: 11.5, fontWeight: 600, color: C.textPrimary,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>{fmt(d.value)}</span>
+          <span style={{
+            flex: '0 0 auto', width: 42, textAlign: 'right', fontSize: 10.5, color: C.textMuted,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>{share(d.value).toFixed(1)}%</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function FunnelWidget({ result, widget, pyramid, canDrill, drillTo }) {

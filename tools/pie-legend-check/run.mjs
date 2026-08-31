@@ -37,13 +37,17 @@ const server = await createServer({
 await server.listen()
 const browser = await chromium.launch({ executablePath })
 try {
-  const page = await browser.newPage({ viewport: { width: 640, height: 760 }, deviceScaleFactor: 2 })
+  const page = await browser.newPage({ viewport: { width: 700, height: 1900 }, deviceScaleFactor: 2 })
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
   await page.goto('http://localhost:5313/tools/pie-legend-check/', { waitUntil: 'networkidle' })
-  await page.waitForSelector('[data-case="right"] canvas', { timeout: 20000 })
-  await page.waitForTimeout(600)
-  for (const id of ['right', 'bottom']) {
+  await page.waitForSelector('[data-case="wide"] canvas', { timeout: 20000 })
+  // The chart resizes through a ResizeObserver, which fires asynchronously —
+  // screenshotting too early photographs the canvas at its PREVIOUS size, which
+  // reads as a clipped pie and sends you looking for a layout bug that is not
+  // there.
+  await page.waitForTimeout(1500)
+  for (const id of ['wide', 'narrow', 'tiny', 'donut', 'bottom']) {
     await page.locator(`[data-case="${id}"]`).screenshot({ path: join(outDir, `pie-${id}.png`) })
     console.log(`wrote ${join(outDir, `pie-${id}.png`)}`)
   }
