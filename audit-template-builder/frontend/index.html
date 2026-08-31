@@ -3810,9 +3810,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'\u2014';
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
-  /* ================= refined brand palette (deep navy + a single emerald
-     accent, cool neutrals; no red/orange, per house style) ================= */
-  const NAVY=[30,36,46], EM=[120,130,144], EMd=[30,36,46], EMlt=[120,130,144],
+  /* ================= EES brand palette — a blue accent distinguishes the EES
+     proposals from the green Sealed documents; body text stays black. ========= */
+  const BLUE=[33,102,172];
+  const NAVY=BLUE, EM=[120,130,144], EMd=BLUE, EMlt=[120,130,144],
         PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
   const _state=stateFullName(m.state);
   /* ---- letterhead: company (left) + document title/meta (right) over a thin
@@ -3847,16 +3848,17 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
     st.y=Math.max(cy,ly,ry)+6; };
   const drawHead=()=>{
-    tc(NAVY); font(14,'bold'); t(W/2,st.y+12,dlab,{align:'center'});
-    tc(NAVY); font(11,'bold'); t(W/2,st.y+27,_state+' IRA Multifamily HOMES Program',{align:'center'});
-    st.y+=34; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16;
+    tc(BLUE);      font(12,'bold'); t(W/2,st.y+11,'Energy Efficiency Services of '+_state,{align:'center'});
+    tc(C.ink);     font(14,'bold'); t(W/2,st.y+29,dlab,{align:'center'});
+    tc([70,82,98]);font(10.5,'bold'); t(W/2,st.y+44,_state+' IRA Multifamily HOMES Program',{align:'center'});
+    st.y+=51; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16;
     drawParties(); };
   const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the FULL header
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
   drawHead();
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
-  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
-    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(BLUE); font(10.5,'bold');
+    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke(BLUE); d.setLineWidth(.9);
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   // A section total drawn on the RIGHT: label right-aligned just left of its
   // figure, both anchored to the right edge, so the eye lands on the money.
@@ -3932,7 +3934,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const tableHeader=()=>{
       need(headH+8);
       fill(PANEL); d.rect(M,st.y,CW,headH,'F');
-      stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+      stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
       tc(NAVY); font(8,'bold'); t(M+5,st.y+headH/2+3,'ENERGY EFFICIENCY MEASURE');
       numCols.forEach(([lbl,,w,rx])=>{const wl=wrap(lbl,w-8); const ty=st.y+(headH-wl.length*9)/2+7;
         wl.forEach((ln,k)=>t(rx-4,ty+k*9,ln,{align:'right'}));});
@@ -3962,7 +3964,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       const numY=y0+h/2+3;
       numCols.forEach(([lbl,fn,w,rx],c)=>{
         font(9.5,c===numCols.length-1?'bold':'normal');
-        tc(c===numCols.length-1?NAVY:[64,78,96]);
+        tc(c===numCols.length-1?C.ink:[64,78,96]);
         t(rx-4,numY,fn(r),{align:'right'});});
       st.y=y0+h;
       colRules(y0,st.y);                                        // vertical separators
@@ -3997,7 +3999,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
      if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2;
        dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
-     tc(EMd); font(10,'bold'); t(W-M,y0+h/2+3,_money(amt),{align:'right'});
+     tc(C.ink); font(10,'bold'); t(W-M,y0+h/2+3,_money(amt),{align:'right'});
      st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;});}
   const reb=foeAmt+iraAmt, due=Math.round((gross-reb)*100)/100;
   const dueVal=Math.abs(due)<0.005?0:due;
@@ -4228,11 +4230,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
   const SGAP=26;                                   // clear space above every section header, so each section reads as its own block
-  const ORANGE=[216,106,30];                        // Sealed brand accent — visually distinguishes Sealed documents from the EES proposals
-  const bh=(txt,x,yy,al)=>{tc(ORANGE); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
+  const GREEN=[33,131,82];                          // Sealed brand accent (green) — visually distinguishes Sealed documents from the EES proposals
+  const bh=(txt,x,yy,al)=>{tc(GREEN); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
   // one identical section-header treatment for all three sections — Sealed orange
-  const sh=(txt)=>{st.y+=SGAP; need(48); tc(ORANGE); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
-    stroke(ORANGE); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(GREEN); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
+    stroke(GREEN); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   // A total drawn on the RIGHT: the label right-aligns just left of its figure,
   // both anchored to the page's right edge, so the reader's eye lands on the money.
@@ -4247,7 +4249,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const drawTitle=()=>{
     tc(C.ink); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
     tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
-    st.y+=32; stroke(ORANGE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
+    st.y+=32; stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
   const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };   // a continuation page keeps the header
   const needH=h=>{ if(st.y+h>H-M-16) contPage(); };             // page break that redraws the header
   drawTitle();
@@ -4271,7 +4273,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const cW=84, mX=M+cW, mW=86, dX=mX+mW, dW=(W-M-64)-dX;   // column geometry
   tc(C.ink); font(8,'bold');
   t(M,st.y+12,'CONTRACTOR'); t(mX,st.y+12,'MEASURE'); t(dX,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
-  st.y+=16; stroke(ORANGE); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+  st.y+=16; stroke(GREEN); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
   const CLH=9, RH=10;
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
