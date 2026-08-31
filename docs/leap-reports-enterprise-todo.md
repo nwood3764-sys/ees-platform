@@ -26,7 +26,19 @@ are struck through as they ship, with the PR that did it.
 - [x] Long category names truncated with the full name on hover. **PR #672.**
 - [ ] A slice smaller than a threshold rolls into "Other" rather than drawing a
       label nobody can read.
+- [x] Pie/donut rebuilt with an HTML legend (Inter names, mono numbers), a
+      responsive row/column layout measured from the tile, and a tail that folds
+      into "Other" past six wedges. **PR #675.**
 - [ ] Same audit for bar/line: axis titles, label density, legend placement.
+- [ ] **The chart palette fails the dataviz validator** and needs a decision.
+      `CHART_COLORS` = `#3ecf8e,#7eb3e8,#1e466b,#a78bfa,#2aab72,#5eead4,#8fa0b8`
+      returns FAIL on the lightness band (`#1e466b` too dark at 0.384,
+      `#5eead4` too light at 0.855), FAIL on the chroma floor (`#7eb3e8`,
+      `#1e466b` and `#8fa0b8` read as gray), and WARN on contrast (six of seven
+      below 3:1 against the surface). CVD separation passes. Fixing it means
+      re-stepping the series hues platform-wide, inside the no-red/orange rule —
+      a visible change to every chart, so it is Nicholas's call, not a silent
+      one.
 
 ## 3. Column widths that stay
 
