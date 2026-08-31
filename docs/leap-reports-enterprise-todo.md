@@ -128,6 +128,37 @@ state filter."*
 - [ ] An on-canvas filter widget still names one column and cannot be mapped
       across objects the way a bar filter can.
 
+## 3d. Field-level security — the one that outranked everything
+
+Found by auditing rather than guessing, 2026-08-31, and built the same day.
+
+- [x] **Financial tiers are enforced, not just declared.** CLAUDE.md has
+      described Tier 1 / 2 / 3 since the platform's first week. All 96
+      populated `field_metadata` rows carried tier 1, and NO read path
+      consulted the column — so any user who could build a report could put
+      gross margin, labour cost or the agreed subcontractor payout on one.
+      Now: `roles.role_max_financial_tier` (what a role sees) +
+      `field_metadata.fm_financial_tier` (what a field is), one decision
+      function, and `app_user_restricted_fields(object)` as the single
+      question every read path asks. 96 fields at tier 2, 15 at tier 3.
+- [x] **Record pages came free** — the tier is applied inside
+      `app_user_field_permissions`, the RPC every page layout already calls,
+      as a hard floor that an explicit "visible" grant cannot override.
+- [x] **Reports enforce it twice**, because there are two different leaks: the
+      field picker never offers a restricted column (filtered at
+      `describeColumns`, the choke point everything derives from), AND a
+      SAVED report drops them at run time — an Admin builds it, a technician
+      runs it, and the picker never saw that field.
+- [ ] **Column-level database privileges.** The decision is the database's and
+      every app read path honours it, but LEAP's users all share the
+      `authenticated` Postgres role, so a determined user with the anon key
+      could still select a restricted column through PostgREST directly. The
+      real fix is revoking those columns from `authenticated` and serving them
+      through a definer view. Worth doing before any external/portal user gets
+      reporting.
+- [ ] Dashboards: a widget whose measure is a restricted field should say so
+      rather than erroring or showing an empty tile.
+
 ## 4. The audit itself
 
 Walk the report builder, the viewer and the dashboard builder against
