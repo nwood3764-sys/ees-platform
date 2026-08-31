@@ -93,7 +93,48 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
   const showingPrompts = prompts && prompts.length > 0 && !result && !loading && !error
 
   if (loading) return <LoadingState />
-  if (error)   return <ErrorState error={error} onRetry={() => run(promptValues)} />
+  // A report that cannot RUN must still be EDITABLE. The toolbar lives below,
+  // past this early return, so a report whose query errors used to render an
+  // error screen and nothing else — no Edit, no Duplicate, no way back in
+  // (Nicholas, 2026-08-29, after changing a report's primary object while its
+  // grouping still named the old object's column: "I changed the primary
+  // object and can't get back to the report to edit it"). Editing is exactly
+  // what such a report needs, and it is the only screen that can repair it.
+  if (error) {
+    return (
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:C.page }}>
+        <div style={{
+          background:C.card, borderBottom:`1px solid ${C.border}`,
+          padding:'14px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12,
+        }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:2, minWidth:0 }}>
+            <div style={{ fontSize:11, color:C.textMuted }}>Report</div>
+            <div style={{ fontSize:18, fontWeight:600, color:C.textPrimary }}>This report could not run</div>
+            <div style={{ fontSize:11, color:C.textMuted }}>
+              Open <strong>Edit</strong> to correct it — a field, filter or grouping is usually
+              naming a column the report's primary object doesn't have.
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+            <button onClick={() => run(promptValues)} style={miniBtnStyle()}>Run Again</button>
+            {onEdit && <button onClick={onEdit} style={miniBtnStyle()}>Edit</button>}
+            {onDuplicate && (
+              <button onClick={handleDuplicate} disabled={duplicating} style={miniBtnStyle()}>
+                {duplicating ? 'Duplicating…' : 'Duplicate'}
+              </button>
+            )}
+            {onClose && <button onClick={onClose} style={miniBtnStyle()}>Close</button>}
+          </div>
+        </div>
+        {duplicateError && (
+          <div style={{ padding:'8px 24px', fontSize:12, color:C.textSecondary, background:'#e8f1fb' }}>{duplicateError}</div>
+        )}
+        <div style={{ flex:1, minHeight:0, display:'flex' }}>
+          <ErrorState error={error} onRetry={() => run(promptValues)} />
+        </div>
+      </div>
+    )
+  }
 
   if (showingPrompts) {
     return (
