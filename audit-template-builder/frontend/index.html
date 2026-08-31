@@ -4202,12 +4202,17 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const P=_pdfNew(20); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
-  const SGAP=8;                                    // clear space above every section header
+  const SGAP=26;                                   // clear space above every section header, so each section reads as its own block
   const bh=(txt,x,yy,al)=>{tc(C.ink); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
   // one identical section-header treatment for all three sections
   const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.ink); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
     stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
+  // A total drawn on the RIGHT: the label right-aligns just left of its figure,
+  // both anchored to the page's right edge, so the reader's eye lands on the money.
+  const AMTW=92;
+  const rline=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
+    t(W-M-AMTW,st.y+10,lbl,{align:'right'}); t(W-M,st.y+10,val,{align:'right'});};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
@@ -4259,11 +4264,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   });
   // Section 1 total — the full cost of all the work above
   {need(28); st.y+=6; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=3;
-   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Project Cost'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=13;
-   stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);}
+   rline('Total Project Cost',_money(m.total),true); st.y+=13;
+   stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=4;}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
-  needH((m.foe?196:150)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
+  needH((m.foe?244:198)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
   sh('Available Rebates & Incentives');
   const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
     st.y+=4; stroke(C.line); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
@@ -4278,16 +4283,15 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     'Focus on Energy - Instant Discount',m.foeAmt);
   // total of every rebate available toward the project cost
   {need(26); st.y+=8; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=3;
-   tc(C.ink); font(9,'bold'); t(M,st.y+10,'Total Rebate Amount'); t(W-M,st.y+10,_money(m.total),{align:'right'}); st.y+=13;
-   stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);}
+   rline('Total Rebate Amount',_money(m.total),true); st.y+=13;
+   stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=4;}
   /* ===== Section 3: Project Summary ===== */
   sh('Project Summary');
   const trows=[['Total Project Cost',_money(m.total),false],
     ['Total Rebate Amount Applied as Instant Discount','('+_money(m.total)+')',false],
     [isInv?'Total Due':'Total Remaining Amount','$0.00',true]];
   for(const [lbl,val,strong] of trows){
-    tc(C.ink); font(9,strong?'bold':'normal');
-    t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'});
+    rline(lbl,val,strong);
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
   // signature — invoice / project payment request only; reserved with the block above so it is never orphaned
   if(isInv){
