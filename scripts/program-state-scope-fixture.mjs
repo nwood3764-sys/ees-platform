@@ -8,7 +8,7 @@
 //
 // Cases are drawn from the live opportunity record types and from the failure
 // Nicholas hit on 2026-08-23: BLD-00153 in Rocky Mount, North Carolina offering
-// FOE-2024-WI and the whole Michigan set.
+// WI-FOE-2024 and the whole Michigan set.
 
 import {
   scopedToState, statesInRecordTypes, needsStateChoice,
@@ -31,7 +31,7 @@ const rt = (label, state) => ({ id: label, value: label, label, state })
 // The live opportunity record types after the 2026-08-23 retirement.
 const OPPORTUNITY_TYPES = [
   rt('Field Operations', null),
-  rt('FOE-2024-WI', 'WI'), rt('FOE-2025-WI', 'WI'), rt('FOE-2026-WI', 'WI'),
+  rt('WI-FOE-2024', 'WI'), rt('WI-FOE-2025', 'WI'), rt('WI-FOE-2026', 'WI'),
   rt('MI-IRA-MF-HEAR', 'MI'), rt('MI-IRA-MF-HOMES', 'MI'), rt('MI-IRA-MF-HOMES-AUDIT', 'MI'),
   rt('NC-IRA-MF-HEAR', 'NC'), rt('NC-IRA-MF-HOMES', 'NC'), rt('NC-IRA-MF-HOMES-AUDIT', 'NC'),
   rt('NC-IRA-SF-HEAR', 'NC'), rt('NC-IRA-SF-HOMES', 'NC'), rt('NC-IRA-SF-HOMES-AUDIT', 'NC'),
