@@ -3,6 +3,7 @@ import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell, pinnedFooterCell } from '../l
 import { useState, useRef, useEffect } from 'react'
 import { getRowValue, saveWidgetColumnWidths } from '../data/reportsService'
 import { useColumnResize, resizeGripStyle } from '../lib/columnWidths'
+import { dataLabelMode, dataLabelText, labelInkFor, categoryLabel } from '../lib/chartDataLabels'
 import {
   reportColumnKey, resolveReportColumnWidths, totalWidth, withColumnWidth, withoutColumnWidth,
 } from '../lib/reportColumnWidths'
@@ -633,7 +634,8 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
   const raw = buildChartData(result, widget)
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
-  const showLabels = cfg.show_data_labels !== false
+  // `auto` on a pie means the share, which is what the boolean used to show.
+  const labelMode = dataLabelMode(cfg, 'percent')
   const showLegend = cfg.show_legend !== false
   const hostRef = useRef(null)
   const width = useElementWidth(hostRef)
@@ -645,6 +647,9 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
   const sorted = [...raw].sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0))
   const head = sorted.slice(0, PIE_MAX_SLICES)
   const tail = sorted.slice(PIE_MAX_SLICES)
+  // A group with no value is "(blank)", not an em dash the reader has to
+  // interpret — the same word the summary report uses for the same thing.
+  for (const d of sorted) d.name = categoryLabel(d.name)
   const data = tail.length > 0
     ? [...head, {
         name: `Other (${tail.length})`,
@@ -678,19 +683,34 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
       subtextStyle: { fontSize: 11, color: C.textMuted, fontFamily: "'Inter', system-ui, sans-serif" },
     } : undefined,
     series: [{
-      type: 'pie', data: data.map(d => ({ name: d.name, value: d.value })),
+      type: 'pie',
+      data: data.map((d, i) => {
+        const fill = CHART_COLORS[i % CHART_COLORS.length]
+        return {
+          name: d.name, value: d.value,
+          // The ink rides on the datum, because it depends on THIS wedge's fill.
+          label: { color: labelInkFor(fill) },
+        }
+      }),
       radius: donut ? ['54%', '78%'] : '76%',
       center: ['50%', '50%'],
       // A 2px surface gap between fills, per the mark spec — adjacent wedges
       // must not touch.
       itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 3 },
-      // Selective direct labels: a share, inside, only where there is room for
-      // it. Never a leader line — they are what collided.
-      label: showLabels
-        ? { show: true, position: 'inside', color: '#ffffff', fontSize: 11, fontWeight: 600,
+      // Selective direct labels, inside the wedge, only where there is room —
+      // and in ink CHOSEN from the wedge's own fill. It was a hardcoded white,
+      // which on this palette's light emerald and sky is about 1.9:1 and
+      // unreadable (Nicholas: "Why would you have white text? I can't even see
+      // that shit"). Never a leader line: they are what collided.
+      label: labelMode === 'none'
+        ? { show: false }
+        : { show: true, position: 'inside', fontSize: 11, fontWeight: 600,
             fontFamily: "'JetBrains Mono', monospace",
-            formatter: (p) => (p.percent >= PIE_INSIDE_LABEL_MIN_PCT ? `${Math.round(p.percent)}%` : '') }
-        : { show: false },
+            color: undefined,   // per-slice, set in the data below
+            formatter: (p) => dataLabelText(labelMode, {
+              value: p.value, percent: p.percent, fmt,
+              autoMode: 'percent', minPercent: PIE_INSIDE_LABEL_MIN_PCT,
+            }) },
       labelLine: { show: false },
       emphasis: { scaleSize: 6 },
       cursor: canDrill ? 'pointer' : 'default',
