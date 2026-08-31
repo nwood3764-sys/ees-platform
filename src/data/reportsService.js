@@ -629,6 +629,31 @@ export async function cloneScheduledReport(sourceScheduleId, { newName = null } 
  * call: dragging a column is not editing the report's definition, and must not
  * rewrite its fields, filters or groupings as a side effect.
  */
+/**
+ * Persist a dashboard TABLE widget's column widths.
+ *
+ * On the widget, the same way a report's live on the report: a dashboard is a
+ * shared named artifact, so the layout someone sets is the layout it has. Its
+ * own one-key update — merged into the existing config rather than replacing
+ * it, because a widget's config also carries its columns, sort, limit and
+ * number format, and a drag must not rewrite any of them.
+ */
+export async function saveWidgetColumnWidths(widgetId, widths) {
+  if (!widgetId) return null
+  const { data: current, error: readErr } = await supabase
+    .from('dashboard_widgets').select('dw_widget_config').eq('id', widgetId).maybeSingle()
+  if (readErr) throw readErr
+  const next = {
+    ...(current?.dw_widget_config || {}),
+    column_widths: (widths && Object.keys(widths).length > 0) ? widths : undefined,
+  }
+  if (next.column_widths === undefined) delete next.column_widths
+  const { error } = await supabase
+    .from('dashboard_widgets').update({ dw_widget_config: next }).eq('id', widgetId)
+  if (error) throw error
+  return widths
+}
+
 export async function saveReportColumnWidths(reportId, widths) {
   if (!reportId) return null
   const { error } = await supabase
