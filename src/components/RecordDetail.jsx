@@ -52,7 +52,7 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
-import { openAssessmentPreapprovalForm, loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
+import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -6904,6 +6904,31 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }, [recordId, openingPreapproval])
 
+  // The assessment rebate claim, from the WI-IRA-MF-HOMES-AUDIT incentive
+  // application. Same shape as the pre-approval handler above and it shares the
+  // same missing-fields modal — the gate is the form's own required set either
+  // way, so there is one place that explains an incomplete record.
+  const [openingApplication, setOpeningApplication] = useState(false)
+  const handleOpenAssessmentApplication = useCallback(async () => {
+    if (openingApplication) return
+    const win = window.open('', '_blank')
+    setOpeningApplication(true)
+    try {
+      const { url, error, missing } = await openAssessmentApplicationForm(recordId, win)
+      if (missing && missing.length) {
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the assessment application.')
+      }
+    } finally {
+      setOpeningApplication(false)
+    }
+  }, [recordId, openingApplication])
+
   // ── Record locking ─────────────────────────────────────────────────────
   // A record is locked once its status reaches a value flagged
   // picklist_locks_record (e.g. an enrollment that's been Submitted). Locked
@@ -9363,6 +9388,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
+    [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -9390,6 +9416,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const topbarPendingByKey = {
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: openingPreapproval,
+    [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: openingApplication,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
     [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
     [ACTION_KEYS.PREVIEW_PDF]:          previewingPdf,
@@ -10144,9 +10171,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 </div>
               </div>
               <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
-                The Focus On Energy pre-approval form can't be submitted until every required
-                field has a value. These are still blank on this enrollment (or its property,
-                building, and contractor records they're inherited from):
+                The Focus On Energy form can't be submitted until every required field has a
+                value. These are still blank on this record (or on the property, building and
+                contractor records they're inherited from):
               </div>
             </div>
             <div style={{ padding: '12px 20px' }}>
