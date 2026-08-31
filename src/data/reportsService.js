@@ -388,50 +388,41 @@ function humanizeFkLabel(fkColumn, referencesTable) {
 }
 
 // ─── List of objects available as a primary report object ─────────────────
-// Salesforce calls this the "Object" picker on a new report. We expose every
-// business table that has a record-detail concept — same set used by the
-// universal search index, basically.
+// Salesforce calls this the "Object" picker on a new report.
+//
+// This used to be a hand-written list of 34 tables, written when reports
+// shipped and never revisited — so every object added to LEAP afterwards was
+// unreportable, silently. Enrollments was one of them (Nicholas, 2026-08-31:
+// "Why can't I create another report for enrollment? The primary object is not
+// available."), and it was hardly alone: the platform's own object catalog
+// carries 114.
+//
+// It is DERIVED now, from the same OBJECT_CATALOG that Object Manager and the
+// module-tab picker read. There is no list to keep in sync, so an object added
+// tomorrow is reportable the day it is registered — the same rule the nav
+// registry settled on (src/lib/objectNav.js) after the identical defect took
+// browser navigation away from 51 objects.
 
 export async function listPrimaryObjectOptions() {
-  // Hardcoded curated list for v1 — better than enumerating every table
-  // (which would include junction tables, audit tables, system tables, etc.).
-  // Expanded via Setup → Objects later.
-  return [
-    { table: 'accounts',                label: 'Accounts' },
-    { table: 'contacts',                label: 'Contacts' },
-    { table: 'properties',              label: 'Properties' },
-    { table: 'buildings',               label: 'Buildings' },
-    { table: 'units',                   label: 'Units' },
-    { table: 'opportunities',           label: 'Opportunities' },
-    { table: 'projects',                label: 'Projects' },
-    { table: 'work_orders',             label: 'Work Orders' },
-    { table: 'work_steps',              label: 'Work Steps' },
-    { table: 'work_plans',              label: 'Work Plans' },
-    { table: 'incentive_applications',  label: 'Incentive Applications' },
-    { table: 'income_qualifications',   label: 'Income Qualifications' },
-    { table: 'project_payment_requests',label: 'Project Payment Requests' },
-    { table: 'payment_receipts',        label: 'Payment Receipts' },
-    { table: 'assessments',             label: 'Assessments' },
-    { table: 'efr_reports',             label: 'EFR Reports' },
-    { table: 'tasks',                   label: 'Tasks' },
-    { table: 'comments',                label: 'Comments' },
-    { table: 'activities',              label: 'Activities' },
-    { table: 'envelopes',               label: 'Envelopes' },
-    { table: 'documents',               label: 'Documents' },
-    { table: 'photos',                  label: 'Photos' },
-    { table: 'vehicles',                label: 'Vehicles' },
-    { table: 'vehicle_activities',      label: 'Vehicle Activities' },
-    { table: 'equipment',               label: 'Equipment' },
-    { table: 'products',                label: 'Products' },
-    { table: 'materials_requests',      label: 'Materials Requests' },
-    { table: 'job_kits',                label: 'Job Kits' },
-    { table: 'time_sheets',             label: 'Time Sheets' },
-    { table: 'time_sheet_entries',      label: 'Time Sheet Entries' },
-    { table: 'service_appointments',    label: 'Service Appointments' },
-    { table: 'users',                   label: 'Users' },
-    { table: 'programs',                label: 'Programs' },
-    { table: 'chat_threads',            label: 'Chat Threads' },
-  ]
+  const { OBJECT_CATALOG } = await import('../modules/admin/objectCatalog')
+  // The catalog carries an object twice when two modules both claim it
+  // (price_books and price_book_entries are listed under CRM & Enrollment and
+  // again under Stock). One table is one reportable object, so the first
+  // listing wins — a picker offering the same object twice is a picker that
+  // makes the reader wonder which one is right.
+  const seen = new Set()
+  return (OBJECT_CATALOG || [])
+    .filter(o => o?.table && !seen.has(o.table) && seen.add(o.table))
+    .map(o => ({
+      table:  o.table,
+      // The picker names objects the way the rest of the platform does: an
+      // object is reported on in the plural ("Enrollments"), and the module is
+      // carried so the picker can group by it.
+      label:  o.pluralLabel || o.label || o.table,
+      module: o.module || 'Other',
+    }))
+    .sort((a, b) =>
+      a.module.localeCompare(b.module) || a.label.localeCompare(b.label))
 }
 
 // ─── Save / load report definitions ───────────────────────────────────────
