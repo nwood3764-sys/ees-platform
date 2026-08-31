@@ -3798,7 +3798,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ================= refined brand palette (deep navy + a single emerald
      accent, cool neutrals; no red/orange, per house style) ================= */
-  const NAVY=[20,44,71], EM=[120,130,144], EMd=[20,44,71], EMlt=[120,130,144],
+  const NAVY=[30,36,46], EM=[120,130,144], EMd=[30,36,46], EMlt=[120,130,144],
         PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
   const _state=stateFullName(m.state);
   /* ---- letterhead: company (left) + document title/meta (right) over a thin
@@ -4076,7 +4076,7 @@ function buildHearPdfBlob(){
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
   const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const _state=stateFullName(m.state);
-  const NAVY=[20,44,71], EM=[120,130,144], EMd=[20,44,71], EMlt=[120,130,144],
+  const NAVY=[30,36,46], EM=[120,130,144], EMd=[30,36,46], EMlt=[120,130,144],
         PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
   /* letterhead — matches the HOMES proposal: company (left) + document title/meta
      (right) over a thin rule with a short emerald tab. No band, no logo, no panel. */
@@ -4195,10 +4195,10 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
   const SGAP=8;                                    // clear space above every section header
-  const bh=(txt,x,yy,al)=>{tc(C.sealBlue); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
+  const bh=(txt,x,yy,al)=>{tc(C.ink); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
   // one identical section-header treatment for all three sections
-  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.sealBlue); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
-    stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.ink); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
+    stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
@@ -4206,9 +4206,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   st.y=M-6;   // tight top margin above the title
   // centered title block; drawn on page 1 and repeated atop any continuation page
   const drawTitle=()=>{
-    tc(C.sealBlue); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
+    tc(C.ink); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
     tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
-    st.y+=32; stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
+    st.y+=32; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
   const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };   // a continuation page keeps the header
   const needH=h=>{ if(st.y+h>H-M-16) contPage(); };             // page break that redraws the header
   drawTitle();
@@ -4239,9 +4239,9 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   /* items table — narrow Contractor/Measure columns, wide readable Description;
      every cell is vertically centered in its row, the way an Excel table reads. */
   const cW=84, mX=M+cW, mW=86, dX=mX+mW, dW=(W-M-64)-dX;   // column geometry
-  tc(C.sealBlue); font(8,'bold');
+  tc(C.ink); font(8,'bold');
   t(M,st.y+12,'CONTRACTOR'); t(mX,st.y+12,'MEASURE'); t(dX,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
-  st.y+=16; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+  st.y+=16; stroke(C.line); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
   const CLH=9, RH=10;
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
@@ -4267,12 +4267,12 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   needH((m.foe?196:150)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
   sh('Available Rebates & Incentives');
   const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
-    st.y+=4; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    st.y+=4; stroke(C.line); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     const dl=wrap(desc,270), h=Math.max(dl.length*9,18)+8; need(h);
     tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+11+k*9,ln));
     wrap(name,150).forEach((ln,k)=>t(M+300,st.y+11+k*9,ln));
     tc(C.ink); font(9,'bold'); t(W-M,st.y+11,_money(amt),{align:'right'});
-    st.y+=h; stroke([188,214,242]); d.line(M,st.y,W-M,st.y);};
+    st.y+=h; stroke(C.line); d.line(M,st.y,W-M,st.y);};
   sect('IRA Rebates','Incentive Description: '+(m.tier?m.tier.desc:'')+'. Notes: '+(m.tier?m.tier.note:'')+'.',
     'IRA HOMES '+(isInv?'Incentive ':'')+'- Instant Discount',m.homesAmt);
   if(m.foe) sect('Other Non-IRA Rebates','Incentive Description: '+m.foe.desc+'. Notes: '+m.foe.note+'.',
