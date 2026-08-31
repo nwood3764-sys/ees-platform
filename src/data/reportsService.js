@@ -1379,6 +1379,27 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     }
   }
 
+  // A grouping on a RELATED field has to ride the embed tree, and it has to be
+  // added BEFORE the tree is serialized — which is why this sits here and not
+  // with the direct groupings below. It used to be skipped entirely: the column
+  // was never selected, so every group header read "(blank)" and the whole
+  // report collapsed into one meaningless group. Grouping by a parent's field
+  // is the ordinary thing to want — "opportunities by property owner".
+  for (const g of (loaded.groupings || [])) {
+    if (!g.rgr_field_name || !g.rgr_field_table) continue
+    if (!g.rgr_field_via_path || g.rgr_field_via_path.length === 0) continue
+    const node = ensureEmbedNode(g.rgr_field_via_path, g.rgr_field_table)
+    if (!node.fields.includes('id')) node.fields.push('id')
+    if (!node.fields.includes(g.rgr_field_name)) node.fields.push(g.rgr_field_name)
+    // When the grouped column is itself a lookup, its label comes too — or the
+    // group header is a uuid instead of a name.
+    const gFk = fkLookup[`${g.rgr_field_table}.${g.rgr_field_name}`]
+    if (gFk?.name_column) {
+      const embed = `_lbl_${g.rgr_field_name}:${g.rgr_field_name}(${gFk.name_column})`
+      if (!node.fields.includes(embed)) node.fields.push(embed)
+    }
+  }
+
   if (!directFields.includes('id')) directFields.unshift('id')
 
   // Serialize the embed tree depth-first into PostgREST nested-embed syntax.
@@ -1405,8 +1426,8 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   // lookup FK, its name-label embed comes along too. Without that embed a
   // "group by Property" header would read as a bare UUID.
   for (const g of (loaded.groupings || [])) {
-    if (g.rgr_field_via_path && g.rgr_field_via_path.length > 0) continue
     if (!g.rgr_field_name) continue
+    if (g.rgr_field_via_path && g.rgr_field_via_path.length > 0) continue   // handled above, in the embed tree
     if (!selectParts.includes(g.rgr_field_name)) selectParts.push(g.rgr_field_name)
     const fkInfo = fkLookup[`${r.rpt_primary_object}.${g.rgr_field_name}`]
     const alias = `_lbl_${g.rgr_field_name}`
