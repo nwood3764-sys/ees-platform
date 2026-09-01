@@ -5295,7 +5295,7 @@ function RelatedListWidget({
           fill('ia_how_is_this_building_heated',  resolvePicklistLabel(b.building_heating_fuel_type))
         }
 
-        // Property owner + installation-address / unit-count fallbacks.
+        // Installation address / unit counts come from the property.
         if (p) {
           fill('ia_installation_address_street',  p.property_street)
           fill('ia_installation_address_city',    p.property_city)
@@ -5303,14 +5303,25 @@ function RelatedListWidget({
           fill('ia_installation_address_zip',     p.property_zip)
           fill('ia_total_number_of_units',        p.property_total_units)
           fill('ia_total_number_of_occupied_units', p.property_ph_total_occupied)
-          fill('ia_building_owner_name',          p.property_hud_owner_org)
-          fill('ia_building_owner_name_ira',      p.property_hud_owner_org)
-          fill('ia_building_owner_email_address', p.property_hud_owner_email)
-          fill('ia_building_owner_office_phone',  p.property_hud_owner_phone)
         }
 
-        // Business entity = the property's owner account (one account per real
-        // company), falling back to the opportunity's account.
+        // The owner is the property's OWNER ACCOUNT -- one account per real
+        // company -- and that is the only source for the owner's NAME
+        // (Nicholas, 2026-09-01: "it needs to come from the property object
+        // owner account, not the HUD owner org").
+        //
+        // These two lines used to read property_hud_owner_org, and because fill()
+        // only fills a blank they ran FIRST and beat the account name below, which
+        // was therefore dead code. That is the same defect 20260901221600 fixed on
+        // the application's own Property Owner Name field: on PROP-07530 the HUD
+        // import still named a previous owner, so correcting the owner on the
+        // property changed nothing on the form.
+        //
+        // The HUD owner's email and phone are still worth having -- an owner
+        // account carries no email on any live property -- but they are borrowed
+        // only when the HUD file names the SAME organisation as the account.
+        // Where it names a different one, those contact details belong to that
+        // other owner and must never print under this account's name.
         const ownerAccountId = p?.property_account_id || opp?.opportunity_account_id || null
         if (ownerAccountId) {
           const { data: acct } = await supabase.from('accounts')
@@ -5321,6 +5332,16 @@ function RelatedListWidget({
             fill('ia_business_entity_phone_number', acct.account_phone)
             fill('ia_business_entity_email',        acct.account_email)
             fill('ia_building_owner_name',          acct.account_name)
+            fill('ia_building_owner_name_ira',      acct.account_name)
+            fill('ia_building_owner_email_address', acct.account_email)
+            fill('ia_building_owner_office_phone',  acct.account_phone)
+
+            const namesSameOrg = (a, b) => !!a && !!b
+              && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
+            if (namesSameOrg(p?.property_hud_owner_org, acct.account_name)) {
+              fill('ia_building_owner_email_address', p.property_hud_owner_email)
+              fill('ia_building_owner_office_phone',  p.property_hud_owner_phone)
+            }
           }
         }
 
