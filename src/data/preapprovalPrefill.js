@@ -27,6 +27,13 @@ export const WI_IRA_ASSESSMENT_PREAPPROVAL_KEY = 'wi_ira_mf_homes_assessment_pre
 // form entirely.
 export const WI_IRA_ASSESSMENT_APPLICATION_KEY = 'wi_ira_mf_homes_assessment_application'
 
+// The third form, also on the incentive application: the Project Payment
+// Request. Hosted on Jotform rather than Formstack, which changes only the
+// stored parameter strings (q65_doesThe65 rather than field188466720) — the
+// query string is built the same way, and build_external_form_prefill picks
+// this target's resolver server-side, so nothing here knows the difference.
+export const WI_IRA_PAYMENT_REQUEST_KEY = 'wi_ira_mf_homes_project_payment_request'
+
 // The pure rules live in src/lib/externalFormPrefill.js so they can be tested
 // without a browser or a database. Re-exported here so existing importers of
 // this module are unchanged.
@@ -81,6 +88,10 @@ export function openAssessmentPreapprovalForm(enrollmentId, targetWindow) {
 
 // The assessment rebate claim, opened from the WI-IRA-MF-HOMES-AUDIT incentive
 // application.
+export function openPaymentRequestForm(incentiveApplicationId, targetWindow) {
+  return openExternalPrefilledForm(incentiveApplicationId, WI_IRA_PAYMENT_REQUEST_KEY, targetWindow)
+}
+
 export function openAssessmentApplicationForm(incentiveApplicationId, targetWindow) {
   return openExternalPrefilledForm(incentiveApplicationId, WI_IRA_ASSESSMENT_APPLICATION_KEY, targetWindow)
 }

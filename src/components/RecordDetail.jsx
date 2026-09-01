@@ -52,7 +52,8 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
-import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
+import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, openPaymentRequestForm,
+         loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -6882,6 +6883,29 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Required fields still blank when the user tried to open the pre-approval
   // form. Non-empty → the completion modal is shown and the form is NOT opened.
   const [preapprovalMissing, setPreapprovalMissing] = useState(null)
+  // Open the Project Payment Request Jotform, pre-filled from this record —
+  // the sibling of the two openers above, on the third form.
+  const [openingPaymentRequest, setOpeningPaymentRequest] = useState(false)
+  const handleOpenPaymentRequestForm = useCallback(async () => {
+    if (openingPaymentRequest) return
+    const win = window.open('', '_blank')
+    setOpeningPaymentRequest(true)
+    try {
+      const { url, error, missing } = await openPaymentRequestForm(recordId, win)
+      if (missing && missing.length) {
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the payment request application.')
+      }
+    } finally {
+      setOpeningPaymentRequest(false)
+    }
+  }, [recordId, openingPaymentRequest])
+
   const handleOpenPreapprovalForm = useCallback(async () => {
     if (openingPreapproval) return
     const win = window.open('', '_blank')
@@ -9389,6 +9413,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
+    [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -9417,6 +9442,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: openingPreapproval,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: openingApplication,
+    [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: openingPaymentRequest,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
     [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
     [ACTION_KEYS.PREVIEW_PDF]:          previewingPdf,
