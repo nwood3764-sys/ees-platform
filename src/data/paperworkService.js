@@ -372,7 +372,7 @@ async function loadPdfJs() {
  * Extract the text of a PDF, reconstructing reading-order lines by y-position
  * (ported from the standalone tool's pdfText()).
  */
-async function extractPdfText(arrayBuffer) {
+export async function extractPdfText(arrayBuffer) {
   const pdfjs = await loadPdfJs()
   const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
   const out = []

@@ -30,6 +30,7 @@ const LogActivityModal                     = lazy(() => import('./LogActivityMod
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
 const SubmittedEnrollmentModal      = lazy(() => import('./SubmittedEnrollmentModal'))
+const HomesProposalModal            = lazy(() => import('./HomesProposalModal'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -7057,6 +7058,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
   const [showSubmittedEnrollmentModal, setShowSubmittedEnrollmentModal] = useState(false)
+  const [showHomesProposalModal, setShowHomesProposalModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -9411,6 +9413,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
+    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setShowHomesProposalModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
@@ -10329,6 +10332,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           <SubmittedEnrollmentModal
             enrollmentId={recordId}
             onClose={() => setShowSubmittedEnrollmentModal(false)}
+            onSaved={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* WI IRA Multifamily HOMES Project Reservation proposal (enrollments only) */}
+        {showHomesProposalModal && tableName === 'enrollments' && (
+          <HomesProposalModal
+            enrollmentId={recordId}
+            onClose={() => setShowHomesProposalModal(false)}
             onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}
