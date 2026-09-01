@@ -20,7 +20,15 @@ import {
 
 const CARD_SECONDARY = '#f7f9fc'
 
-export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
+// The three documents produced off one Project Reservation enrollment.
+const DOC = {
+  proposal: { title: 'Generate Proposal',                 noun: 'proposal', usesReports: true },
+  invoice:  { title: 'Generate Payment Request Invoice',  noun: 'invoice',  usesReports: true },
+  audit:    { title: 'Generate Assessment Invoice',       noun: 'invoice',  usesReports: false },
+}
+
+export default function HomesProposalModal({ enrollmentId, kind = 'proposal', onClose, onSaved }) {
+  const doc = DOC[kind] || DOC.proposal
   const toast = useToast()
   const [ctx, setCtx] = useState(null)
   const [missing, setMissing] = useState(null)   // array from the record-level gate
@@ -37,20 +45,20 @@ export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
         const c = await loadHomesProposalContext(enrollmentId)
         if (!alive) return
         setCtx(c)
-        setMissing(homesProposalMissing(c))
+        setMissing(homesProposalMissing(c, kind))
       } catch (e) { if (alive) setLoadErr(e.message || String(e)) }
     })()
     return () => { alive = false }
-  }, [enrollmentId])
+  }, [enrollmentId, kind])
 
   useEffect(() => () => { if (result?.url) URL.revokeObjectURL(result.url) }, [result])
 
   async function handleGenerate() {
     setGenerating(true); setGenMissing(null)
     try {
-      const r = await generateHomesProposal(enrollmentId)
+      const r = await generateHomesProposal(enrollmentId, kind)
       if (result?.url) URL.revokeObjectURL(result.url)
-      setResult({ blob: r.blob, fileName: r.fileName, url: URL.createObjectURL(r.blob), model: r.model })
+      setResult({ blob: r.blob, fileName: r.fileName, url: URL.createObjectURL(r.blob), model: r.model, documentType: r.documentType })
     } catch (e) {
       if (Array.isArray(e.missing)) setGenMissing(e.missing)
       else toast.error(`Could not generate the proposal: ${e.message || e}`)
@@ -61,7 +69,7 @@ export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
     if (!result) return
     setSaving(true)
     try {
-      await saveHomesProposalToRecord(enrollmentId, result.blob, result.fileName)
+      await saveHomesProposalToRecord(enrollmentId, result.blob, result.fileName, result.documentType)
       toast.success(`Saved to this enrollment’s Documents: ${result.fileName}`)
       if (onSaved) onSaved()
       if (onClose) onClose()
@@ -88,7 +96,7 @@ export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
       <div style={panel} onClick={e => e.stopPropagation()}>
         <div style={header}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>Generate Proposal</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{doc.title}</div>
             <div style={{
               fontSize: 12, color: C.textMuted, marginTop: 2,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -125,16 +133,21 @@ export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
               )}
 
               {/* what will be pulled */}
-              <div style={sectionLabel}>What this proposal will use</div>
+              <div style={sectionLabel}>What this document will use</div>
               <div style={rowGrid}>
                 <Field label="Design" value={designLabel} />
                 <Field label="Primary contractor" value={ctx.contractor || '—'} tone={ctx.contractor ? undefined : 'warn'} />
-                <Field label="Units" value={ctx.units || '—'} tone={ctx.units ? undefined : 'warn'} />
+                <Field label="Secondary contractor" value={ctx.secondaryContractor || 'None'} />
+                <Field label="Units" value={ctx.units || '—'} tone={(ctx.units || !doc.usesReports) ? undefined : 'warn'} />
                 <Field label="Owner" value={f.pjOwner || '—'} />
                 <Field label="Contact" value={[f.pjContact, f.pjContactTitle].filter(Boolean).join(' — ') || '—'} />
                 <Field label="Property" value={[f.pjInstallAddr, f.pjCsz].filter(Boolean).join(', ') || '—'} />
-                <Field label="Baseline Asset Score" value={ctx.baseDoc ? 'Attached' : 'Missing'} tone={ctx.baseDoc ? undefined : 'warn'} />
-                <Field label="Improved Asset Score" value={ctx.impDoc ? 'Attached' : 'Missing'} tone={ctx.impDoc ? undefined : 'warn'} />
+                {doc.usesReports && (
+                  <>
+                    <Field label="Baseline Asset Score" value={ctx.baseDoc ? 'Attached' : 'Missing'} tone={ctx.baseDoc ? undefined : 'warn'} />
+                    <Field label="Improved Asset Score" value={ctx.impDoc ? 'Attached' : 'Missing'} tone={ctx.impDoc ? undefined : 'warn'} />
+                  </>
+                )}
               </div>
 
               {/* parse-level gate: reports attached but unreadable/incomplete */}
@@ -142,7 +155,7 @@ export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
                 <div style={notice}>
                   <Icon path="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" size={15} color="#1e466b" />
                   <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>The reports are attached but the proposal can’t be built:</div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>The reports are attached but the {doc.noun} can’t be built:</div>
                     <ul style={{ margin: 0, paddingLeft: 18 }}>
                       {genMissing.map((m, i) => <li key={i} style={{ marginBottom: 2 }}>{m}</li>)}
                     </ul>
@@ -154,9 +167,16 @@ export default function HomesProposalModal({ enrollmentId, onClose, onSaved }) {
                 <div style={{ ...notice, background: '#eaf7f0', borderColor: '#bfe6d2', color: '#0d5c3a' }}>
                   <Icon path="M5 13l4 4L19 7" size={15} color="#0d5c3a" />
                   <div>
-                    Proposal generated: {result.fileName}
-                    {result.model?.total != null && (
+                    {doc.noun === 'invoice' ? 'Invoice' : 'Proposal'} generated: {result.fileName}
+                    {result.model?.total != null && doc.usesReports && (
                       <span style={{ color: C.textMuted }}> · Total project cost ${Number(result.model.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                    )}
+                    {result.model?.savings != null && (
+                      <span style={{ color: C.textMuted }}>
+                        {' · '}Modeled savings {result.model.savings.toFixed(1)}%
+                        {result.model.euiBase != null && result.model.euiImp != null &&
+                          ` (Site EUI ${result.model.euiBase} → ${result.model.euiImp} kBtu/ft²/yr)`}
+                      </span>
                     )}
                   </div>
                 </div>
