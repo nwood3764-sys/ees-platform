@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
+import { sharedStatusLabelPrefix, shortStatusLabel } from '../lib/statusPathLabels'
 
 // ---------------------------------------------------------------------------
 // StatusTransitionsBar
@@ -23,6 +24,14 @@ import { useToast } from './Toast'
 //   - The record is in edit mode (would let unsaved field changes
 //     leak through a status update)
 //   - The current status has no outgoing transitions (terminal state)
+//   - The layout carries a status path for the same field (suppressForFields):
+//     the path renders these very buttons inside its own card, and two cards
+//     announcing one status is what made the control unrecognisable
+//
+// `embedded` drops the card chrome and the current-status pill so the bar can
+// be the action row of the status path. `statusField` names the lifecycle
+// column outright — the path already knows which column it renders, so an
+// embedded bar is not subject to the one-status-field-per-table limit below.
 // ---------------------------------------------------------------------------
 
 export default function StatusTransitionsBar({
@@ -31,12 +40,20 @@ export default function StatusTransitionsBar({
   record,
   editing,
   onStatusChanged,
+  statusField: statusFieldProp = null,
+  embedded = false,
+  suppressForFields = null,
 }) {
   const toast = useToast()
-  const [statusField,  setStatusField]  = useState(null)
+  const [resolvedField, setResolvedField] = useState(null)
   const [transitions,  setTransitions]  = useState([])
   const [statusLabels, setStatusLabels] = useState(new Map())
+  const [shortStatusLabels, setShortStatusLabels] = useState(new Map())
   const [loading,      setLoading]      = useState(false)
+
+  // Joined so a caller passing a fresh array literal each render does not
+  // re-run the resolver on every render.
+  const suppressKey = (suppressForFields || []).join(',')
   const [busy,         setBusy]         = useState(false)
   const [pendingTxn,   setPendingTxn]   = useState(null)
 
@@ -48,6 +65,9 @@ export default function StatusTransitionsBar({
   // suppressed for v1; we'll revisit when there's actual demand.
   useEffect(() => {
     let cancelled = false
+    // Given the field outright (the status path knows it), there is nothing
+    // to discover and no ambiguity to be suppressed by.
+    if (statusFieldProp) { setResolvedField(statusFieldProp); return }
     if (!tableName) return
     setLoading(true)
     supabase
@@ -59,12 +79,17 @@ export default function StatusTransitionsBar({
         if (cancelled) return
         if (error) { setLoading(false); return }
         const fields = Array.from(new Set((data || []).map(r => r.st_status_field)))
-        if (fields.length === 1) setStatusField(fields[0])
-        else                     setStatusField(null)
-        if (fields.length === 0) setLoading(false)
+        const only = fields.length === 1 ? fields[0] : null
+        // A field the layout already shows as a status path is that path's to
+        // render; a standalone bar beside it would say the same thing twice.
+        const covered = only && suppressKey.split(',').includes(only)
+        setResolvedField(covered ? null : only)
+        if (fields.length === 0 || covered) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [tableName])
+  }, [tableName, statusFieldProp, suppressKey])
+
+  const statusField = statusFieldProp || resolvedField
 
   // ── Load outgoing transitions whenever the record's status changes ─
   const currentStatusId = statusField ? (record?.[statusField] ?? null) : null
@@ -110,11 +135,21 @@ export default function StatusTransitionsBar({
       if (cancelled) return
       if (txnsRes.error) { setLoading(false); return }
       setTransitions(txnsRes.data || [])
+      // Same rule the chevrons use: a button reading "Pre-approval received →
+      // Incentive Application Pre-Approved" spends most of its width on the
+      // object name the page already states. The full label stays on the
+      // button's title and in the confirmation dialog.
+      const full = (plsRes.data || []).map(pv => pv.picklist_label || pv.picklist_value)
+      const prefix = sharedStatusLabelPrefix(full)
       const labels = new Map()
+      const shortLabels = new Map()
       for (const pv of (plsRes.data || [])) {
-        labels.set(pv.id, pv.picklist_label || pv.picklist_value)
+        const label = pv.picklist_label || pv.picklist_value
+        labels.set(pv.id, label)
+        shortLabels.set(pv.id, shortStatusLabel(label, prefix))
       }
       setStatusLabels(labels)
+      setShortStatusLabels(shortLabels)
       setLoading(false)
     })
 
@@ -166,12 +201,22 @@ export default function StatusTransitionsBar({
   if (!statusField || transitions.length === 0) return null
 
   return (
-    <div style={{
+    <div style={embedded ? {
+      marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+    } : {
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
       padding: '10px 14px', marginBottom: 12,
       display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
     }}>
-      {currentLabel && (
+      {embedded && (
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+          textTransform: 'uppercase', color: C.textMuted,
+        }}>
+          Move to
+        </span>
+      )}
+      {!embedded && currentLabel && (
         <div style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           padding: '4px 10px', borderRadius: 999,
@@ -183,9 +228,12 @@ export default function StatusTransitionsBar({
           <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}>{currentLabel}</span>
         </div>
       )}
-      <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {/* `220px` basis so the buttons drop below the caption on a phone
+          rather than being squeezed into the column beside it. */}
+      <div style={{ flex: '1 1 220px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {transitions.map(t => {
           const toLabel = statusLabels.get(t.st_to_status_id) || '—'
+          const toShort = shortStatusLabels.get(t.st_to_status_id) || toLabel
           return (
             <button
               key={t.id}
@@ -203,7 +251,7 @@ export default function StatusTransitionsBar({
               }}
             >
               <span>{t.st_transition_label}</span>
-              <span style={{ fontSize: 10.5, opacity: 0.85 }}>→ {toLabel}</span>
+              <span style={{ fontSize: 10.5, opacity: 0.85 }}>→ {toShort}</span>
             </button>
           )
         })}
