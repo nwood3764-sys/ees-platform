@@ -583,9 +583,7 @@ export async function loadCombustionContext(buildingId) {
   if (building.property_id) {
     const { data } = await supabase.from('properties')
       .select(`id, property_name, property_street, property_city, property_state, property_zip,
-        property_account_id, property_total_units,
-        property_hud_owner_org, property_hud_owner_address, property_hud_owner_city,
-        property_hud_owner_state, property_hud_owner_zip, property_hud_management_org`)
+        property_account_id, property_total_units`)
       .eq('id', building.property_id).maybeSingle()
     property = data || null
   }
@@ -684,17 +682,17 @@ export async function loadCombustionContext(buildingId) {
     if (!usedIds.has(u.id)) { samples.push(blankSample(u)); usedIds.add(u.id) }
   }
 
-  // Owner / management company is inherited from the PROPERTY record — the HUD
-  // owner fields carry the fullest data (org name + mailing address); the
-  // property's account is the fallback. Never re-typed on the notification.
-  const ownerName = property?.property_hud_owner_org || property?.property_hud_management_org || account?.account_name || ''
-  const ownerAddress = property?.property_hud_owner_address
-    || account?.billing_street || account?.mailing_street || ''
-  const ownerCsz = property?.property_hud_owner_city
-    ? joinCityStateZip(property.property_hud_owner_city, property.property_hud_owner_state, property.property_hud_owner_zip)
-    : account?.billing_street
-      ? joinCityStateZip(account.billing_city, account.billing_state, account.billing_zip)
-      : joinCityStateZip(account?.mailing_city, account?.mailing_state, account?.mailing_zip)
+  // The owner is the property's Owner ACCOUNT — name and address from the same
+  // record, so the notification cannot address one organisation at another's
+  // mailing address. The HUD owner fields are not read here: they stay on the
+  // property record (Nicholas, 2026-09-01), and they carried a name/address pair
+  // that could name a previous owner. This now matches loadPaperworkContext,
+  // which has always taken the owner from the account.
+  const ownerName = account?.account_name || ''
+  const ownerAddress = account?.billing_street || account?.mailing_street || ''
+  const ownerCsz = account?.billing_street
+    ? joinCityStateZip(account.billing_city, account.billing_state, account.billing_zip)
+    : joinCityStateZip(account?.mailing_city, account?.mailing_state, account?.mailing_zip)
 
   return {
     building: { id: building.id, name: building.building_number_or_name || building.building_name || '' },

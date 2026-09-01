@@ -4918,13 +4918,15 @@ function RelatedListWidget({
       // not from the property summary columns.
       copyFromProperty('property_mf_property_category',       'enrollment_property_category')
       copyFromProperty('property_mf_raw_property_category_name', 'enrollment_property_category')
-      copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
-      copyFromProperty('property_hud_owner_phone',            'enrollment_owner_phone')
-      copyFromProperty('property_hud_owner_email',            'enrollment_owner_email')
+      // Owner and management agent are NOT copied here. They are Inherited
+      // Fields resolved live from the property's Owner Account and Management
+      // Company (Nicholas, 2026-09-01: the property account is what is inherited
+      // everywhere; the HUD owner/management fields stay on the property record
+      // and go nowhere else). Copying them would put a snapshot of HUD import
+      // text on the enrollment, which is the defect this rule exists to stop --
+      // and these five targets are not enrollment columns any more anyway, so
+      // the copies resolved to nothing.
       copyFromProperty('fein',                                'enrollment_owner_fein')
-      copyFromProperty('property_hud_management_org',         'enrollment_management_agent')
-      copyFromProperty('property_hud_management_phone',       'enrollment_management_phone')
-      copyFromProperty('property_hud_management_email',       'enrollment_management_email')
       copyFromProperty('property_primary_contract_number',    'enrollment_hud_contract_number')
       copyFromProperty('property_primary_contract_tracs_status', 'enrollment_hud_tracs_status')
       copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
@@ -4936,18 +4938,18 @@ function RelatedListWidget({
       if (prefillObj.enrollment_payment_address_different == null) {
         prefillObj.enrollment_payment_address_different = false
       }
-      // Owner address is one text field on the enrollment; the property holds
-      // it in four parts — compose "street, city, ST zip".
+      // Owner address is one text field on the enrollment; an account holds it in
+      // four parts — compose "street, city, ST zip". It is composed from the
+      // OWNER ACCOUNT's billing address further down, once the account is
+      // fetched. It used to be composed here from the property's HUD owner
+      // address, and because this block runs first and only fills a blank, that
+      // beat the account version below — which was therefore dead code, the same
+      // way the HUD owner org beat the account name. The HUD owner address stays
+      // on the property record (Nicholas, 2026-09-01).
       const composeAddress = (street, city, state, zip) => {
         const head = [street, city].map(v => String(v || '').trim()).filter(Boolean).join(', ')
         const tail = [state, zip].map(v => String(v || '').trim()).filter(Boolean).join(' ')
         return [head, tail].filter(Boolean).join(', ')
-      }
-      if (prefillObj.enrollment_owner_address == null || prefillObj.enrollment_owner_address === '') {
-        const composed = composeAddress(
-          parentRecord.property_hud_owner_address, parentRecord.property_hud_owner_city,
-          parentRecord.property_hud_owner_state, parentRecord.property_hud_owner_zip)
-        if (composed) prefillObj.enrollment_owner_address = composed
       }
       // HUD program: the MF raw program types when imported, else composed
       // from the program-participation flags.
@@ -5247,8 +5249,7 @@ function RelatedListWidget({
             'building_heating_fuel_type, building_heating_fuel_provider', 'building_is_deleted'),
           fetchRow('properties', propId,
             'property_street, property_city, property_state, property_zip, property_total_units, ' +
-            'property_ph_total_occupied, property_account_id, property_name, ' +
-            'property_hud_owner_org, property_hud_owner_email, property_hud_owner_phone', 'property_is_deleted'),
+            'property_ph_total_occupied, property_account_id, property_name', 'property_is_deleted'),
         ])
         const opp = oppRes?.data
         const b   = buildingRes?.data
@@ -5317,11 +5318,11 @@ function RelatedListWidget({
         // import still named a previous owner, so correcting the owner on the
         // property changed nothing on the form.
         //
-        // The HUD owner's email and phone are still worth having -- an owner
-        // account carries no email on any live property -- but they are borrowed
-        // only when the HUD file names the SAME organisation as the account.
-        // Where it names a different one, those contact details belong to that
-        // other owner and must never print under this account's name.
+        // The owner's email and phone come from the same account, not from the
+        // HUD owner fields: those stay on the property record and are not moved
+        // anywhere else. An owner account with no email leaves the field blank
+        // for a person to fill in, which is honest -- printing a different
+        // organisation's contact details under this account's name is not.
         const ownerAccountId = p?.property_account_id || opp?.opportunity_account_id || null
         if (ownerAccountId) {
           const { data: acct } = await supabase.from('accounts')
@@ -5335,13 +5336,6 @@ function RelatedListWidget({
             fill('ia_building_owner_name_ira',      acct.account_name)
             fill('ia_building_owner_email_address', acct.account_email)
             fill('ia_building_owner_office_phone',  acct.account_phone)
-
-            const namesSameOrg = (a, b) => !!a && !!b
-              && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
-            if (namesSameOrg(p?.property_hud_owner_org, acct.account_name)) {
-              fill('ia_building_owner_email_address', p.property_hud_owner_email)
-              fill('ia_building_owner_office_phone',  p.property_hud_owner_phone)
-            }
           }
         }
 

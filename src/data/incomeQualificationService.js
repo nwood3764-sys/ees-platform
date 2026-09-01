@@ -104,9 +104,10 @@ async function resolveRunRecord(enrollmentId) {
         id, property_name, property_hud_property_id,
         property_street, property_city, property_state, property_zip, property_county,
         property_total_units, property_assisted_units, property_category, property_hud_contracts,
-        property_hud_owner_org, property_hud_owner_phone, property_hud_owner_email, fein,
-        property_hud_management_org, property_hud_management_phone, property_hud_management_email,
-        property_primary_contract_number, property_is_202_811, property_is_opportunity_zone
+        fein,
+        property_primary_contract_number, property_is_202_811, property_is_opportunity_zone,
+        owner_account:property_account_id ( account_name, account_phone, account_email ),
+        management_account:property_management_company_id ( account_name, account_phone, account_email )
       )
     `)
     .eq('id', enrollmentId)
@@ -115,6 +116,8 @@ async function resolveRunRecord(enrollmentId) {
   if (!enr) throw new Error('Enrollment not found.')
   const prop = enr.properties
   if (!prop) throw new Error('This enrollment has no linked property.')
+  const ownerAccount = prop.owner_account || null
+  const managementAccount = prop.management_account || null
 
   const hud = prop.property_hud_contracts || null
 
@@ -157,20 +160,23 @@ async function resolveRunRecord(enrollmentId) {
     total_units: totalUnits,
     assisted_units: assistedUnits,
     category,
-    // Owner / management now live on the Property (the enrollment no longer keeps
-    // its own copy) — fall back to the property's HUD fields when the enrollment
-    // column is empty, so a determination on a fresh enrollment is fully populated.
-    owner_org: v(enr.enrollment_owner_organization, prop.property_hud_owner_org),
+    // Owner and management come from the property's ACCOUNT records — the Owner
+    // Account and the Management Company (Nicholas, 2026-09-01: the property
+    // account is what is inherited everywhere; the HUD owner and HUD management
+    // fields stay on the property record and are not moved onto anything else).
+    // The enrollment_* names below are Inherited Fields, not stored columns, so
+    // they are read off the joined accounts rather than the enrollment row.
+    owner_org: v(ownerAccount?.account_name, ''),
     owner_type: v(enr.enrollment_owner_type, ''),
     owner_addr: v(enr.enrollment_owner_address, ''),
     owner_city: '',
     owner_state: v(enr.enrollment_state, prop.property_state) || 'WI',
     owner_zip: '',
-    owner_phone: v(enr.enrollment_owner_phone, prop.property_hud_owner_phone),
-    owner_email: v(enr.enrollment_owner_email, prop.property_hud_owner_email),
-    mgmt_org: v(enr.enrollment_management_agent, prop.property_hud_management_org),
-    mgmt_phone: v(enr.enrollment_management_phone, prop.property_hud_management_phone),
-    mgmt_email: v(enr.enrollment_management_email, prop.property_hud_management_email),
+    owner_phone: v(ownerAccount?.account_phone, ''),
+    owner_email: v(ownerAccount?.account_email, ''),
+    mgmt_org: v(managementAccount?.account_name, ''),
+    mgmt_phone: v(managementAccount?.account_phone, ''),
+    mgmt_email: v(managementAccount?.account_email, ''),
     is_202_811: enr.enrollment_is_202_811 || prop.property_is_202_811 || hud?.is_202_811 ? 'Y' : 'N',
     is_opp_zone: enr.enrollment_is_opportunity_zone || prop.property_is_opportunity_zone || hud?.is_opp_zone ? 'Y' : 'N',
     programs: [enr.enrollment_hud_program, hud?.primary_program, hud?.elig_pathway].filter(Boolean),
