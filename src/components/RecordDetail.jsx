@@ -7482,12 +7482,28 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             .eq('account_name', name).eq('account_is_deleted', false).maybeSingle()
           return data?.id || null
         }
-        const [appFor, bType, bProj, sealedRow, eesRow] = await Promise.all([
+        // Every value here is resolved by literal string, so each one is a
+        // silent failure waiting to happen: a picklist value renamed in Admin
+        // returns null and the field just stops filling in, which is exactly
+        // what 'Multifamily - Central 5 Units' did when it gained its '+'.
+        // find_unresolvable_reservation_defaults() is the server-side guard;
+        // this mirror is checked against the trigger by
+        // scripts/reservation-defaults-fixture.mjs.
+        const submitter = async (email) => {
+          const { data } = await supabase.from('users').select('id')
+            .eq('user_email', email).eq('user_is_deleted', false)
+            .eq('user_is_active', true).maybeSingle()
+          return data?.id || null
+        }
+        const isHomes = /HOMES/i.test(rtVal)
+        const [appFor, bType, bProj, sealedRow, eesRow, submittedBy, modelSw] = await Promise.all([
           pv('application_for', 'Project Reservation'),
           pv('building_type', 'Existing'),
-          pv('building_project_type', 'Multifamily - Central 5 Units'),
+          pv('building_project_type', 'Multifamily - Central 5+ Units'),
           acct('Sealed Inc'),
           acct('Energy Efficiency Services of Wisconsin'),
+          submitter('lucas.wood@ees-wi.org'),
+          isHomes ? pv('modeling_software', 'Energy Plus') : Promise.resolve(null),
         ])
         if (cancelled) return
         setDraft(prev => {
@@ -7495,6 +7511,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           if (appFor && next.enrollment_application_for == null) next.enrollment_application_for = appFor
           if (bType && next.enrollment_building_type == null) next.enrollment_building_type = bType
           if (bProj && next.enrollment_building_project_type == null) next.enrollment_building_project_type = bProj
+          if (submittedBy && next.enrollment_submitted_by == null) next.enrollment_submitted_by = submittedBy
+          if (modelSw && next.enrollment_modeling_software == null) next.enrollment_modeling_software = modelSw
           // Primary contractor = Sealed Inc, support contractor = Energy
           // Efficiency Services of Wisconsin. Which COMPANY runs the program is
           // program config; which PERSON represents it is never named here --
