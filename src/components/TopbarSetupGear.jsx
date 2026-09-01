@@ -4,6 +4,7 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { getRecordTypeColumn, getCurrentUserProfile } from '../data/layoutService'
 import { setLayoutReturnRecord } from '../lib/urlNav'
+import AnchoredPopover from './AnchoredPopover'
 
 /**
  * Salesforce-style gear menu that lives in the global topbar (not on every
@@ -39,7 +40,7 @@ export default function TopbarSetupGear({
   // selectedRecord changes — guards against showing the wrong layout link
   // if the user navigates from one record to another with the menu closed.
   const [resolvedRecordTypeId, setResolvedRecordTypeId] = useState(null)
-  const wrapRef = useRef(null)
+  const btnRef = useRef(null)
 
   // The object the gear acts on: the open record's table when viewing a
   // record, otherwise the current list page's table (so the gear deep-links to
@@ -60,15 +61,6 @@ export default function TopbarSetupGear({
   useEffect(() => {
     setResolvedRecordTypeId(null)
   }, [selectedRecord?.table, selectedRecord?.id])
-
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open])
 
   // When the menu opens on a record page, lazily fetch the record's record_type
   // so Edit Page Layout can resolve the right layout.
@@ -246,8 +238,9 @@ export default function TopbarSetupGear({
   const onModuleHome = !effectiveTable && (!section || section === 'home')
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div style={{ display: 'inline-block' }}>
       <button
+        ref={btnRef}
         type="button"
         onClick={handleOpen}
         title="Setup"
@@ -269,22 +262,27 @@ export default function TopbarSetupGear({
         <Icon path="M10.325 4.317a1 1 0 011.35 0l.99.99a1 1 0 001.13.18l1.32-.55a1 1 0 011.36.55l.5 1.36a1 1 0 00.78.78l1.36.5a1 1 0 01.55 1.36l-.55 1.32a1 1 0 00.18 1.13l.99.99a1 1 0 010 1.35l-.99.99a1 1 0 00-.18 1.13l.55 1.32a1 1 0 01-.55 1.36l-1.36.5a1 1 0 00-.78.78l-.5 1.36a1 1 0 01-1.36.55l-1.32-.55a1 1 0 00-1.13.18l-.99.99a1 1 0 01-1.35 0l-.99-.99a1 1 0 00-1.13-.18l-1.32.55a1 1 0 01-1.36-.55l-.5-1.36a1 1 0 00-.78-.78l-1.36-.5a1 1 0 01-.55-1.36l.55-1.32a1 1 0 00-.18-1.13l-.99-.99a1 1 0 010-1.35l.99-.99a1 1 0 00.18-1.13l-.55-1.32a1 1 0 01.55-1.36l1.36-.5a1 1 0 00.78-.78l.5-1.36a1 1 0 011.36-.55l1.32.55a1 1 0 001.13-.18l.99-.99zM12 15a3 3 0 100-6 3 3 0 000 6z" size={18} color={C.textSecondary} />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            minWidth: 240,
-            background: '#fff',
-            border: `1px solid ${C.border}`,
-            borderRadius: 6,
-            boxShadow: '0 6px 16px rgba(15, 23, 42, 0.10)',
-            zIndex: 50,
-            padding: '4px 0',
-          }}
-        >
+      {/* Portalled (AnchoredPopover), never `position:absolute`. The topbar's
+          right-hand cluster is a z-index:10 stacking context, so an absolutely
+          positioned menu here is sealed at level 10 and the record page's
+          pinned header band (z-index 30) paints straight over it. See the
+          header comment in AnchoredPopover.jsx. */}
+      <AnchoredPopover
+        anchorRef={btnRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        role="menu"
+        width={240}
+        align="right"
+        maxHeight={420}
+        panelStyle={{
+          background: '#fff',
+          border: `1px solid ${C.border}`,
+          borderRadius: 6,
+          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.10)',
+          padding: '4px 0',
+        }}
+      >
           <div style={{
             padding: '6px 14px 4px',
             fontSize: 10.5,
@@ -310,8 +308,7 @@ export default function TopbarSetupGear({
             </>
           ) : null}
           <MenuItem label="Open Setup" hint="Setup home" onClick={handleOpenSetup} />
-        </div>
-      )}
+      </AnchoredPopover>
     </div>
   )
 }

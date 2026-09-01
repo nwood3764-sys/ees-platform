@@ -13,6 +13,7 @@ import HelpTopbarButton from './components/help/HelpTopbarButton'
 import TopbarSetupGear from './components/TopbarSetupGear'
 import { NavContext } from './lib/navContext'
 import TopbarUserMenu from './components/TopbarUserMenu'
+import AnchoredPopover from './components/AnchoredPopover'
 import AssistantPanel from './components/AssistantPanel'
 import NotificationBell from './components/NotificationBell'
 import { C, NAV_MODULES } from './data/constants'
@@ -66,9 +67,11 @@ const CreateRecordModal   = lazy(() => import('./components/RecordDetail'))
 // permission, so this is a UI convenience over a server-enforced capability.
 function ViewAsControl({ roles, active, onStart, onExit }) {
   const [open, setOpen] = useState(false)
+  const btnRef = useRef(null)
   return (
-    <div style={{ position: 'relative' }}>
+    <div>
       <button
+        ref={btnRef}
         onClick={() => (active ? onExit() : setOpen(o => !o))}
         title="View as role (troubleshooting)"
         aria-label="View as role"
@@ -86,15 +89,20 @@ function ViewAsControl({ roles, active, onStart, onExit }) {
           <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" />
         </svg>
       </button>
-      {open && !active && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-          <div style={{
-            position: 'absolute', top: 38, right: 0, zIndex: 41,
-            width: 240, maxHeight: 360, overflowY: 'auto',
-            background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(13,26,46,0.16)', padding: 6,
-          }}>
+      {/* Portalled, never `position:absolute` — see AnchoredPopover.jsx. */}
+      <AnchoredPopover
+        anchorRef={btnRef}
+        open={open && !active}
+        onClose={() => setOpen(false)}
+        role="menu"
+        width={240}
+        align="right"
+        maxHeight={360}
+        panelStyle={{
+          background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(13,26,46,0.16)', padding: 6,
+        }}
+      >
             <div style={{
               padding: '6px 10px 8px', fontSize: 11, fontWeight: 700,
               textTransform: 'uppercase', letterSpacing: 0.4, color: C.textMuted,
@@ -116,9 +124,7 @@ function ViewAsControl({ roles, active, onStart, onExit }) {
                 {r.role_name}
               </button>
             ))}
-          </div>
-        </>
-      )}
+      </AnchoredPopover>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import RecordLink from './RecordLink'
+import AnchoredPopover from './AnchoredPopover'
 import { supabase } from '../lib/supabase'
 import {
   loadUnreadCount,
@@ -37,7 +38,7 @@ export default function NotificationBell({ onNavigateToRecord }) {
   const [error, setError] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [busyAll, setBusyAll] = useState(false)
-  const wrapRef = useRef(null)
+  const btnRef = useRef(null)
   const pollRef = useRef(null)
   const channelRef = useRef(null)
   const openRef = useRef(false)
@@ -93,17 +94,6 @@ export default function NotificationBell({ onNavigateToRecord }) {
       }
     }
   }, [])
-
-  // Click-outside to close.
-  useEffect(() => {
-    if (!open) return
-    function onDocClick(e) {
-      if (!wrapRef.current) return
-      if (!wrapRef.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open])
 
   // ESC to close.
   useEffect(() => {
@@ -164,8 +154,9 @@ export default function NotificationBell({ onNavigateToRecord }) {
   }, [])
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div style={{ display: 'inline-block' }}>
       <button
+        ref={btnRef}
         type="button"
         onClick={handleOpen}
         title="Notifications"
@@ -213,25 +204,25 @@ export default function NotificationBell({ onNavigateToRecord }) {
         )}
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            width: 360,
-            maxHeight: 480,
-            background: '#fff',
-            border: `1px solid ${C.border}`,
-            borderRadius: 6,
-            boxShadow: '0 6px 16px rgba(15, 23, 42, 0.10)',
-            zIndex: 50,
-            padding: 0,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
+      {/* Portalled, never `position:absolute` — see AnchoredPopover.jsx. */}
+      <AnchoredPopover
+        anchorRef={btnRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        role="menu"
+        width={360}
+        align="right"
+        maxHeight={480}
+        panelStyle={{
+          background: '#fff',
+          border: `1px solid ${C.border}`,
+          borderRadius: 6,
+          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.10)',
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
           {/* Header */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -284,8 +275,7 @@ export default function NotificationBell({ onNavigateToRecord }) {
               />
             ))}
           </div>
-        </div>
-      )}
+      </AnchoredPopover>
     </div>
   )
 }
