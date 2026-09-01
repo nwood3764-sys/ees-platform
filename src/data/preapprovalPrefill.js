@@ -21,6 +21,19 @@ import { supabase } from '../lib/supabase'
 // pre-approval. A second program is another external_form_targets row + key.
 export const WI_IRA_ASSESSMENT_PREAPPROVAL_KEY = 'wi_ira_mf_homes_assessment_preapproval'
 
+// The WI IRA HOMES Project Payment Request, hosted on Jotform. Jotform names its
+// query parameters `q65_doesThe65` where Formstack uses `field188466720`, which
+// is a difference in the stored param strings only — the query string is built
+// the same way, so nothing here needs to know which provider a target is.
+export const WI_IRA_PAYMENT_REQUEST_KEY = 'wi_ira_mf_homes_project_payment_request'
+
+// Which server-side builder resolves a record into that target's values. Keyed
+// by target so a third form is a row plus an entry, not a new code path.
+const PAYLOAD_RPC_BY_TARGET = {
+  [WI_IRA_ASSESSMENT_PREAPPROVAL_KEY]: { rpc: 'build_wi_ira_assessment_prefill',            arg: 'p_enrollment_id' },
+  [WI_IRA_PAYMENT_REQUEST_KEY]:        { rpc: 'build_wi_ira_payment_request_form_prefill',  arg: 'p_incentive_application_id' },
+}
+
 // US state name -> USPS abbreviation (plus DC + territories the form lists).
 // Used by the `state_2letter` transform: account billing_state is stored as a
 // full name ("Wisconsin") but the form's state dropdown stores "WI".
@@ -109,9 +122,11 @@ export function findMissingRequiredFields(payload, fields) {
 }
 
 // Load the resolved record values + the field map for a target.
-export async function loadAssessmentPrefill(enrollmentId, targetKey = WI_IRA_ASSESSMENT_PREAPPROVAL_KEY) {
+export async function loadAssessmentPrefill(recordId, targetKey = WI_IRA_ASSESSMENT_PREAPPROVAL_KEY) {
+  const builder = PAYLOAD_RPC_BY_TARGET[targetKey]
+  if (!builder) throw new Error(`No prefill builder is configured for "${targetKey}".`)
   const [{ data: payload, error: pErr }, { data: map, error: mErr }] = await Promise.all([
-    supabase.rpc('build_wi_ira_assessment_prefill', { p_enrollment_id: enrollmentId }),
+    supabase.rpc(builder.rpc, { [builder.arg]: recordId }),
     supabase.rpc('get_external_form_map', { p_key: targetKey }),
   ])
   if (pErr) throw pErr
@@ -122,10 +137,11 @@ export async function loadAssessmentPrefill(enrollmentId, targetKey = WI_IRA_ASS
 // Orchestrate the open. Pass a pre-opened window handle (opened synchronously in
 // the click handler) so popup blockers don't fire; the async work then redirects
 // it. Returns { url, filledCount } on success or { error } on failure.
-export async function openAssessmentPreapprovalForm(enrollmentId, targetWindow) {
+export async function openAssessmentPreapprovalForm(recordId, targetWindow,
+                                                   targetKey = WI_IRA_ASSESSMENT_PREAPPROVAL_KEY) {
   try {
-    if (!enrollmentId) return { error: 'No record selected.' }
-    const { payload, map } = await loadAssessmentPrefill(enrollmentId)
+    if (!recordId) return { error: 'No record selected.' }
+    const { payload, map } = await loadAssessmentPrefill(recordId, targetKey)
     if (!map || !map.base_url) return { error: 'This program has no pre-approval form configured.' }
     // Completeness gate: every required field (resolved from the enrollment and
     // its parent records) must be populated before the form can be submitted.

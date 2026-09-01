@@ -52,7 +52,8 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
-import { openAssessmentPreapprovalForm, loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
+import { openAssessmentPreapprovalForm, loadAssessmentPrefill, findMissingRequiredFields,
+         WI_IRA_PAYMENT_REQUEST_KEY } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -6882,6 +6883,30 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Required fields still blank when the user tried to open the pre-approval
   // form. Non-empty → the completion modal is shown and the form is NOT opened.
   const [preapprovalMissing, setPreapprovalMissing] = useState(null)
+  // Open the Project Payment Request Jotform, pre-filled from this record. Same
+  // opener, same completeness gate, same missing-fields dialog as the
+  // pre-approval button — only the target key differs, because everything about
+  // the form lives in external_form_targets / external_form_field_map.
+  const [openingPaymentRequest, setOpeningPaymentRequest] = useState(false)
+  const handleOpenPaymentRequestForm = useCallback(async () => {
+    if (openingPaymentRequest) return
+    const win = window.open('', '_blank')
+    setOpeningPaymentRequest(true)
+    try {
+      const { error, missing } = await openAssessmentPreapprovalForm(
+        recordId, win, WI_IRA_PAYMENT_REQUEST_KEY)
+      if (missing && missing.length) {
+        try { win?.close() } catch { /* the tab may already be gone */ }
+        setPreapprovalMissing(missing)
+      } else if (error) {
+        try { win?.close() } catch { /* the tab may already be gone */ }
+        window.alert(error || 'Could not open the payment request application.')
+      }
+    } finally {
+      setOpeningPaymentRequest(false)
+    }
+  }, [recordId, openingPaymentRequest])
+
   const handleOpenPreapprovalForm = useCallback(async () => {
     if (openingPreapproval) return
     const win = window.open('', '_blank')
@@ -9363,6 +9388,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
+    [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -9390,6 +9416,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const topbarPendingByKey = {
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: openingPreapproval,
+    [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: openingPaymentRequest,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
     [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
     [ACTION_KEYS.PREVIEW_PDF]:          previewingPdf,
