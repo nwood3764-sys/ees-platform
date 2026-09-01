@@ -144,11 +144,11 @@ export function homesProposalMissing(ctx, kind = 'proposal') {
   const spec = DOCUMENT_SPECS[kind] || DOCUMENT_SPECS.proposal
   const m = []
   if (spec.usesReports) {
-    if (!ctx.baseDoc) m.push('Baseline Asset Score report (attach the “… Baseline - Asset Score.pdf” under Reservation Customer Report)')
-    if (!ctx.impDoc)  m.push('Improved Asset Score report (attach the “… Improved - Asset Score.pdf” under Reservation Customer Report)')
-    if (!ctx.units)   m.push('Unit count (occupied units on the enrollment, or the building unit count)')
+    if (!ctx.baseDoc) m.push('Baseline Asset Score report (attach the “… Baseline - Asset Score.pdf” under Reservation Customer Report on the Project Reservation enrollment)')
+    if (!ctx.impDoc)  m.push('Improved Asset Score report (attach the “… Improved - Asset Score.pdf” under Reservation Customer Report on the Project Reservation enrollment)')
+    if (!ctx.units)   m.push('Unit count (occupied units, or the building unit count)')
   }
-  if (!ctx.contractor) m.push('Primary contractor (Contractor account on the enrollment)')
+  if (!ctx.contractor) m.push('Primary contractor (Contractor account on the record)')
   return m
 }
 
@@ -160,17 +160,26 @@ async function fetchPdfText(doc) {
   return extractPdfText(await res.arrayBuffer())
 }
 
+// Given the two Asset Score document rows for an opportunity's Project
+// Reservation enrollment, find baseline + improved. Returns { baseDoc, impDoc }.
+function pickAssetScoreDocs(docs) {
+  const asr = (docs || []).filter(d =>
+    d.document_type === ASSET_SCORE_DOCUMENT_TYPE && /\.pdf$/i.test(d.name || d.storage_path || ''))
+  return {
+    baseDoc: asr.find(d => /baseline/i.test(d.name || '')) || null,
+    impDoc:  asr.find(d => /improved/i.test(d.name || '')) || null,
+  }
+}
+
 /**
- * Render one of the enrollment's documents (`kind`: 'proposal' | 'invoice' |
- * 'audit'). Throws with `.missing` (an array of strings) when the record is not
- * ready, so the caller can list exactly what to fix. Returns
+ * Render a document from an already-loaded context. Throws with `.missing`
+ * (array of strings) when the record isn't ready. Returns
  * { blob, fileName, model, ctx, documentType }.
  */
-export async function generateHomesProposal(enrollmentId, kind = 'proposal') {
+async function renderFromContext(ctx, kind) {
   const spec = DOCUMENT_SPECS[kind] || DOCUMENT_SPECS.proposal
-  const ctx = await loadHomesProposalContext(enrollmentId)
   const missing = homesProposalMissing(ctx, kind)
-  if (missing.length) { const e = new Error('This enrollment is missing inputs the document needs.'); e.missing = missing; throw e }
+  if (missing.length) { const e = new Error('This record is missing inputs the document needs.'); e.missing = missing; throw e }
 
   // The proposal and payment-request invoice are built from the Asset Score
   // reports; the fixed-price assessment invoice reads none, so we skip the
@@ -204,14 +213,139 @@ export async function generateHomesProposal(enrollmentId, kind = 'proposal') {
   return { blob, fileName, model, ctx, documentType: spec.documentType }
 }
 
-/** Save a generated document onto the enrollment's Documents. */
-export async function saveHomesProposalToRecord(enrollmentId, blob, fileName, documentType = 'homes_proposal') {
+// The incentive-application record type the Payment Request invoice belongs to.
+export const PAYMENT_REQUEST_RECORD_TYPE = 'WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST'
+// The enrollment record type the Assessment invoice belongs to.
+export const ASSESSMENT_INVOICE_RECORD_TYPE = 'WI-IRA-MF-HOMES-Assessment-Preapproval'
+
+/**
+ * Load everything an incentive application needs for its Payment Request
+ * invoice. The incentive record carries its own owner / contractor / support /
+ * units / contact; the Asset Score reports (for the rebate tier) live on the
+ * Project Reservation enrollment for the same opportunity, so we traverse there.
+ */
+export async function loadPaymentRequestContext(incentiveAppId) {
+  if (!incentiveAppId) throw new Error('loadPaymentRequestContext: incentiveAppId is required')
+
+  const { data: ia, error } = await supabase
+    .from('incentive_applications').select('*').eq('id', incentiveAppId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!ia) throw new Error('Incentive application not found')
+
+  const { data: rt } = ia.ia_record_type
+    ? await supabase.from('picklist_values').select('picklist_value, picklist_label').eq('id', ia.ia_record_type).maybeSingle()
+    : { data: null }
+
+  const [{ data: prop }, { data: bld }] = await Promise.all([
+    ia.property_id ? supabase.from('properties').select('*').eq('id', ia.property_id).maybeSingle() : Promise.resolve({ data: null }),
+    ia.building_id ? supabase.from('buildings').select('building_total_units, building_number_of_units').eq('id', ia.building_id).maybeSingle() : Promise.resolve({ data: null }),
+  ])
+
+  const acctIds = [ia.ia_owner, ia.ia_contractor_account_id, ia.ia_support_contractor_account_id]
+    .filter(v => v && UUID.test(String(v)))
+  const { data: accts } = acctIds.length
+    ? await supabase.from('accounts').select('id, account_name').in('id', acctIds) : { data: [] }
+  const acctName = id => (accts || []).find(a => a.id === id)?.account_name || null
+
+  const contractor = acctName(ia.ia_contractor_account_id) || ia.ia_primary_contractor_business_name || ''
+  const secondaryContractor = ia.ia_has_support_contractor
+    ? (acctName(ia.ia_support_contractor_account_id) || '') : ''
+
+  // Contact: prefer the named signer, else the business-entity contact on the IA.
+  let contactName = ia.ia_business_entity_name_contact_name || ''
+  let contactTitle = ''
+  if (ia.ia_signer_contact_id && UUID.test(String(ia.ia_signer_contact_id))) {
+    const { data: c } = await supabase.from('contacts')
+      .select('contact_name, contact_title, contact_first_name, contact_last_name')
+      .eq('id', ia.ia_signer_contact_id).maybeSingle()
+    if (c) {
+      contactName = c.contact_name || [c.contact_first_name, c.contact_last_name].filter(Boolean).join(' ') || contactName
+      contactTitle = c.contact_title || ''
+    }
+  }
+
+  const units = toInt(ia.ia_occupied_units) || toInt(ia.ia_units_per_building)
+    || toInt(bld?.building_total_units) || toInt(bld?.building_number_of_units)
+    || toInt(prop?.property_total_units) || toInt(prop?.property_total_number_of_units) || null
+  const csz = [prop?.property_city,
+    [prop?.property_state, prop?.property_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+  const ownerName = ia.ia_property_owner_name || ia.ia_building_owner_name
+    || (UUID.test(String(ia.ia_owner || '')) ? (acctName(ia.ia_owner) || '') : (ia.ia_owner || '')) || ''
+
+  const fields = {
+    pjOwner:       ownerName,
+    pjContact:     contactName,
+    pjContactTitle:contactTitle,
+    pjEmail:       ia.ia_applicant_building_owner_email || '',
+    pjPhone:       ia.ia_building_owner_mobile_phone || ia.ia_applicant_building_owner_office_phone || '',
+    pjPropName:    prop?.property_name || '',
+    pjInstallAddr: prop?.property_street || '',
+    pjCsz:         csz,
+    pjIQ:          prop?.property_ira_income_qualification_number || '',
+    pjProjInvNo:   ia.ia_record_number || '',
+    pjInvNo:       ia.ia_record_number || '',
+    pjInvDate:     new Date().toISOString().slice(0, 10),
+    pjSecondaryContractor: secondaryContractor || '',
+  }
+
+  // The Asset Score reports live on the opportunity's Project Reservation
+  // enrollment, not on the incentive record — traverse to them.
+  let baseDoc = null, impDoc = null
+  if (ia.opportunity_id) {
+    const { data: enrs } = await supabase.from('enrollments')
+      .select('id, enrollment_record_type').eq('opportunity_id', ia.opportunity_id)
+    const rtIds = [...new Set((enrs || []).map(e => e.enrollment_record_type).filter(Boolean))]
+    const { data: rts } = rtIds.length
+      ? await supabase.from('picklist_values').select('id, picklist_value').in('id', rtIds) : { data: [] }
+    const rtVal = id => (rts || []).find(r => r.id === id)?.picklist_value || null
+    const resEnr = (enrs || []).find(e => rtVal(e.enrollment_record_type) === HOMES_PROPOSAL_RECORD_TYPE)
+    if (resEnr) {
+      const docs = await listDocuments('enrollments', resEnr.id).catch(() => [])
+      ;({ baseDoc, impDoc } = pickAssetScoreDocs(docs))
+    }
+  }
+
+  return { ia, object: 'incentive_applications', recordTypeValue: rt?.picklist_value || null,
+    fields, units, contractor, secondaryContractor, baseDoc, impDoc, property: prop }
+}
+
+/**
+ * Generate a document for any supporting object. `object` is 'enrollments'
+ * (kinds 'proposal' | 'audit') or 'incentive_applications' (kind 'invoice').
+ * Throws with `.missing` when the record isn't ready.
+ */
+export async function generateHomesDocument({ object, id, kind }) {
+  const ctx = object === 'incentive_applications'
+    ? await loadPaymentRequestContext(id)
+    : await loadHomesProposalContext(id)
+  return renderFromContext(ctx, kind)
+}
+
+/** Load a document context for any supporting object (used to gate the UI). */
+export async function loadHomesDocumentContext({ object, id }) {
+  return object === 'incentive_applications'
+    ? await loadPaymentRequestContext(id)
+    : await loadHomesProposalContext(id)
+}
+
+/** Back-compat: generate one of an enrollment's documents. */
+export async function generateHomesProposal(enrollmentId, kind = 'proposal') {
+  return generateHomesDocument({ object: 'enrollments', id: enrollmentId, kind })
+}
+
+/** Save a generated document onto the record's Documents (any supporting object). */
+export async function saveHomesDocument({ object, id }, blob, fileName, documentType = 'homes_proposal') {
   const file = new File([blob], fileName, { type: 'application/pdf' })
   return uploadDocument({
     file,
-    relatedObject: 'enrollments',
-    relatedId:     enrollmentId,
+    relatedObject: object || 'enrollments',
+    relatedId:     id,
     documentType,
     name:          fileName,
   })
+}
+
+/** Back-compat wrapper. */
+export async function saveHomesProposalToRecord(enrollmentId, blob, fileName, documentType = 'homes_proposal') {
+  return saveHomesDocument({ object: 'enrollments', id: enrollmentId }, blob, fileName, documentType)
 }
