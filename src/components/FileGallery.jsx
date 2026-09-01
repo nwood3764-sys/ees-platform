@@ -39,6 +39,7 @@ import {
   freshDocumentUrlsBatch,
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
+import { applyFileDragOut, canDragOut } from '../lib/fileDragOut'
 import { isImageFile, isVideoFile, fileTypeLabel, extensionOf } from '../lib/fileKinds'
 import { uploadOutcomeMessages } from '../lib/galleryUploadOutcome'
 import { usePhotoRepair } from '../lib/usePhotoRepair'
@@ -342,28 +343,29 @@ export default function FileGalleryWidget({
   // card's rows when the tab returns to the foreground, which is when a long
   // absence ends. The batch helpers return the same array when every URL is
   // still good, so this is a no-op in the common case.
+  const resignStaleUrls = useCallback(async () => {
+    const current = itemsRef.current
+    if (!current || current.length === 0) return
+    const next = target === 'photos'
+      ? await freshPhotoUrlsBatch(current)
+      : await freshDocumentUrlsBatch(current)
+    // Identity change means something was actually re-signed; and only
+    // apply it if the card has not loaded a different set meanwhile.
+    if (next !== current && itemsRef.current === current) setItems(next)
+  }, [target])
+
   useEffect(() => {
-    let cancelled = false
-    async function resignIfStale() {
+    const onForeground = () => {
       if (document.visibilityState === 'hidden') return
-      const current = itemsRef.current
-      if (!current || current.length === 0) return
-      const next = target === 'photos'
-        ? await freshPhotoUrlsBatch(current)
-        : await freshDocumentUrlsBatch(current)
-      // Identity change means something was actually re-signed; and only
-      // apply it if the card has not loaded a different set meanwhile.
-      if (!cancelled && next !== current && itemsRef.current === current) setItems(next)
+      resignStaleUrls().catch(() => {})
     }
-    const onForeground = () => { resignIfStale().catch(() => {}) }
     window.addEventListener('focus', onForeground)
     document.addEventListener('visibilitychange', onForeground)
     return () => {
-      cancelled = true
       window.removeEventListener('focus', onForeground)
       document.removeEventListener('visibilitychange', onForeground)
     }
-  }, [target])
+  }, [resignStaleUrls])
 
   // Work-order gallery: the two filter dropdowns. A photo carries a work step
   // (where it was captured) and a tag (what it shows) — both are worth
@@ -461,6 +463,35 @@ export default function FileGalleryWidget({
       toast.error(`Download failed: ${e.message || e}`)
     }
   }
+
+  // ── Drag a file out of LEAP ──────────────────────────────────────────
+  // Nicholas (2026-09-01), on the Focus on Energy payment request Jotform:
+  // "have the user click and drag the file from LEAP over to the JotForm.
+  // Currently, I can't drag files off of LEAP."
+  //
+  // A file upload is the one field on an external form that no pre-filled URL
+  // can reach — a page is not allowed to put bytes into a file input — so the
+  // supporting documents travel by hand. Until now the only route was
+  // download, then find the download, then browse to it in the other tab.
+  //
+  // `dragstart` is SYNCHRONOUS: it cannot await a re-sign, and a signed URL
+  // lives an hour while a record page stays open far longer. So the re-sign
+  // happens on HOVER — the last moment before a gesture where there is still
+  // time to do work — and is a no-op whenever the URLs are still good. A row
+  // whose URL is spent is simply not draggable, rather than dragging a file
+  // the browser will fail to fetch after the drop.
+  const fileDragSource = (row) => (target === 'photos'
+    ? { fileName: photoFileName(row), url: row._thumbUrl || row._originalUrl, mimeType: row.mime_type }
+    : { fileName: documentFileName(row), url: row._url || row._previewUrl, mimeType: row.mime_type })
+
+  const handleFileDragStart = (e, row) => {
+    applyFileDragOut(e.dataTransfer, fileDragSource(row))
+  }
+  // Every row's URL is re-signed together, so hovering the list once keeps the
+  // whole card draggable rather than re-signing row by row as the pointer
+  // moves across it.
+  const handleFileDragHover = () => { resignStaleUrls().catch(() => {}) }
+  const canDragRowOut = (row) => canDragOut(fileDragSource(row).url)
 
   // Toggle the internal "include in final report" flag. Optimistic — flips the
   // local row immediately, reverts on failure. Not shown on the watermark.
@@ -1061,6 +1092,9 @@ export default function FileGalleryWidget({
                 <PhotoGrid
                   photos={visiblePhotos}
                   renderingIds={renderingIds}
+                  onDragStartFile={handleFileDragStart}
+                  onDragHover={handleFileDragHover}
+                  canDragRow={canDragRowOut}
                   isMobile={isMobile}
                   showStepTag={isWorkOrderPhotoGallery}
                   selectMode={selectMode}
@@ -1104,6 +1138,9 @@ export default function FileGalleryWidget({
                 <DocumentList
                   documents={visibleItems}
                   isMobile={isMobile}
+                  onDragStartFile={handleFileDragStart}
+                  onDragHover={handleFileDragHover}
+                  canDragRow={canDragRowOut}
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
@@ -1639,7 +1676,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
 // false for work_steps, so the flag was correctly withheld — and the button was
 // drawn anyway, and crashed the record page to the error screen the moment he
 // flagged the video he had just uploaded. Pass the null through.
-function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
+function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete, onDragStartFile, onDragHover, canDragRow }) {
   return (
     <div style={{
       display: 'grid',
@@ -1660,13 +1697,16 @@ function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, se
           rendering={!!renderingIds?.has(p.id)}
           onReprocess={() => onReprocess(p.id)}
           onDelete={() => onDelete(p)}
+          onDragStartFile={onDragStartFile ? (e) => onDragStartFile(e, p) : null}
+          onDragHover={onDragHover}
+          canDrag={canDragRow ? canDragRow(p) : false}
         />
       ))}
     </div>
   )
 }
 
-function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
+function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete, onDragStartFile, onDragHover, canDrag }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
   // process-photo writes 'pending' | 'processing' | 'done' | 'skipped' |
@@ -1682,9 +1722,15 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
   const kindLabel = fileTypeLabel(source, photo.mime_type)
   const failedWithImage = status === 'failed' && !!url
   const [hover, setHover] = useState(false)
+  // Same drag-out rule as a document row. The tile is the drag handle, not the
+  // <img> inside it: a bare image drag carries the picture, and what a program
+  // wants is the evidence FILE, watermarked and with its EXIF intact.
+  const dragOut = !selectMode && canDrag && !!onDragStartFile
   return (
     <div
-      onMouseEnter={() => setHover(true)}
+      draggable={dragOut}
+      onDragStart={dragOut ? onDragStartFile : undefined}
+      onMouseEnter={() => { setHover(true); onDragHover?.() }}
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'relative',
@@ -1718,6 +1764,9 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
           src={url}
           alt={photo.caption || photo.photo_number || 'photo'}
           loading="lazy"
+          // An <img> is draggable by default and would carry the picture,
+          // beating the tile to the gesture. The tile drags the file.
+          draggable={false}
           style={{
             width: '100%', height: '100%',
             objectFit: 'cover', display: 'block',
@@ -1982,7 +2031,7 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, r
 }
 
 // Same null-through rule as PhotoGrid above.
-function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
+function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete, onDragStartFile, onDragHover, canDragRow }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {documents.map((d) => (
@@ -1997,13 +2046,16 @@ function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSe
           onDownload={() => onDownload(d)}
           onToggleReport={onToggleReport ? () => onToggleReport(d) : null}
           onDelete={() => onDelete(d)}
+          onDragStartFile={onDragStartFile ? (e) => onDragStartFile(e, d) : null}
+          onDragHover={onDragHover}
+          canDrag={canDragRow ? canDragRow(d) : false}
         />
       ))}
     </div>
   )
 }
 
-function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
+function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete, onDragStartFile, onDragHover, canDrag }) {
   const [hover, setHover] = useState(false)
   const ext = (doc.name || '').split('.').pop()?.toLowerCase() || ''
   const iconPath = ext === 'pdf'
@@ -2030,9 +2082,16 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
   }
   const clickable = selectMode || !!doc._url
 
+  // The row is dragged out as the FILE, not as a link — a program's upload
+  // field takes the file. Never while selecting: the row is a checkbox then,
+  // and a drag would fight the selection being built.
+  const dragOut = !selectMode && canDrag && !!onDragStartFile
+
   return (
     <div
-      onMouseEnter={() => setHover(true)}
+      draggable={dragOut}
+      onDragStart={dragOut ? onDragStartFile : undefined}
+      onMouseEnter={() => { setHover(true); onDragHover?.() }}
       onMouseLeave={() => setHover(false)}
       onClick={open}
       style={{
