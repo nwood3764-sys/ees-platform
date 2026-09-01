@@ -66,19 +66,21 @@ export async function fetchResearchTarget(tableName, recordId) {
   }
   const { data, error } = await supabase
     .from('properties')
-    .select('id, property_name, property_city, property_state, property_website, property_account_id, property_hud_owner_org, accounts:property_account_id (account_name, account_website)')
+    .select('id, property_name, property_city, property_state, property_website, property_account_id, accounts:property_account_id (account_name, account_website)')
     .eq('id', recordId).maybeSingle()
   if (error || !data) throw new Error(error?.message || 'Property not found')
   const account = data.accounts || null
-  // The CRM account wins unless it's a placeholder ("Unknown Owner"), in
-  // which case fall back to the HUD-listed owner org; if that's missing too,
-  // the owner is genuinely unknown and web research pivots to identifying it
-  // from the property itself.
+  // The owner is the CRM account, and only the CRM account (Nicholas,
+  // 2026-09-01). The HUD owner org used to stand in when the account was a
+  // placeholder, but seeding the research with a name from the HUD import is
+  // the worst place to trust it: it anchors the whole run on a possibly
+  // superseded owner and then writes that name onto the request record. With no
+  // researchable account the owner is genuinely unknown, which is a state this
+  // tool already handles — web research pivots to identifying the owner from the
+  // property itself, which is what it is for.
   let companyName = null
   if (account?.account_name && !isPlaceholderOrgName(account.account_name)) {
     companyName = account.account_name
-  } else if (data.property_hud_owner_org && !isPlaceholderOrgName(data.property_hud_owner_org)) {
-    companyName = data.property_hud_owner_org
   }
   return {
     propertyId: data.id,
