@@ -7058,7 +7058,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
   const [showSubmittedEnrollmentModal, setShowSubmittedEnrollmentModal] = useState(false)
-  const [showHomesProposalModal, setShowHomesProposalModal] = useState(false)
+  const [homesModalKind, setHomesModalKind] = useState(null)   // null | 'proposal' | 'invoice' | 'audit'
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -9413,7 +9413,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
-    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setShowHomesProposalModal(true),
+    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setHomesModalKind('proposal'),
+    [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setHomesModalKind('invoice'),
+    [ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE]:   () => setHomesModalKind('audit'),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
@@ -10336,11 +10338,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           />
         )}
 
-        {/* WI IRA Multifamily HOMES Project Reservation proposal (enrollments only) */}
-        {showHomesProposalModal && tableName === 'enrollments' && (
+        {/* WI IRA Multifamily HOMES Project Reservation documents — proposal,
+            payment-request invoice, assessment invoice (enrollments only) */}
+        {homesModalKind && tableName === 'enrollments' && (
           <HomesProposalModal
             enrollmentId={recordId}
-            onClose={() => setShowHomesProposalModal(false)}
+            kind={homesModalKind}
+            onClose={() => setHomesModalKind(null)}
             onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}

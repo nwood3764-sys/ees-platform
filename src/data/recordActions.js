@@ -69,6 +69,8 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_ENERGY_ASSESSMENT_REPORT:        'generate_energy_assessment_report',
   GENERATE_SUBMITTED_ENROLLMENT:               'generate_submitted_enrollment',
   GENERATE_HOMES_PROPOSAL:                     'generate_homes_proposal',
+  GENERATE_HOMES_PAYMENT_INVOICE:              'generate_homes_payment_invoice',
+  GENERATE_HOMES_ASSESSMENT_INVOICE:           'generate_homes_assessment_invoice',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
   GENERATE_ASSESSMENT_APPLICATION:          'generate_assessment_application',
   GENERATE_PAYMENT_REQUEST_APPLICATION:     'generate_payment_request_application',
@@ -454,6 +456,32 @@ export const ACTION_REGISTRY = Object.freeze({
     applicableObjects:   ['enrollments'],
     defaultTier:         'menu',
     defaultSortOrder:    45,
+    isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
+      !editing && !!record?.id && tableName === 'enrollments'
+      && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
+  },
+
+  generate_homes_payment_invoice: {
+    key:                 ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE,
+    label:               'Generate Payment Request Invoice',
+    icon:                'M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6 M8 13h8 M8 17h5',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'menu',
+    defaultSortOrder:    46,
+    isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
+      !editing && !!record?.id && tableName === 'enrollments'
+      && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
+  },
+
+  generate_homes_assessment_invoice: {
+    key:                 ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE,
+    label:               'Generate Assessment Invoice',
+    icon:                'M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6 M8 13h8 M8 17h5',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'menu',
+    defaultSortOrder:    47,
     isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
       !editing && !!record?.id && tableName === 'enrollments'
       && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',

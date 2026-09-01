@@ -555,6 +555,8 @@ function invoiceModel(){
   // (cheap); only the NC documents render the two columns.
   rows.forEach(r=>{r.material=Math.floor(r.cost*50)/100; r.labor=Math.round((r.cost-r.material)*100)/100;});
   return {units,roofSqFt,baseAtticR,iMin,savings,state,tier,homesAmt,foe,foeAmt,total,rows,
+    euiBase:(asB&&asB.euiCurrent!=null)?asB.euiCurrent:null,
+    euiImp:(asI&&asI.euiUpgraded!=null)?asI.euiUpgraded:null,
     fields:{..._fields}};
 }
 
@@ -621,7 +623,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   // EES is the Primary IRA Contractor (name + phone follow the document's state,
   // like the footer), so the contractor block is Energy Efficiency Services'.
   const cLines=['Energy Efficiency Services of '+_state,'112 Owen Rd. PO Box 6141','Monona, WI 53716',
-    _phone(m.state==='NC'?'7049905614':'6084607419')].filter(v=>v&&String(v).trim());
+    _phone(m.state==='NC'?'7049905614':'6084607419'),
+    (F.pjSecondaryContractor?('Support Contractor: '+F.pjSecondaryContractor):'')].filter(v=>v&&String(v).trim());
   const lLines=[F.pjInstallAddr,F.pjCsz,'Multi-Family',
     (m.units?('Total Units: '+m.units):''),
     (F.pjIQ?('Income Qualification Number: '+F.pjIQ):'')].filter(v=>v&&String(v).trim());
@@ -875,7 +878,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   bh('Primary IRA Contractor:',M,st.y);
   bh('Project Information:',CX2,st.y);
   bh('Customer Information:',CX3,st.y,'right');
-  let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593',_phone('(949) 832-6798')],M,st.y+13);
+  let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593',_phone('(949) 832-6798'),
+    (F.pjSecondaryContractor?('Support Contractor: '+F.pjSecondaryContractor):'')].filter(v=>v&&String(v).trim()),M,st.y+13);
   let y2=lines9(projInfo,CX2,st.y+13);
   let y3=lines9(ci,CX3,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
