@@ -10394,11 +10394,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           />
         )}
 
-        {/* WI IRA Multifamily HOMES Project Reservation documents — proposal,
-            payment-request invoice, assessment invoice (enrollments only) */}
-        {homesModalKind && tableName === 'enrollments' && (
+        {/* WI IRA Multifamily HOMES documents — proposal + assessment invoice on
+            enrollments, payment-request invoice on incentive applications. Each
+            action is gated to its own object + record type in recordActions. */}
+        {homesModalKind && (tableName === 'enrollments' || tableName === 'incentive_applications') && (
           <HomesProposalModal
-            enrollmentId={recordId}
+            recordObject={tableName}
+            recordId={recordId}
             kind={homesModalKind}
             onClose={() => setHomesModalKind(null)}
             onSaved={() => { setReloadTick(t => t + 1) }}

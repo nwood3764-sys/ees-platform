@@ -461,19 +461,27 @@ export const ACTION_REGISTRY = Object.freeze({
       && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
   },
 
+  // The Final Project Payment Request invoice belongs to the INCENTIVE
+  // application (the payment-request record type), not the enrollment — same
+  // object + record type the Open Payment Request Application action uses. Its
+  // Asset Score inputs are traversed from the opportunity's Project Reservation
+  // enrollment.
   generate_homes_payment_invoice: {
     key:                 ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE,
     label:               'Generate Payment Request Invoice',
     icon:                'M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6 M8 13h8 M8 17h5',
     color:               ACTION_COLORS.EMERALD,
-    applicableObjects:   ['enrollments'],
+    applicableObjects:   ['incentive_applications'],
     defaultTier:         'menu',
     defaultSortOrder:    46,
-    isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
-      !editing && !!record?.id && tableName === 'enrollments'
-      && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
+    isAvailable: ({ tableName, editing, record, recordTypeLabel }) =>
+      !editing && !!record?.id && tableName === 'incentive_applications'
+      && recordTypeLabel === 'WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST',
   },
 
+  // The Multifamily Energy Assessment invoice belongs to the assessment
+  // enrollment record type (Assessment Pre-Approval), not Project Reservation.
+  // It is fixed-price and reads no Asset Score.
   generate_homes_assessment_invoice: {
     key:                 ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE,
     label:               'Generate Assessment Invoice',
@@ -484,7 +492,7 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    47,
     isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
       !editing && !!record?.id && tableName === 'enrollments'
-      && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
+      && recordTypeValue === 'WI-IRA-MF-HOMES-Assessment-Preapproval',
   },
 
   generate_energy_assessment_report: {
