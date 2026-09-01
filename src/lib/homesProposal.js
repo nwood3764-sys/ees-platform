@@ -878,8 +878,13 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   bh('Primary IRA Contractor:',M,st.y);
   bh('Project Information:',CX2,st.y);
   bh('Customer Information:',CX3,st.y,'right');
-  let y1=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593',_phone('(949) 832-6798'),
-    (F.pjSecondaryContractor?('Support Contractor: '+F.pjSecondaryContractor):'')].filter(v=>v&&String(v).trim()),M,st.y+13);
+  // Wrap the contractor column to its own width (up to the Project Information
+  // column) so a long support-contractor name can't bleed into the next column.
+  const cW1=CX2-M-8;
+  const contractorLines=['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593',_phone('(949) 832-6798'),
+    (F.pjSecondaryContractor?('Support Contractor: '+F.pjSecondaryContractor):'')]
+    .filter(v=>v&&String(v).trim()).flatMap(v=>wrap(String(v),cW1));
+  let y1=lines9(contractorLines,M,st.y+13);
   let y2=lines9(projInfo,CX2,st.y+13);
   let y3=lines9(ci,CX3,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
