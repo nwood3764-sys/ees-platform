@@ -7615,6 +7615,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const tabsFromData = () =>
     data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
 
+  // The status paths this layout renders, and the lifecycle columns they
+  // cover. The transitions bar stands down for those columns so one status is
+  // announced by one card. Hoisted above the loading returns — a hook below a
+  // return is minified error #310.
+  const statusPathWidgets = useMemo(
+    () => (data?.sections || []).flatMap(
+      sec => (sec.widgets || []).filter(w => w.widget_type === 'status_path')
+    ),
+    [data?.sections]
+  )
+  const statusPathFields = useMemo(
+    () => statusPathWidgets.map(w => w.widget_config?.status_field).filter(Boolean),
+    [statusPathWidgets]
+  )
+
   // When data first loads (or when the loaded record changes tables),
   // pick the active tab. Honors a ?tab= deep link / restored history entry
   // when this record is the URL-addressed one; otherwise the first tab.
@@ -9883,30 +9898,32 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             when the object has no lifecycle configured. Multiple status_path
             widgets per layout are supported (e.g. work_orders has both
             work_order_status and work_order_approval_status). */}
-        {!isInsertMode && !editing && sections
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'status_path'))
-          .map(w => (
-            <StatusPathWidget
-              key={w.id}
-              widget={w}
-              parentRecordId={recordId}
-              tableName={tableName}
-              record={record}
-              onStatusChanged={() => setReloadTick(t => t + 1)}
-            />
-          ))}
+        {!isInsertMode && !editing && statusPathWidgets.map(w => (
+          <StatusPathWidget
+            key={w.id}
+            widget={w}
+            parentRecordId={recordId}
+            tableName={tableName}
+            record={record}
+            onStatusChanged={() => setReloadTick(t => t + 1)}
+          />
+        ))}
 
         {/* Status transitions bar — surfaces outgoing transitions for the
             record's current status as one-click action buttons. Calls the
             change_record_status RPC, which validates the move server-side
             against status_transitions. Self-suppresses when the table has
             no lifecycle configured, when the record is in edit mode, or
-            when the current status is terminal (no outgoing transitions). */}
+            when the current status is terminal (no outgoing transitions).
+            It also stands down for a field a status path above already
+            renders — the path carries those same buttons in its own card,
+            and two cards announcing one status read as a bug. */}
         <StatusTransitionsBar
           tableName={tableName}
           recordId={recordId}
           record={record}
           editing={editing}
+          suppressForFields={statusPathFields}
           onStatusChanged={() => setReloadTick(t => t + 1)}
         />
 

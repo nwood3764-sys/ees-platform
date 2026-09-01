@@ -6,3 +6,6 @@ dist/
 .env.local
 .env.*.local
 .scratch/
+
+# Screenshots written by the tools/*-check browser harnesses
+tools/*-check/*.png

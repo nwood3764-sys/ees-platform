@@ -24,12 +24,16 @@
 // surfaces them this way too; the user sees the full universe of possible
 // states, not a filtered "happy path."
 //
-// Clickability: every chevron is clickable. Clicking a stage calls the
-// change_record_status RPC, which validates the move server-side against
-// status_transitions. Illegal jumps return an error (surfaced as a toast);
-// legal moves persist and trigger a record reload. This matches Salesforce
-// Path behavior — every stage is clickable; validation rules enforce what's
-// actually permitted.
+// Clickability: the chevrons are a read-out, not a control. Advancing the
+// record is done with the transition buttons the widget renders underneath,
+// which are the moves status_transitions actually permits from where the
+// record stands — a chevron you can click but that the server will refuse is
+// not a control, it is a trap.
+//
+// Labels: a stage carries only what distinguishes it from its siblings. LEAP
+// names statuses "[Object] [State]", so the object half is dropped when every
+// stage on the strip shares it (src/lib/statusPathLabels.js). The full label
+// is the hover title and the line under the strip.
 //
 // Configured per page layout via widget_config:
 //   status_field         text  — which status column to render
@@ -41,12 +45,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { getRecordTypeValue } from '../data/layoutService'
+import { sharedStatusLabelPrefix, shortStatusLabel } from '../lib/statusPathLabels'
+import StatusTransitionsBar from './StatusTransitionsBar'
 
 // Display-only chevron. The strip is a visual status indicator, not a
-// control — chevrons are never clickable. Stage advancement is driven by
-// field-triggered lifecycle transitions, never by a user clicking a stage.
+// control — chevrons are never clickable. Stage advancement goes through the
+// transition buttons below the strip, which are validated server-side.
 function ChevronSegment({
-  label, state /* 'complete' | 'current' | 'future' */,
+  label, fullLabel, state /* 'complete' | 'current' | 'future' */,
   isFirst, isLast,
 }) {
   const palette = {
@@ -64,36 +70,55 @@ function ChevronSegment({
     return 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%)'
   })()
 
-  // Only the active (current) stage is maximized: it sizes to its full label
-  // so the text is always readable. Every other stage is minimized — it
-  // compresses to share the remaining width and truncates with an ellipsis.
   const isCurrent = state === 'current'
 
+  // Every stage is sized to its own label and the strip WRAPS when the row is
+  // full, so a nine-stage lifecycle is nine readable stages rather than nine
+  // 89px slivers sharing the leftovers of whichever one is current. Stages do
+  // not grow into the spare width: a wrapped row holding two stages would
+  // stretch them to half the card each, which reads as two enormous stages
+  // rather than the tail of a path. `minWidth: max-content` is what holds the
+  // label intact — without it flexbox shrinks the item below its text and the
+  // label is clipped at BOTH ends (a centered flex child does not take
+  // `text-overflow`, so there is not even an ellipsis to say something was
+  // cut).
   return (
     <div
-      title={label}
+      data-chevron
+      title={fullLabel}
       style={{
-        flex: isCurrent ? '0 0 auto' : '1 1 0',
-        minWidth: isCurrent ? 'auto' : 0,
+        flexGrow: 0,
+        flexShrink: 1,
+        flexBasis: 'auto',
+        minWidth: 'max-content',
+        maxWidth: '100%',
+        boxSizing: 'content-box',
         height: 36,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: `0 ${isLast ? 14 : 18}px 0 ${isFirst ? 14 : 22}px`,
+        padding: `0 ${isLast ? 14 : 20}px 0 ${isFirst ? 14 : 24}px`,
         background: palette.bg,
         color: palette.text,
         clipPath: clip,
         fontSize: 12,
         fontWeight: isCurrent ? 700 : 500,
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
         marginLeft: isFirst ? 0 : -2,
         textAlign: 'center',
         userSelect: 'none',
       }}
     >
-      {label}
+      {/* The label is its own box so that, in the one case the chevron still
+          cannot hold it (a long stage on a phone), it truncates at the END
+          with an ellipsis instead of losing both ends. */}
+      <span style={{
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {label}
+      </span>
     </div>
   )
 }
@@ -147,6 +172,15 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
     [picklistValues, currentStatusId]
   )
 
+  // The words every stage on THIS strip shares — dropped from the chevrons so
+  // each one shows what makes it different. Derived from the stage set that
+  // actually rendered, so a record type with a narrower stage list gets the
+  // prefix its own stages share, not the object's whole picklist.
+  const sharedPrefix = useMemo(
+    () => sharedStatusLabelPrefix((picklistValues || []).map(p => p.picklist_label)),
+    [picklistValues]
+  )
+
   if (picklistValues === null) return null
   if (picklistValues.length === 0) return null
 
@@ -183,7 +217,13 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        flexWrap: 'wrap',
+        rowGap: 4,
+        width: '100%',
+      }}>
         {picklistValues.map((stage, idx) => {
           let state
           if (currentIdx < 0)        state = 'future'   // unknown current — nothing filled
@@ -194,7 +234,8 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
           return (
             <ChevronSegment
               key={stage.id}
-              label={stage.picklist_label}
+              label={shortStatusLabel(stage.picklist_label, sharedPrefix)}
+              fullLabel={stage.picklist_label}
               state={state}
               isFirst={idx === 0}
               isLast={idx === picklistValues.length - 1}
@@ -245,6 +286,20 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
           {nextTransitionDescription}
         </div>
       )}
+
+      {/* The moves permitted from here. They live INSIDE the path card because
+          the path is where a user reads the lifecycle — a second card
+          announcing the same status next to this one is what made the control
+          unrecognisable. Renders nothing when the stage is terminal. */}
+      <StatusTransitionsBar
+        embedded
+        statusField={statusField}
+        tableName={tableName}
+        recordId={parentRecordId}
+        record={record}
+        editing={false}
+        onStatusChanged={onStatusChanged}
+      />
     </div>
   )
 }
