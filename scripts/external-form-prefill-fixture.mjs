@@ -101,10 +101,13 @@ const IA_00042 = {
   contractor_phone: '5152978316', contractor_email: 'ira@EES-WI.org',
 }
 
-// The one required answer nobody has given yet must be reported, and it must be
-// the ONLY thing reported — anything else in this list would be a false alarm
-// that stops the assessor opening a form they could have submitted.
-eq('exactly one required field is outstanding',
+// A required answer that is genuinely absent must be reported, and it must be
+// the ONLY thing reported — anything else would be a false alarm that stops the
+// assessor opening a form they could have submitted. (On a real record this
+// particular one is now derived: an application is always one building, so
+// trg_3_ia_single_building_answer answers it No. The check stays because the
+// REPORTING rule is what is under test, not this record's state.)
+eq('a genuinely blank required answer is the only thing reported',
   JSON.stringify(findMissingRequiredFields(IA_00042, FIELDS)),
   JSON.stringify(['Requesting incentives for more than one property or unit owned by the same person or entity?']))
 
