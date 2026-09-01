@@ -69,6 +69,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_ENERGY_ASSESSMENT_REPORT:        'generate_energy_assessment_report',
   GENERATE_SUBMITTED_ENROLLMENT:               'generate_submitted_enrollment',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
+  GENERATE_ASSESSMENT_APPLICATION:          'generate_assessment_application',
   GENERATE_PAYMENT_REQUEST_APPLICATION:     'generate_payment_request_application',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
@@ -313,11 +314,29 @@ export const ACTION_REGISTRY = Object.freeze({
     isAvailable: ({ tableName, editing, recordTypeLabel }) =>
       !editing && tableName === 'enrollments' && recordTypeLabel === 'WI-IRA-MF-HOMES-Assessment-Preapproval',
   },
-  // Open the Focus On Energy IRA HOMES Project Submittal Form (hosted on
-  // Jotform), pre-filled from THIS payment request. Same data-driven route as
-  // the pre-approval button — the target URL and every field's Jotform
-  // parameter live in external_form_targets / external_form_field_map — so the
-  // only thing that differs is which target key it opens.
+  // Open the Focus On Energy IRA assessment application (the rebate CLAIM, filed
+  // after the assessment is done), pre-filled from THIS incentive application.
+  // The sibling of generate_preapproval_application above: same mechanism, same
+  // host, a different form with its own field ids — and a different stage, which
+  // is why it hangs off the incentive application rather than the enrollment.
+  // Gated to WI-IRA-MF-HOMES-AUDIT, the only record type whose branch of that
+  // (conditional) form is mapped.
+  generate_assessment_application: {
+    key:                 ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION,
+    label:               'Open Assessment Application',
+    icon:                'M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5M15 3h6m0 0v6m0-6L10 14',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['incentive_applications'],
+    defaultTier:         'primary',
+    defaultSortOrder:    23,
+    isAvailable: ({ tableName, editing, recordTypeLabel }) =>
+      !editing && tableName === 'incentive_applications' && recordTypeLabel === 'WI-IRA-MF-HOMES-AUDIT',
+  },
+  // Open the Focus On Energy IRA HOMES Multifamily Project Submittal Form
+  // (hosted on Jotform), pre-filled from THIS payment request. The third form
+  // on the same data-driven route: the target URL and every field's parameter
+  // live in external_form_targets / external_form_field_map, so the only thing
+  // that differs from the two above is which target key it opens.
   generate_payment_request_application: {
     key:                 ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION,
     label:               'Open Payment Request Application',
@@ -325,7 +344,7 @@ export const ACTION_REGISTRY = Object.freeze({
     color:               ACTION_COLORS.EMERALD,
     applicableObjects:   ['incentive_applications'],
     defaultTier:         'primary',
-    defaultSortOrder:    23,
+    defaultSortOrder:    24,
     isAvailable: ({ tableName, editing, recordTypeLabel }) =>
       !editing && tableName === 'incentive_applications'
         && recordTypeLabel === 'WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST',

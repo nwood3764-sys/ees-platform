@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
 import { useRecharts } from '../lib/RechartsLazy'
-import { C, CHART_COLORS, fmt } from '../data/constants'
+import { C, CHART_COLORS, seriesColor, fmt } from '../data/constants'
 import { Badge, Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
@@ -154,7 +154,7 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
               <R.ResponsiveContainer width={130} height={130}>
                 <R.PieChart>
                   <R.Pie data={invByFamily} cx="50%" cy="50%" innerRadius={32} outerRadius={60} dataKey="value" strokeWidth={0}>
-                    {invByFamily.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    {invByFamily.map((_, i) => <R.Cell key={i} fill={seriesColor(i)} />)}
                   </R.Pie>
                 </R.PieChart>
               </R.ResponsiveContainer>
@@ -162,7 +162,7 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
                 {invByFamily.map((d, i) => (
                   <div key={d.name} style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ width:8, height:8, borderRadius:2, background:CHART_COLORS[i % CHART_COLORS.length] }} />
+                      <span style={{ width:8, height:8, borderRadius:2, background:seriesColor(i) }} />
                       <span style={{ fontSize:11, color:C.textSecondary }}>{d.name}</span>
                     </div>
                     <span style={{ fontSize:12, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace' }}>{d.value.toLocaleString()}</span>

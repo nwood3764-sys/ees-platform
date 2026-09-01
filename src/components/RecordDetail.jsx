@@ -52,8 +52,8 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
-import { openAssessmentPreapprovalForm, loadAssessmentPrefill, findMissingRequiredFields,
-         WI_IRA_PAYMENT_REQUEST_KEY } from '../data/preapprovalPrefill'
+import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, openPaymentRequestForm,
+         loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -6883,23 +6883,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Required fields still blank when the user tried to open the pre-approval
   // form. Non-empty → the completion modal is shown and the form is NOT opened.
   const [preapprovalMissing, setPreapprovalMissing] = useState(null)
-  // Open the Project Payment Request Jotform, pre-filled from this record. Same
-  // opener, same completeness gate, same missing-fields dialog as the
-  // pre-approval button — only the target key differs, because everything about
-  // the form lives in external_form_targets / external_form_field_map.
+  // Open the Project Payment Request Jotform, pre-filled from this record —
+  // the sibling of the two openers above, on the third form.
   const [openingPaymentRequest, setOpeningPaymentRequest] = useState(false)
   const handleOpenPaymentRequestForm = useCallback(async () => {
     if (openingPaymentRequest) return
     const win = window.open('', '_blank')
     setOpeningPaymentRequest(true)
     try {
-      const { error, missing } = await openAssessmentPreapprovalForm(
-        recordId, win, WI_IRA_PAYMENT_REQUEST_KEY)
+      const { url, error, missing } = await openPaymentRequestForm(recordId, win)
       if (missing && missing.length) {
-        try { win?.close() } catch { /* the tab may already be gone */ }
+        if (win) win.close()
         setPreapprovalMissing(missing)
-      } else if (error) {
-        try { win?.close() } catch { /* the tab may already be gone */ }
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
         window.alert(error || 'Could not open the payment request application.')
       }
     } finally {
@@ -6928,6 +6927,31 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setOpeningPreapproval(false)
     }
   }, [recordId, openingPreapproval])
+
+  // The assessment rebate claim, from the WI-IRA-MF-HOMES-AUDIT incentive
+  // application. Same shape as the pre-approval handler above and it shares the
+  // same missing-fields modal — the gate is the form's own required set either
+  // way, so there is one place that explains an incomplete record.
+  const [openingApplication, setOpeningApplication] = useState(false)
+  const handleOpenAssessmentApplication = useCallback(async () => {
+    if (openingApplication) return
+    const win = window.open('', '_blank')
+    setOpeningApplication(true)
+    try {
+      const { url, error, missing } = await openAssessmentApplicationForm(recordId, win)
+      if (missing && missing.length) {
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the assessment application.')
+      }
+    } finally {
+      setOpeningApplication(false)
+    }
+  }, [recordId, openingApplication])
 
   // ── Record locking ─────────────────────────────────────────────────────
   // A record is locked once its status reaches a value flagged
@@ -9388,6 +9412,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
+    [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
@@ -9416,6 +9441,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const topbarPendingByKey = {
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: openingPreapproval,
+    [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: openingApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: openingPaymentRequest,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
     [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
@@ -10171,9 +10197,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 </div>
               </div>
               <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
-                The Focus On Energy pre-approval form can't be submitted until every required
-                field has a value. These are still blank on this enrollment (or its property,
-                building, and contractor records they're inherited from):
+                The Focus On Energy form can't be submitted until every required field has a
+                value. These are still blank on this record (or on the property, building and
+                contractor records they're inherited from):
               </div>
             </div>
             <div style={{ padding: '12px 20px' }}>

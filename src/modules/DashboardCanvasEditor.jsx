@@ -20,6 +20,8 @@ import LeapCanvas from '../builder/LeapCanvas'
 import SortableList from '../builder/SortableList'
 import { dashboardRegistry } from '../builder/registries/dashboardRegistry'
 import { loadDashboardForCanvas, saveDashboardFromCanvas } from '../builder/adapters/dashboardAdapter'
+import { describeDashboardFilterObjects } from '../data/reportsService'
+import { buildFieldMap, filterCoverage, filterColumnForObject } from '../lib/dashboardFilterFields'
 
 const FILTER_OPS = [
   'equals','not_equals','greater_than','less_than','greater_or_equal','less_or_equal',
@@ -93,20 +95,30 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
   // hook after a conditional return changes the hook count between the loading
   // and loaded renders (React "Rendered more/fewer hooks" crash). `loaded` is
   // null until the load resolves, so the optional chaining keeps it safe.
-  const fieldSuggestions = useMemo(() => {
-    const set = new Set()
-    for (const c of (loaded?.components || [])) {
-      const cfg = c.config || c.props || c.dw_widget_config || {}
-      for (const k of ['group_by', 'series_by', 'measure_field', 'date_field', 'filter_field']) {
-        if (cfg[k]) set.add(cfg[k])
-      }
-      if (Array.isArray(cfg.columns)) for (const col of cfg.columns) {
-        if (typeof col === 'string') set.add(col)
-        else if (col?.name) set.add(col.name)
-      }
-    }
-    return Array.from(set).sort()
-  }, [loaded])
+  // The objects this dashboard's widgets report on, with their real columns —
+  // what a filter is authored against. Keyed by the set of report ids so it
+  // re-resolves when a widget is added or repointed during the session.
+  //
+  // MUST stay above the loading/error early returns below — these are hooks,
+  // and a hook after a conditional return changes the hook count between the
+  // loading and loaded renders (React "Rendered more/fewer hooks" crash).
+  const [liveReportIds, setLiveReportIds] = useState(null)
+  const [filterObjects, setFilterObjects] = useState([])
+  const reportIdKey = useMemo(() => {
+    const ids = liveReportIds ?? (loaded?.components || []).map(c => c.dataSourceId)
+    return Array.from(new Set(ids.filter(Boolean))).sort().join(',')
+  }, [liveReportIds, loaded])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!reportIdKey) { setFilterObjects([]); return }
+    describeDashboardFilterObjects(reportIdKey.split(','))
+      .then(objs => { if (!cancelled) setFilterObjects(objs) })
+      // A failed schema read leaves the picker empty rather than breaking the
+      // editor; the filter's own column is still whatever it already was.
+      .catch(() => { if (!cancelled) setFilterObjects([]) })
+    return () => { cancelled = true }
+  }, [reportIdKey])
 
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onClose} />
@@ -125,10 +137,15 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
     </div>
   )
 
-  const settingsPanel = (
+  // A render function, so the panel sees the canvas's LIVE widget list — a
+  // filter added right after a widget is authored against that widget too.
+  const settingsPanel = ({ components }) => (
     <DashboardSettings
       meta={meta} setMeta={setMeta} folders={folders}
-      filters={filters} ops={FILTER_OPS} fieldSuggestions={fieldSuggestions}
+      filters={filters} ops={FILTER_OPS}
+      filterObjects={filterObjects}
+      onComponentsChange={setLiveReportIds}
+      components={components}
       onAddFilter={addFilter} onUpdateFilter={updateFilter} onRemoveFilter={removeFilter}
       onReorderFilters={setFilters}
     />
@@ -149,7 +166,17 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
 }
 
 // ─── Dashboard settings + filters (inspector, no-widget-selected view) ────────
-function DashboardSettings({ meta, setMeta, folders, filters, ops, fieldSuggestions = [], onAddFilter, onUpdateFilter, onRemoveFilter, onReorderFilters }) {
+function DashboardSettings({
+  meta, setMeta, folders, filters, ops,
+  filterObjects = [], components = [], onComponentsChange,
+  onAddFilter, onUpdateFilter, onRemoveFilter, onReorderFilters,
+}) {
+  // Report the canvas's live report ids up so the field picker re-resolves when
+  // a widget is added or repointed. An effect, not a render-time call — setting
+  // parent state during render is a React warning and a re-render loop.
+  const liveIds = (components || []).map(c => c.dataSourceId).filter(Boolean).sort().join(',')
+  useEffect(() => { onComponentsChange?.(liveIds ? liveIds.split(',') : []) }, [liveIds])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
@@ -178,8 +205,15 @@ function DashboardSettings({ meta, setMeta, folders, filters, ops, fieldSuggesti
           <button onClick={onAddFilter} style={miniAdd()}>+ Add</button>
         </div>
         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, lineHeight: 1.4 }}>
-          A filter applies to every widget whose report includes the named field. Drag to reorder.
+          A filter sits above the dashboard and applies to every widget. Pick the field once;
+          each widget uses the matching field on its own object. Drag to reorder.
         </div>
+        {filterObjects.length === 0 && (
+          <div style={{ fontSize: 11, color: C.textSecondary, background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 8, marginBottom: 8, lineHeight: 1.45 }}>
+            Add a widget with a report first — a filter is authored against the fields the
+            dashboard's reports actually have.
+          </div>
+        )}
         {filters.length === 0
           ? <div style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>No filters.</div>
           : (
@@ -187,28 +221,12 @@ function DashboardSettings({ meta, setMeta, folders, filters, ops, fieldSuggesti
               items={filters}
               onReorder={onReorderFilters}
               renderItem={(f, { setNodeRef, style, dragHandleProps }) => (
-                <div ref={setNodeRef} style={{ ...style, background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 8, marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <span {...dragHandleProps} title="Drag to reorder" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
-                    <input type="text" value={f.label} placeholder="Label"
-                      onChange={e => onUpdateFilter(f.id, { label: e.target.value })} style={{ ...input(), fontSize: 12, flex: 1 }} />
-                    <button onClick={() => onRemoveFilter(f.id)} title="Remove" style={miniRemove()}>×</button>
-                  </div>
-                  <input type="text" value={f.field_name} placeholder="Field name (column on reports)"
-                    list={fieldSuggestions.length ? `dfilt-fields-${f.id}` : undefined}
-                    onChange={e => onUpdateFilter(f.id, { field_name: e.target.value })} style={{ ...input(), fontSize: 12, marginBottom: 6 }} />
-                  {fieldSuggestions.length > 0 && (
-                    <datalist id={`dfilt-fields-${f.id}`}>
-                      {fieldSuggestions.map(fn => <option key={fn} value={fn} />)}
-                    </datalist>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    <select value={f.operator} onChange={e => onUpdateFilter(f.id, { operator: e.target.value })} style={{ ...input(), fontSize: 12 }}>
-                      {ops.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                    <input type="text" value={f.default_value ?? ''} placeholder="Default"
-                      onChange={e => onUpdateFilter(f.id, { default_value: e.target.value })} style={{ ...input(), fontSize: 12 }} />
-                  </div>
+                <div ref={setNodeRef} style={style}>
+                  <DashboardFilterEditor
+                    filter={f} ops={ops} objects={filterObjects}
+                    onUpdate={onUpdateFilter} onRemove={onRemoveFilter}
+                    dragHandleProps={dragHandleProps}
+                  />
                 </div>
               )}
             />
@@ -216,6 +234,154 @@ function DashboardSettings({ meta, setMeta, folders, filters, ops, fieldSuggesti
       </div>
     </div>
   )
+}
+
+// ─── One filter ───────────────────────────────────────────────────────────────
+//
+// The field used to be a free-text box for a raw column name, with a datalist of
+// whatever columns some widget config happened to mention. Authoring a filter
+// therefore meant knowing the platform's column names by heart, and a typo
+// produced a control that silently filtered nothing. Nicholas, 2026-08-31: "The
+// user needs to be able to put any kind of filter they want on, not just the
+// state filter."
+//
+// So: pick a real field from a real object, and the editor proposes the matching
+// field on every OTHER object the dashboard reports on and says plainly which
+// widgets the filter reaches. What it cannot map, it names.
+const FILTER_VALUE_TOKEN = '::'
+
+export function DashboardFilterEditor({ filter: f, ops, objects, onUpdate, onRemove, dragHandleProps }) {
+  const [showMapping, setShowMapping] = useState(false)
+
+  const coverage = filterCoverage(f, objects)
+  // The object the field was picked FROM: the one whose map entry is the
+  // filter's own column. Falls back to the first covered object for a filter
+  // saved before the map existed.
+  const sourceTable = objects.find(o => (f.field_map || {})[o.table] === f.field_name)?.table
+    || coverage.covered.find(c => c.column === f.field_name)?.table
+    || null
+  const selectedToken = sourceTable && f.field_name ? `${sourceTable}${FILTER_VALUE_TOKEN}${f.field_name}` : ''
+
+  const labelOf = (table, column) =>
+    objects.find(o => o.table === table)?.columns.find(c => c.name === column)?.label || column
+
+  const pickField = (token) => {
+    if (!token) { onUpdate(f.id, { field_name: '', field_map: null, options: [] }); return }
+    const [table, column] = token.split(FILTER_VALUE_TOKEN)
+    // The source object is written into the map too, so the map alone answers
+    // "which column here?" for every object and nothing depends on remembering
+    // where the field came from.
+    const map = { [table]: column, ...buildFieldMap(column, table, objects) }
+    const patch = {
+      field_name: column,
+      field_map:  map,
+      // The value control offers what is actually in the data, resolved to
+      // names for picklist and lookup columns. A free-text box is the fallback,
+      // chosen below.
+      options: { source: 'distinct', object: table, field: column },
+    }
+    const auto = f.field_name ? labelOf(sourceTable, f.field_name) : ''
+    if (!f.label || f.label === auto) patch.label = labelOf(table, column)
+    onUpdate(f.id, patch)
+  }
+
+  const setMapping = (table, column) => {
+    const map = { ...(f.field_map || {}) }
+    // An empty choice is stored explicitly, not deleted: "not on this object" and
+    // "nobody has said" are different answers, and only the first one survives an
+    // object that spells the column the same way.
+    map[table] = column || null
+    onUpdate(f.id, { field_map: map })
+  }
+
+  const usesValueList = !!(f.options && !Array.isArray(f.options) && f.options.source === 'distinct')
+
+  return (
+    <div style={{ background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span {...dragHandleProps} title="Drag to reorder" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
+        <input type="text" value={f.label} placeholder="Label"
+          onChange={e => onUpdate(f.id, { label: e.target.value })} style={{ ...input(), fontSize: 12, flex: 1 }} />
+        <button onClick={() => onRemove(f.id)} title="Remove" style={miniRemove()}>×</button>
+      </div>
+
+      <select value={selectedToken} onChange={e => pickField(e.target.value)}
+        style={{ ...input(), fontSize: 12, marginBottom: 6 }}>
+        <option value="">— Choose a field —</option>
+        {objects.map(o => (
+          <optgroup key={o.table} label={o.label}>
+            {o.columns.map(c => (
+              <option key={`${o.table}${FILTER_VALUE_TOKEN}${c.name}`} value={`${o.table}${FILTER_VALUE_TOKEN}${c.name}`}>
+                {c.label}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      {f.field_name && !selectedToken && (
+        <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>
+          Currently <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{f.field_name}</code>, which no
+          widget on this dashboard has. Choose a field above to repoint it.
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+        <select value={f.operator} onChange={e => onUpdate(f.id, { operator: e.target.value })} style={{ ...input(), fontSize: 12 }}>
+          {ops.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <input type="text" value={f.default_value ?? ''} placeholder="Default"
+          onChange={e => onUpdate(f.id, { default_value: e.target.value })} style={{ ...input(), fontSize: 12 }} />
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>
+        <input type="checkbox" checked={usesValueList} disabled={!sourceTable}
+          onChange={e => onUpdate(f.id, {
+            options: e.target.checked && sourceTable
+              ? { source: 'distinct', object: sourceTable, field: f.field_name }
+              : [],
+          })} />
+        Choose from values in the data
+      </label>
+
+      {/* What the filter reaches, said plainly — the thing that was invisible
+          before, and the reason two widgets could answer different questions. */}
+      {objects.length > 0 && f.field_name && (
+        <div style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.45 }}>
+          {coverage.covered.length > 0
+            ? <>Applies to <strong style={{ color: C.textPrimary }}>{coverage.covered.map(c => labelForTable(objects, c.table)).join(', ')}</strong>.</>
+            : <>Applies to no widget on this dashboard.</>}
+          {coverage.uncovered.length > 0 && (
+            <> Not applied to <strong style={{ color: C.textPrimary }}>{coverage.uncovered.map(t => labelForTable(objects, t)).join(', ')}</strong> — those widgets show every record.</>
+          )}
+          {' '}
+          <button onClick={() => setShowMapping(v => !v)}
+            style={{ background: 'none', border: 'none', padding: 0, color: C.emeraldMid, cursor: 'pointer', font: 'inherit', textDecoration: 'underline' }}>
+            {showMapping ? 'Hide fields' : 'Set fields per object'}
+          </button>
+        </div>
+      )}
+
+      {showMapping && (
+        <div style={{ marginTop: 8, borderTop: `1px solid ${C.border}`, paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {objects.map(o => (
+            <div key={o.table}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 }}>{o.label}</div>
+              <select value={filterColumnForObject(f, o.table) || ''}
+                onChange={e => setMapping(o.table, e.target.value)}
+                style={{ ...input(), fontSize: 12 }}>
+                <option value="">— Not filtered —</option>
+                {o.columns.map(c => <option key={c.name} value={c.name}>{c.label}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function labelForTable(objects, table) {
+  return objects.find(o => o.table === table)?.label || table
 }
 
 // ─── Style helpers ────────────────────────────────────────────────────────────

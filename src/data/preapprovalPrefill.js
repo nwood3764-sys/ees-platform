@@ -21,112 +21,36 @@ import { supabase } from '../lib/supabase'
 // pre-approval. A second program is another external_form_targets row + key.
 export const WI_IRA_ASSESSMENT_PREAPPROVAL_KEY = 'wi_ira_mf_homes_assessment_preapproval'
 
-// The WI IRA HOMES Project Payment Request, hosted on Jotform. Jotform names its
-// query parameters `q65_doesThe65` where Formstack uses `field188466720`, which
-// is a difference in the stored param strings only — the query string is built
-// the same way, so nothing here needs to know which provider a target is.
+// The second form, on the INCENTIVE APPLICATION: the assessment rebate claim
+// filed after the assessment is done. A different form on the same host, with
+// its own field ids — never the pre-approval's, which belong to a different
+// form entirely.
+export const WI_IRA_ASSESSMENT_APPLICATION_KEY = 'wi_ira_mf_homes_assessment_application'
+
+// The third form, also on the incentive application: the Project Payment
+// Request. Hosted on Jotform rather than Formstack, which changes only the
+// stored parameter strings (q65_doesThe65 rather than field188466720) — the
+// query string is built the same way, and build_external_form_prefill picks
+// this target's resolver server-side, so nothing here knows the difference.
 export const WI_IRA_PAYMENT_REQUEST_KEY = 'wi_ira_mf_homes_project_payment_request'
 
-// Which server-side builder resolves a record into that target's values. Keyed
-// by target so a third form is a row plus an entry, not a new code path.
-const PAYLOAD_RPC_BY_TARGET = {
-  [WI_IRA_ASSESSMENT_PREAPPROVAL_KEY]: { rpc: 'build_wi_ira_assessment_prefill',            arg: 'p_enrollment_id' },
-  [WI_IRA_PAYMENT_REQUEST_KEY]:        { rpc: 'build_wi_ira_payment_request_form_prefill',  arg: 'p_incentive_application_id' },
-}
-
-// US state name -> USPS abbreviation (plus DC + territories the form lists).
-// Used by the `state_2letter` transform: account billing_state is stored as a
-// full name ("Wisconsin") but the form's state dropdown stores "WI".
-const STATE_ABBR = {
-  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
-  colorado: 'CO', connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC',
-  florida: 'FL', georgia: 'GA', guam: 'GU', hawaii: 'HI', idaho: 'ID', illinois: 'IL',
-  indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME',
-  maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS',
-  missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH',
-  'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC',
-  'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA',
-  'puerto rico': 'PR', 'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD',
-  tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT', 'virgin islands (us)': 'VI',
-  virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY',
-}
-
-function toStateAbbr(value) {
-  const s = String(value).trim()
-  if (s.length === 2) return s.toUpperCase()   // already an abbreviation
-  return STATE_ABBR[s.toLowerCase()] || s
-}
-
-function toMmddyyyy(value) {
-  // Accepts 'YYYY-MM-DD' (what the RPC emits) -> 'MM/DD/YYYY'.
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value))
-  if (!m) return String(value)
-  return `${m[2]}/${m[3]}/${m[1]}`
-}
-
-// Apply a field-map transform. Pure; unknown transforms pass through unchanged.
-export function applyTransform(value, transform) {
-  switch (transform) {
-    case 'bool_yes_no':   return value === true || value === 'true' ? 'Yes' : 'No'
-    case 'state_2letter': return toStateAbbr(value)
-    case 'date_mmddyyyy': return toMmddyyyy(value)
-    default:              return value
-  }
-}
-
-// Turn the resolved payload + field map into the array of {param, value} the
-// query string is built from. Skips blanks so the form only receives real data.
-export function mapPayloadToParams(payload, fields) {
-  const out = []
-  for (const f of fields || []) {
-    let v = payload?.[f.leap_field]
-    if (v === null || v === undefined || v === '') continue
-    v = applyTransform(v, f.transform)
-    if (v === null || v === undefined || v === '') continue
-    // Option-value map (e.g. a radio whose stored value differs from the LEAP
-    // label) is applied after the transform.
-    const ovm = f.option_value_map
-    if (ovm && typeof ovm === 'object' && Object.prototype.hasOwnProperty.call(ovm, v)) {
-      v = ovm[v]
-    }
-    out.push({ param: f.param, value: String(v) })
-  }
-  return out
-}
-
-export function buildPrefillUrl(map, payload) {
-  const params = mapPayloadToParams(payload, map?.fields)
-  const qs = new URLSearchParams()
-  for (const { param, value } of params) qs.set(param, value)
-  const query = qs.toString()
-  return { url: query ? `${map.base_url}?${query}` : map.base_url, filledCount: params.length }
-}
-
-// Which required form fields are still blank in the resolved payload. The
-// payload is built from the enrollment AND its inherited parent records
-// (account / property / building) by build_wi_ira_assessment_prefill, so a
-// blank here means the data is genuinely missing upstream, not just unmapped.
-// `required` and `field_label` are per-field flags stored on the field map
-// (external_form_field_map), so which fields are mandatory is admin-editable,
-// never hardcoded. Returns an array of human-readable field labels.
-export function findMissingRequiredFields(payload, fields) {
-  const out = []
-  for (const f of fields || []) {
-    if (!f.required) continue
-    const v = payload?.[f.leap_field]
-    if (v === null || v === undefined || String(v).trim() === '') {
-      out.push(f.field_label || f.leap_field)
-    }
-  }
-  return out
-}
+// The pure rules live in src/lib/externalFormPrefill.js so they can be tested
+// without a browser or a database. Re-exported here so existing importers of
+// this module are unchanged.
+export {
+  applyTransform, mapPayloadToParams, buildPrefillUrl, findMissingRequiredFields,
+} from '../lib/externalFormPrefill'
+import { buildPrefillUrl, findMissingRequiredFields } from '../lib/externalFormPrefill'
 
 // Load the resolved record values + the field map for a target.
+//
+// Both halves are keyed by the TARGET, not by the object: build_external_form_prefill
+// picks the resolver that belongs to this form (the enrollment's for the
+// pre-approval, the incentive application's for the assessment claim), so adding
+// a third form never touches this file.
 export async function loadAssessmentPrefill(recordId, targetKey = WI_IRA_ASSESSMENT_PREAPPROVAL_KEY) {
-  const builder = PAYLOAD_RPC_BY_TARGET[targetKey]
-  if (!builder) throw new Error(`No prefill builder is configured for "${targetKey}".`)
   const [{ data: payload, error: pErr }, { data: map, error: mErr }] = await Promise.all([
-    supabase.rpc(builder.rpc, { [builder.arg]: recordId }),
+    supabase.rpc('build_external_form_prefill', { p_key: targetKey, p_record_id: recordId }),
     supabase.rpc('get_external_form_map', { p_key: targetKey }),
   ])
   if (pErr) throw pErr
@@ -137,24 +61,37 @@ export async function loadAssessmentPrefill(recordId, targetKey = WI_IRA_ASSESSM
 // Orchestrate the open. Pass a pre-opened window handle (opened synchronously in
 // the click handler) so popup blockers don't fire; the async work then redirects
 // it. Returns { url, filledCount } on success or { error } on failure.
-export async function openAssessmentPreapprovalForm(recordId, targetWindow,
-                                                   targetKey = WI_IRA_ASSESSMENT_PREAPPROVAL_KEY) {
+export async function openExternalPrefilledForm(recordId, targetKey, targetWindow) {
   try {
     if (!recordId) return { error: 'No record selected.' }
     const { payload, map } = await loadAssessmentPrefill(recordId, targetKey)
-    if (!map || !map.base_url) return { error: 'This program has no pre-approval form configured.' }
-    // Completeness gate: every required field (resolved from the enrollment and
-    // its parent records) must be populated before the form can be submitted.
-    // If any are blank, don't open the form — return the list so the caller can
-    // ask the user to complete them first.
+    if (!map || !map.base_url) return { error: 'This program has no form configured.' }
+    // Completeness gate: every required field (resolved from the record and its
+    // parents) must be populated before the form can be submitted. If any are
+    // blank, don't open the form — return the list so the caller can ask the
+    // user to complete them first.
     const missing = findMissingRequiredFields(payload, map.fields)
-    if (missing.length) return { missing }
+    if (missing.length) return { missing, formName: map.name }
     const { url, filledCount } = buildPrefillUrl(map, payload)
     if (targetWindow) targetWindow.location = url
     else window.open(url, '_blank', 'noopener')
-    return { url, filledCount }
+    return { url, filledCount, formName: map.name }
   } catch (e) {
-    console.warn('open pre-approval form failed', e)
-    return { error: e?.message || 'Could not build the pre-approval form.' }
+    console.warn('open prefilled form failed', e)
+    return { error: e?.message || 'Could not build the form.' }
   }
+}
+
+export function openAssessmentPreapprovalForm(enrollmentId, targetWindow) {
+  return openExternalPrefilledForm(enrollmentId, WI_IRA_ASSESSMENT_PREAPPROVAL_KEY, targetWindow)
+}
+
+// The assessment rebate claim, opened from the WI-IRA-MF-HOMES-AUDIT incentive
+// application.
+export function openPaymentRequestForm(incentiveApplicationId, targetWindow) {
+  return openExternalPrefilledForm(incentiveApplicationId, WI_IRA_PAYMENT_REQUEST_KEY, targetWindow)
+}
+
+export function openAssessmentApplicationForm(incentiveApplicationId, targetWindow) {
+  return openExternalPrefilledForm(incentiveApplicationId, WI_IRA_ASSESSMENT_APPLICATION_KEY, targetWindow)
 }

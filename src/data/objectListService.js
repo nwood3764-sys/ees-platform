@@ -142,6 +142,15 @@ function linkTypeOf(c) {
   return dt === 'email' || dt === 'phone' || dt === 'url' ? dt : undefined
 }
 
+// Same idea, for a value that is FORMATTED rather than linked: a money column
+// is `numeric` in Postgres, so without this the list drew `110000` where
+// $110,000 belongs (Nicholas: "Why aren't my fields coming in like currency?").
+// Kept separate from `type`, which drives the FILTER — an amount still filters
+// as a number.
+function valueTypeOf(c) {
+  return c?.display_type === 'currency' ? 'currency' : undefined
+}
+
 // Build a ListView column descriptor for one own-object schema column.
 // FK columns (picklist/user) resolve to a *__label field; others map straight.
 // `valueSource` tells the filter sidebar where the value typeahead's options
@@ -180,6 +189,8 @@ function ownColumnDescriptor(c, group, ownerTable, idContext) {
   const base = { field: c.column_name, label: titleize(c.column_name), type, group, columnName: c.column_name }
   const linkType = linkTypeOf(c)
   if (linkType) base.linkType = linkType
+  const valueType = valueTypeOf(c)
+  if (valueType) base.valueType = valueType
   if (type === 'text') base.valueSource = { kind: 'picklist', object: ownerTable, field: c.column_name, maybe: true }
   return base
 }
@@ -448,6 +459,7 @@ export async function buildObjectColumnCatalog(table) {
         shortLabel: relShortLabel,
         type,
         linkType: linkTypeOf(pc),
+        valueType: valueTypeOf(pc),
         group: groupLabel,
         valueSource,
         related: {

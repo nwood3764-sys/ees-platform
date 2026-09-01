@@ -48,7 +48,14 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
       const v = values[f.id]
       if (v === undefined || v === null || v === '') continue
       out.push({
+        // Carried so a widget the filter cannot reach can name it.
+        label:      f.dfilt_label || f.dfilt_field_name,
         field_name: f.dfilt_field_name,
+        // The filter's column on each object it reaches. reportsService
+        // resolves it against the widget report's own object, so one control
+        // filters properties by property_state and opportunities by
+        // opportunity_state instead of quietly filtering only the first.
+        field_map:  f.dfilt_field_map || null,
         operator:   f.dfilt_operator || 'equals',
         value:      v,
       })
@@ -87,12 +94,18 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     // "All" clears the report's built-in `property_state = NC` filter rather
     // than leaving the dashboard pinned to NC. Listed even when their current
     // value is "All" (empty), which is precisely when the override matters.
+    // Carried as {field_name, field_map} for the bar filters so the override
+    // resolves to the right column per object, exactly as the filter itself
+    // does; on-canvas filter widgets name a single column and stay strings.
     const baseOverride = [
-      ...(dashboardData.filters || []).map(f => f.dfilt_field_name),
+      ...(dashboardData.filters || [])
+        .filter(f => f.dfilt_field_name)
+        .map(f => ({ field_name: f.dfilt_field_name, field_map: f.dfilt_field_map || null })),
       ...(dashboardData.widgets || [])
         .filter(w => FILTER_WIDGET_TYPES.has(w.dw_widget_type))
-        .map(w => w.dw_widget_config?.filter_field),
-    ].filter(Boolean)
+        .map(w => w.dw_widget_config?.filter_field)
+        .filter(Boolean),
+    ]
     // Each widget type routes to its server-side query shape (grouped
     // aggregate, 2D pivot, time buckets, single aggregate) via runWidgetData,
     // which itself falls back to the full row fetch on any fast-path failure —
@@ -245,9 +258,16 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
                 textTransform:'uppercase', letterSpacing:0.5,
               }}>
                 {f.dfilt_label}
-                <span style={{ color:C.textMuted, marginLeft:6, textTransform:'none' }}>
-                  ({f.dfilt_field_name} {f.dfilt_operator})
-                </span>
+                {/* The raw column name used to print here. It is now only the
+                    column on ONE of the dashboard's objects — each widget uses
+                    its own — so showing it would name the wrong field as often
+                    as the right one. The operator still shows when it is
+                    anything other than a plain match. */}
+                {f.dfilt_operator && f.dfilt_operator !== 'equals' && (
+                  <span style={{ color:C.textMuted, marginLeft:6, textTransform:'none' }}>
+                    ({String(f.dfilt_operator).replace(/_/g, ' ')})
+                  </span>
+                )}
               </label>
               {(filterOptions[f.id] && filterOptions[f.id].length > 0) ? (
                 <select
@@ -341,6 +361,9 @@ function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onDril
   const canDrillRecords = !!onDrillToRecords && !!primaryObject
   const canDrill = canDrillRecords || !!onOpenReport
   const canCrossFilter = !!onCrossFilter && !!cfg.group_by
+  // Only filters the reader actually SET are reported — one left on "All" is
+  // filtering nothing anywhere, so naming it would be noise.
+  const unappliedHere = Array.isArray(result?.unappliedFilters) ? result.unappliedFilters : []
 
   // Resolve the human label from the aggregated rows (for the cross-filter chip
   // and the drill scope banner).
@@ -419,6 +442,18 @@ function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onDril
           }}
         >View Records →</button>
       </div>
+      {/* A dashboard filter that this widget's object has no field for is
+          dropped at run time — the only safe thing to do, but until now it was
+          invisible: a widget showing every state sat beside one filtered to NC
+          and looked identical. It says so now. */}
+      {unappliedHere.length > 0 && (
+        <div style={{
+          padding:'4px 12px', background:'#e8f1fb', borderBottom:`1px solid ${C.border}`,
+          fontSize:10.5, color:'#2f6da3', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+        }} title={`This widget's report has no field for: ${unappliedHere.join(', ')}. It shows every record.`}>
+          Not filtered by {unappliedHere.join(', ')}
+        </div>
+      )}
       <div style={{ flex:1, padding:12, overflow:'hidden' }}>
         {!result ? (
           <div style={{ fontSize:12, color:C.textMuted }}>Loading…</div>

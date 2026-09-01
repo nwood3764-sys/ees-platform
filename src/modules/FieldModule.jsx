@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
 import { useRecharts } from '../lib/RechartsLazy'
-import { C, CHART_COLORS, fmt } from '../data/constants'
+import { C, CHART_COLORS, seriesColor, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
@@ -410,12 +410,12 @@ export function FieldHome({ setSec, onOpenRecord, onNavigateToModule, projects, 
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Work Orders by Status</div></div>
             <div style={{ padding:'12px 14px', display:'flex', gap:10, alignItems:'center' }}>
               <R.ResponsiveContainer width={80} height={80}>
-                <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={18} outerRadius={36} dataKey="value" strokeWidth={0}>{woByStatus.map((_,i) => <R.Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</R.Pie></R.PieChart>
+                <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={18} outerRadius={36} dataKey="value" strokeWidth={0}>{woByStatus.map((_,i) => <R.Cell key={i} fill={seriesColor(i)}/>)}</R.Pie></R.PieChart>
               </R.ResponsiveContainer>
               <div style={{ flex:1 }}>
                 {woByStatus.map((d,i) => (
                   <div key={d.name} style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:7, height:7, borderRadius:2, background:CHART_COLORS[i%CHART_COLORS.length], flexShrink:0 }}/><span style={{ fontSize:10, color:C.textSecondary }}>{d.name}</span></div>
+                    <div style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:7, height:7, borderRadius:2, background:seriesColor(i), flexShrink:0 }}/><span style={{ fontSize:10, color:C.textSecondary }}>{d.name}</span></div>
                     <span style={{ fontSize:11, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace' }}>{d.value}</span>
                   </div>
                 ))}

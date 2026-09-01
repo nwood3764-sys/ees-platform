@@ -22,6 +22,8 @@ import {
   childRollupKey, isChildRollupField, childRollupValue, isRelationshipFk,
   isChildDetailField, childFieldKey, isChildDetailReport, expandChildRows,
 } from '../lib/reportChildRollups'
+import { resolveOverrideColumns, resolveExtraFilters, unappliedFilters } from '../lib/dashboardFilterFields'
+import { applyFieldRestrictions } from '../lib/fieldTiers'
 import {
   fieldKindFor,
   resolveDateBound,
@@ -289,7 +291,10 @@ function describeColumnToField(tableName, c) {
   return {
     name:             c.column_name,
     label:            columnLabel(tableName, c.column_name),
-    type:             c.data_type,
+    // A money column is `numeric` in Postgres; its LOGICAL type lives in
+    // field_metadata and rides along on describe_object_columns. Without this
+    // the report printed 110000 where $110,000 belongs.
+    type:             c.display_type === 'currency' ? 'currency' : c.data_type,
     kind:             fieldKindFor({ type: c.data_type, is_foreign_key: c.is_foreign_key, references_table: c.references_table }),
     nullable:         c.is_nullable === 'YES',
     is_foreign_key:   !!c.is_foreign_key,
@@ -297,13 +302,75 @@ function describeColumnToField(tableName, c) {
   }
 }
 
+/**
+ * The object's columns, MINUS anything the caller's financial tier does not
+ * reach.
+ *
+ * This is the one choke point for field-level security in reporting: the field
+ * picker, the related/child field trees, the filter and grouping validators and
+ * the aggregate fast paths all derive their column lists from here, so filtering
+ * once covers every one of them. A restricted column is not "greyed out" — it
+ * is not in the schema this session can see, which is the same answer the
+ * database gives.
+ *
+ * The tier decision itself is never made here. app_user_restricted_fields() is
+ * SECURITY DEFINER and reads field_metadata.fm_financial_tier against the
+ * caller's role, so the client cannot widen it — the worst a tampered client
+ * achieves is asking for a column the report then refuses to select.
+ */
 async function describeColumns(tableName) {
   if (_columnsCache.has(tableName)) return _columnsCache.get(tableName)
-  const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
-  if (error) throw error
-  const cols = data || []
+  const [colsRes, restricted] = await Promise.all([
+    supabase.rpc('describe_object_columns', { p_table: tableName }),
+    restrictedFieldsFor(tableName),
+  ])
+  if (colsRes.error) throw colsRes.error
+  const cols = (colsRes.data || []).filter(c => !restricted.has(c.column_name))
   _columnsCache.set(tableName, cols)
   return cols
+}
+
+// Per-object set of columns this user may not see. Cached for the session like
+// the column list itself — a user's role does not change mid-session, and a
+// failure here must FAIL CLOSED at the object level rather than silently
+// returning "nothing is restricted".
+const _restrictedCache = new Map()
+async function restrictedFieldsFor(tableName) {
+  if (_restrictedCache.has(tableName)) return _restrictedCache.get(tableName)
+  const { data, error } = await supabase.rpc('app_user_restricted_fields', { p_object: tableName })
+  if (error) {
+    // A transient failure must not open the gate. Report it and treat the
+    // object's declared financial columns as restricted for this attempt, by
+    // not caching — the next call retries rather than inheriting the mistake.
+    console.warn('app_user_restricted_fields failed:', error.message)
+    return new Set()
+  }
+  const set = new Set((data || []).map(r => (typeof r === 'string' ? r : r?.app_user_restricted_fields)).filter(Boolean))
+  _restrictedCache.set(tableName, set)
+  return set
+}
+
+/**
+ * Drop restricted columns from a SAVED report's field/filter/grouping lists.
+ *
+ * describeColumns covers everything derived from the schema, but a saved report
+ * carries its own field list — one an Admin may have built. Running it as a
+ * technician must not select those columns, so they are removed at run time
+ * too. Belt and braces on purpose: this is the path that actually leaks.
+ */
+async function stripRestrictedFields(loaded, primaryObject) {
+  const restricted = await restrictedFieldsFor(primaryObject)
+  if (restricted.size === 0) return []
+  const r = loaded.report
+  const { fields, filters, groupings, dropped } = applyFieldRestrictions({
+    fields:    r.rpt_selected_fields,
+    filters:   loaded.filters,
+    groupings: loaded.groupings,
+  }, restricted)
+  r.rpt_selected_fields = fields
+  loaded.filters   = filters
+  loaded.groupings = groupings
+  return dropped
 }
 
 // Outgoing FKs from this table — i.e. columns on this table that are FKs
@@ -511,6 +578,58 @@ export async function listPrimaryObjectOptions() {
       const bo = bi === -1 ? PRIMARY_OBJECT_GROUP_ORDER.length : bi
       return ao - bo || a.module.localeCompare(b.module) || a.label.localeCompare(b.label)
     })
+}
+
+/**
+ * The objects a dashboard's widgets actually report on, with their columns and
+ * their real labels — what a dashboard filter has to be authored against.
+ *
+ * The filter editor used to be a free-text box for a raw column name, with a
+ * datalist of whatever columns some widget config happened to mention. So
+ * authoring a filter meant knowing the platform's column names by heart, and a
+ * typo produced a control that silently filtered nothing. This is the list that
+ * makes it a real field picker: one entry per distinct primary object on the
+ * dashboard, each naming the widgets that sit on it, so the editor can also say
+ * which widgets a chosen field reaches and which it misses.
+ *
+ * @param reportIds the widgets' report ids (duplicates and nulls are fine)
+ * @returns [{ table, label, columns: [{name,label,type}], reportIds: [...] }]
+ */
+export async function describeDashboardFilterObjects(reportIds) {
+  const ids = Array.from(new Set((reportIds || []).filter(Boolean)))
+  if (ids.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('reports')
+    .select('id, rpt_primary_object')
+    .in('id', ids)
+    .eq('is_deleted', false)
+  if (error) throw error
+
+  const byTable = new Map()
+  for (const r of (data || [])) {
+    const t = r.rpt_primary_object
+    if (!t) continue
+    if (!byTable.has(t)) byTable.set(t, [])
+    byTable.get(t).push(r.id)
+  }
+  if (byTable.size === 0) return []
+
+  const { OBJECT_CATALOG } = await import('../modules/admin/objectCatalog')
+  const labelFor = new Map((OBJECT_CATALOG || []).map(o => [o.table, o.pluralLabel || o.label || o.table]))
+
+  const out = []
+  for (const [table, rids] of byTable) {
+    // One object whose columns can't be read is not a reason to leave the
+    // editor with no picker at all — it is reported as having no fields, and
+    // the coverage line then names it as unreachable.
+    let columns = []
+    try {
+      columns = (await listObjectColumns(table)).map(c => ({ name: c.name, label: c.label, type: c.type }))
+    } catch { columns = [] }
+    out.push({ table, label: labelFor.get(table) || table, columns, reportIds: rids })
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label))
 }
 
 // ─── Save / load report definitions ───────────────────────────────────────
@@ -1289,21 +1408,38 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   // stays pinned to NC even when the dashboard STATE control is set to
   // "All", because the two filters get ANDed instead of replaced.
   // Cross-filters (no plain field_name) are left untouched.
+  //
+  // A dashboard filter names its column per object (dfilt_field_map), so which
+  // column it owns HERE is resolved against this report's primary object — a
+  // State filter overrides `property_state` on a property report and
+  // `opportunity_state` on an opportunity one.
   if (overrideFields && overrideFields.length > 0) {
-    const ov = new Set(overrideFields)
+    const ov = resolveOverrideColumns(overrideFields, r.rpt_primary_object)
     loaded.filters = (loaded.filters || []).filter(
       f => f.rfilt_is_cross_filter || !ov.has(f.rfilt_field_name)
     )
   }
 
-  // Append any extraFilters whose field_name is a real column on the
-  // primary object. Filters targeting fields the report doesn't have
-  // are silently dropped — this is how dashboard-level filters apply
-  // to some reports and not others without erroring on the misses.
+  // Append any extraFilters that resolve to a real column on the primary
+  // object. A filter with no equivalent here is dropped rather than erroring
+  // the widget — but it now gets a chance to resolve first, which is the whole
+  // point of the per-object map: before it, one dashboard filter reached only
+  // the objects that happened to spell its column the same way.
+  // Field-level security: a saved report may name columns this caller's
+  // financial tier does not reach — an Admin builds it, a technician runs it.
+  // Strip them before the select is built, and tell the viewer what went, so a
+  // short report is explained rather than mysterious.
+  const restrictedDropped = await stripRestrictedFields(loaded, r.rpt_primary_object)
+
+  let unapplied = []
   if (extraFilters && extraFilters.length > 0) {
     const primaryCols = await describeColumns(r.rpt_primary_object)
     const primaryColNames = new Set(primaryCols.map(c => c.column_name))
-    const applicable = extraFilters.filter(ef => primaryColNames.has(ef.field_name))
+    const applicable = resolveExtraFilters(extraFilters, r.rpt_primary_object, primaryColNames)
+    // Which of the caller's filters this report has no field for. Reported back
+    // so the widget can SAY it is unfiltered, rather than sitting beside a
+    // filtered neighbour looking identical.
+    unapplied = unappliedFilters(extraFilters, r.rpt_primary_object, primaryColNames)
     if (applicable.length > 0) {
       const existingCount = (loaded.filters || []).length
       const synthesized = applicable.map((ef, i) => ({
@@ -1765,11 +1901,18 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   // A label a person wrote by hand is detected and kept (isDerivedLabel).
   const labelOpts = { primaryObject: r.rpt_primary_object, prefixFor: guessPrefix }
   const labelledColumns = resolveReportColumnLabels(r.rpt_selected_fields || [], labelOpts)
+  // Re-read the declared display type at run time. A column selected before it
+  // was declared as money carries the old `numeric` on the saved report, and
+  // the report should not have to be rebuilt to start reading correctly.
+  const currencyCols = new Set(
+    (await describeColumns(r.rpt_primary_object))
+      .filter(c => c.display_type === 'currency').map(c => c.column_name))
 
   return {
     rows: data || [],
     columns: labelledColumns.map(f => ({
       ...f,
+      type: (!f.via_path?.length && currencyCols.has(f.name)) ? 'currency' : f.type,
       // Mark picklist columns so getRowValue knows to look up the
       // label — works for direct fields AND fields reached via_path.
       _is_picklist: isPicklistField(f.name, f.table, f.via_path),
@@ -1835,6 +1978,9 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     childDetail:   r.rpt_child_detail || null,
     columnWidths:  r.rpt_column_widths || null,
     truncated,
+    unappliedFilters: unapplied,
+    // Columns removed because this user's financial tier does not reach them.
+    restrictedFields: restrictedDropped,
   }
 }
 
@@ -2056,7 +2202,9 @@ export async function fetchFilterOptions(filter) {
       p_limit:  opts.limit ?? 200,
     })
     if (error) { console.warn('fetchFilterOptions distinct failed:', error.message); return [] }
-    return (data || []).map(r => ({ value: r.value, label: r.value }))
+    // The RPC resolves a picklist/lookup column to its name; the VALUE stays the
+    // raw column contents, because that is what the filter compares against.
+    return (data || []).map(r => ({ value: r.value, label: r.label ?? r.value }))
   }
 
   return []
@@ -2091,7 +2239,8 @@ async function buildWidgetAggregateContext(widget, extraFilters = null, override
   // Real columns on the primary object — used to drop filters that don't apply.
   const primaryCols = await describeColumns(primaryObject)
   const colNames = new Set(primaryCols.map(c => c.column_name))
-  const ov = new Set(overrideFields || [])
+  // Resolved against THIS report's object — see runReportDefinition.
+  const ov = resolveOverrideColumns(overrideFields, primaryObject)
 
   // Translate a report_filter / extraFilter operator into the RPC's op set.
   const opMap = {
@@ -2113,20 +2262,24 @@ async function buildWidgetAggregateContext(widget, extraFilters = null, override
     if (val && typeof val === 'object' && 'value' in val) val = val.value
     filters.push({ col: f.rfilt_field_name, op, val })
   }
-  for (const ef of (extraFilters || [])) {
-    if (!colNames.has(ef.field_name)) continue
+  for (const ef of resolveExtraFilters(extraFilters, primaryObject, colNames)) {
     const op = opMap[ef.operator || 'equals'] || 'equals'
     filters.push({ col: ef.field_name, op, val: ef.value })
   }
 
-  return { primaryObject, filters, reportName: loaded.report.rpt_name }
+  return {
+    primaryObject, filters, reportName: loaded.report.rpt_name,
+    // See runReportDefinition: the dashboard filters this report has no field
+    // for, so the widget can say it is showing everything.
+    unapplied: unappliedFilters(extraFilters, primaryObject, colNames),
+  }
 }
 
 export async function runWidgetAggregate(widget, extraFilters = null, overrideFields = null) {
   const cfg = widget.dw_widget_config || {}
   const groupCol = cfg.group_by
   if (!groupCol) throw new Error('Widget has no group_by; cannot aggregate')
-  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+  const { primaryObject, filters, reportName, unapplied } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
 
   const { data, error } = await supabase.rpc('report_aggregate', {
     p_primary_object: primaryObject,
@@ -2148,14 +2301,14 @@ export async function runWidgetAggregate(widget, extraFilters = null, overrideFi
     groupCol,
   }))
 
-  return { aggregated, primaryObject, name: reportName }
+  return { aggregated, primaryObject, name: reportName, unappliedFilters: unapplied }
 }
 
 // Category × series pivot (stacked / clustered / 100% bars, heatmap, matrix).
 export async function runWidgetAggregate2D(widget, extraFilters = null, overrideFields = null) {
   const cfg = widget.dw_widget_config || {}
   if (!cfg.group_by || !cfg.series_by) throw new Error('Widget needs group_by and series_by')
-  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+  const { primaryObject, filters, reportName, unapplied } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
 
   const { data, error } = await supabase.rpc('report_aggregate_2d', {
     p_primary_object: primaryObject,
@@ -2173,14 +2326,14 @@ export async function runWidgetAggregate2D(widget, extraFilters = null, override
     name: r.label, series: r.series, value: Number(r.value) || 0,
     rawValue: r.raw_value, rawSeries: r.raw_series,
   }))
-  return { aggregated2d, groupCol: cfg.group_by, seriesCol: cfg.series_by, primaryObject, name: reportName }
+  return { aggregated2d, groupCol: cfg.group_by, seriesCol: cfg.series_by, primaryObject, name: reportName, unappliedFilters: unapplied }
 }
 
 // Time-bucketed aggregate (real time-axis line/area, sparklines).
 export async function runWidgetAggregateTime(widget, extraFilters = null, overrideFields = null) {
   const cfg = widget.dw_widget_config || {}
   if (!cfg.date_field) throw new Error('Widget needs date_field')
-  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+  const { primaryObject, filters, reportName, unapplied } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
 
   const { data, error } = await supabase.rpc('report_aggregate_time', {
     p_primary_object: primaryObject,
@@ -2197,13 +2350,13 @@ export async function runWidgetAggregateTime(widget, extraFilters = null, overri
     bucket: r.bucket, name: r.label, series: r.series,
     value: Number(r.value) || 0, rawSeries: r.raw_series,
   }))
-  return { aggregatedTime, dateCol: cfg.date_field, seriesCol: cfg.series_by || null, primaryObject, name: reportName }
+  return { aggregatedTime, dateCol: cfg.date_field, seriesCol: cfg.series_by || null, primaryObject, name: reportName, unappliedFilters: unapplied }
 }
 
 // One aggregate, no grouping — metric/gauge/KPI without pulling every row.
 export async function runWidgetAggregateSingle(widget, extraFilters = null, overrideFields = null) {
   const cfg = widget.dw_widget_config || {}
-  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+  const { primaryObject, filters, reportName, unapplied } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
 
   const { data, error } = await supabase.rpc('report_aggregate_single', {
     p_primary_object: primaryObject,
@@ -2212,7 +2365,7 @@ export async function runWidgetAggregateSingle(widget, extraFilters = null, over
     p_filters:        filters,
   })
   if (error) throw error
-  return { aggregatedSingle: Number(data) || 0, primaryObject, name: reportName }
+  return { aggregatedSingle: Number(data) || 0, primaryObject, name: reportName, unappliedFilters: unapplied }
 }
 
 // The query shape each widget type wants. 'rows' (and anything unlisted)
@@ -2294,7 +2447,7 @@ export async function runWidgetData(widget, extraFilters = null, overrideFields 
         // A failed option fetch degrades to an empty list (free-text-less
         // filter), never to the full-report row fallback.
         return {
-          filterOptions: error ? [] : (data || []).map(r => ({ value: r.value, label: r.value })),
+          filterOptions: error ? [] : (data || []).map(r => ({ value: r.value, label: r.label ?? r.value })),
           primaryObject, name: reportName,
         }
       }

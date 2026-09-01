@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
 import { useRecharts } from '../lib/RechartsLazy'
-import { C, CHART_COLORS } from '../data/constants'
+import { C, CHART_COLORS, seriesColor } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
@@ -120,7 +120,7 @@ function PortalHome({ setSec, users, partners }) {
               <R.ResponsiveContainer width={130} height={150}>
                 <R.PieChart>
                   <R.Pie data={byRole} cx="50%" cy="50%" innerRadius={30} outerRadius={58} dataKey="value" strokeWidth={0}>
-                    {byRole.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    {byRole.map((_, i) => <R.Cell key={i} fill={seriesColor(i)} />)}
                   </R.Pie>
                 </R.PieChart>
               </R.ResponsiveContainer>
@@ -128,7 +128,7 @@ function PortalHome({ setSec, users, partners }) {
                 {byRole.map((d, i) => (
                   <div key={d.name} style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ width:8, height:8, borderRadius:2, background:CHART_COLORS[i % CHART_COLORS.length] }} />
+                      <span style={{ width:8, height:8, borderRadius:2, background:seriesColor(i) }} />
                       <span style={{ fontSize:11, color:C.textSecondary }}>{d.name}</span>
                     </div>
                     <span style={{ fontSize:12, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace' }}>{d.value}</span>

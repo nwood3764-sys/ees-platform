@@ -1,4 +1,4 @@
-import { C, CHART_COLORS } from '../data/constants'
+import { C, CHART_COLORS, seriesColor } from '../data/constants'
 import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell, pinnedFooterCell } from '../lib/pinnedTableHeader'
 import { useState, useRef, useEffect } from 'react'
 import { getRowValue, saveWidgetColumnWidths } from '../data/reportsService'
@@ -604,8 +604,34 @@ function LineWidget({ result, widget, canDrill, drillTo }) {
 // the row becomes a column and the legend sits under the chart. Both are checked
 // by screenshotting the real widget at real tile sizes
 // (tools/pie-legend-check).
-const PIE_LEGEND_MIN_WIDTH = 400   // px of TILE below which the legend goes under
-const PIE_LEGEND_WIDTH     = 210   // px the legend column takes when beside
+// A tile narrower than this cannot hold a legend BESIDE the chart and still
+// show a pie — but that is only ever applied when the author asked for 'auto'.
+// It used to be applied to 'right' as well, which is how a legend set to the
+// right in the editor arrived at the BOTTOM on the rendered page: the runner's
+// tile is narrower than the canvas tile, it crossed this threshold, and the
+// widget silently re-laid itself out. (Nicholas, 2026-08-31: "I put the legend
+// to the right, but then when I look at the actual rendered page, it pushed it
+// to the bottom. That can't happen. You got to keep fidelity.") A layout the
+// author chose is now honoured literally everywhere it is drawn; responsive
+// behaviour is a THIRD choice they can opt into, never a silent override.
+const PIE_LEGEND_MIN_WIDTH = 400   // px of TILE below which 'auto' puts the legend under
+// The legend is a SHARE of the tile, not a fixed column. It used to be a hard
+// 210px with `flex: 0 0 auto`, so widening the tile widened the CHART and never
+// the legend — the names stayed truncated no matter how much room you gave it
+// (Nicholas, 2026-08-31: "even when I made the element way wider, it's still
+// cutting off the names of the property owners"). Bounded at both ends: below
+// the floor a legend is unreadable anyway, and past the ceiling it starves the
+// pie it is labelling.
+const PIE_LEGEND_FRACTION  = 0.42
+const PIE_LEGEND_MIN_COL   = 190
+const PIE_LEGEND_MAX_COL   = 520
+const pieLegendWidth = (tileWidth) => {
+  const w = tileWidth || 0
+  const want = Math.max(PIE_LEGEND_MIN_COL, Math.min(PIE_LEGEND_MAX_COL, w * PIE_LEGEND_FRACTION))
+  // Never more than 60% of the tile: honouring "legend on the right" on a
+  // narrow tile must not squeeze the pie out of existence.
+  return Math.round(w > 0 ? Math.min(want, w * 0.6) : want)
+}
 const PIE_INSIDE_LABEL_MIN_PCT = 9 // a slice smaller than this has no room for text
 // Part-to-whole reads at a glance up to about six wedges; past that adjacent
 // slices blur and the chart stops answering anything. The tail folds into one
@@ -641,7 +667,14 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
   const width = useElementWidth(hostRef)
   // Until the first measurement lands, assume there is room: a tile that starts
   // as a column and jumps to a row on the next frame reads as a flicker.
-  const legendBeside = showLegend && (cfg.legend_position || 'right') === 'right' && (width === 0 || width >= PIE_LEGEND_MIN_WIDTH)
+  // 'right' and 'bottom' are LITERAL — the same layout in the editor, on the
+  // dashboard, and at any tile size. Only 'auto' consults the width.
+  const legendPos = cfg.legend_position || 'right'
+  const legendBeside = showLegend && (
+    legendPos === 'right' ? true
+      : legendPos === 'bottom' ? false
+      : (width === 0 || width >= PIE_LEGEND_MIN_WIDTH)   // 'auto'
+  )
 
   // Fold the tail into one wedge, keeping its parts for the tooltip.
   const sorted = [...raw].sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0))
@@ -685,7 +718,7 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
     series: [{
       type: 'pie',
       data: data.map((d, i) => {
-        const fill = CHART_COLORS[i % CHART_COLORS.length]
+        const fill = seriesColor(i)
         return {
           name: d.name, value: d.value,
           // The ink rides on the datum, because it depends on THIS wedge's fill.
@@ -735,9 +768,12 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
         <LeapEChart option={option} onSeriesClick={onSeriesClick} minHeight={0} />
       </div>
       {showLegend && (
-        <PieLegend
+        <SeriesLegend
           data={data} total={total} fmt={fmt} share={share}
-          beside={legendBeside} onPick={onSeriesClick}
+          beside={legendBeside} width={pieLegendWidth(width)} onPick={onSeriesClick}
+          showValue={cfg.legend_show_value !== false}
+          showPercent={cfg.legend_show_percent !== false}
+          valuePosition={cfg.legend_value_position || 'right'}
         />
       )}
     </div>
@@ -747,57 +783,96 @@ function PieWidget({ result, widget, donut, canDrill, drillTo }) {
 // The legend, in HTML: a swatch, the name in Inter truncating with an ellipsis,
 // the value and share in mono, right-aligned so the numbers form a column. Text
 // wears text tokens — the swatch carries the identity, never the words.
-function PieLegend({ data, total, fmt, share, beside, onPick }) {
+function SeriesLegend({
+  data, total, fmt, share, beside, width, onPick,
+  showValue = true, showPercent = true, valuePosition = 'right',
+}) {
+  // Each number is its own switch: turning the count off must not take the
+  // share with it, and vice versa. With both off the legend is names only,
+  // which is a legitimate choice when the wedges already carry their labels.
+  const numbers = (d) => {
+    const cells = []
+    if (showValue) cells.push(
+      <span key="v" style={{
+        flex: '0 0 auto', fontSize: 11.5, fontWeight: 600, color: C.textPrimary,
+        fontFamily: "'JetBrains Mono', monospace",
+        // Before the name the numbers form a left column, so they need a fixed
+        // width to line up; after it they hug the right edge and do not.
+        ...(valuePosition === 'left' ? { minWidth: 34, textAlign: 'right' } : {}),
+      }}>{fmt(d.value)}</span>
+    )
+    if (showPercent) cells.push(
+      <span key="p" style={{
+        flex: '0 0 auto', width: 42, textAlign: 'right', fontSize: 10.5, color: C.textMuted,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>{share(d.value).toFixed(1)}%</span>
+    )
+    return cells
+  }
+
   return (
     <div style={{
       ...(beside
-        ? { width: PIE_LEGEND_WIDTH, flex: '0 0 auto', maxHeight: '100%' }
+        ? { width, flex: '0 0 auto', maxHeight: '100%' }
         : { width: '100%', flex: '0 1 auto', maxHeight: '42%', minHeight: 0 }),
       overflowY: 'auto', overflowX: 'hidden',
       display: 'flex', flexDirection: 'column', gap: 4,
       alignSelf: beside ? 'center' : 'stretch',
       paddingRight: 2,
     }}>
-      {data.map((d, i) => (
-        <div
-          key={d.name}
-          title={`${d.name} · ${fmt(d.value)} · ${share(d.value).toFixed(1)}%`}
-          onClick={onPick ? () => onPick({ name: d.name }) : undefined}
-          style={{
-            display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0,
-            cursor: onPick ? 'pointer' : 'default', lineHeight: 1.35,
-          }}
-        >
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%', flex: '0 0 auto',
-            background: CHART_COLORS[i % CHART_COLORS.length], alignSelf: 'center',
-          }} />
-          <span style={{
+      {data.map((d, i) => {
+        const nums = numbers(d)
+        const name = (
+          <span key="n" style={{
             flex: '1 1 auto', minWidth: 0, fontSize: 11.5, color: C.textSecondary,
             fontFamily: "'Inter', system-ui, sans-serif",
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{d.name}</span>
-          <span style={{
-            flex: '0 0 auto', fontSize: 11.5, fontWeight: 600, color: C.textPrimary,
-            fontFamily: "'JetBrains Mono', monospace",
-          }}>{fmt(d.value)}</span>
-          <span style={{
-            flex: '0 0 auto', width: 42, textAlign: 'right', fontSize: 10.5, color: C.textMuted,
-            fontFamily: "'JetBrains Mono', monospace",
-          }}>{share(d.value).toFixed(1)}%</span>
-        </div>
-      ))}
+        )
+        return (
+          <div
+            key={d.name}
+            // The full name is always reachable on hover, however narrow the tile.
+            title={`${d.name} · ${fmt(d.value)} · ${share(d.value).toFixed(1)}%`}
+            onClick={onPick ? () => onPick({ name: d.name }) : undefined}
+            style={{
+              display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0,
+              cursor: onPick ? 'pointer' : 'default', lineHeight: 1.35,
+            }}
+          >
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', flex: '0 0 auto',
+              background: seriesColor(i), alignSelf: 'center',
+            }} />
+            {valuePosition === 'left' ? [...nums, name] : [name, ...nums]}
+          </div>
+        )
+      })}
     </div>
   )
 }
 
 function FunnelWidget({ result, widget, pyramid, canDrill, drillTo }) {
-  const data = [...buildChartData(result, widget)].sort((a, b) => b.value - a.value)
+  const raw = [...buildChartData(result, widget)].sort((a, b) => b.value - a.value)
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
-  const showLabels = cfg.show_data_labels !== false
+  const labelMode = dataLabelMode(cfg, 'value')
+  const showLegend = cfg.show_legend !== false
+  const hostRef = useRef(null)
+  const width = useElementWidth(hostRef)
+  const legendPos = cfg.legend_position || 'right'
+  const legendBeside = showLegend && (
+    legendPos === 'right' ? true
+      : legendPos === 'bottom' ? false
+      : (width === 0 || width >= PIE_LEGEND_MIN_WIDTH)
+  )
+
+  const data = raw.map(d => ({ ...d, name: categoryLabel(d.name) }))
   const first = data[0]?.value || 0
+  const total = data.reduce((a, d) => a + (Number(d.value) || 0), 0)
+  const share = (v) => (total > 0 ? (Number(v) || 0) / total * 100 : 0)
   const byName = Object.fromEntries(data.map(d => [d.name, d]))
+
   const option = {
     animationDuration: 250,
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => {
@@ -806,23 +881,62 @@ function FunnelWidget({ result, widget, pyramid, canDrill, drillTo }) {
     } },
     series: [{
       // Pyramid = the same stage chart with the widest band at the bottom.
-      type: 'funnel', data: data.map(d => ({ name: d.name, value: d.value })),
-      sort: pyramid ? 'ascending' : 'descending', gap: 2,
-      left: '2%', right: '26%', top: 8, bottom: 8,
-      // A floor width keeps late stages readable instead of collapsing to a
-      // sliver — the fix for the "distorted wedge" render.
-      minSize: '14%', maxSize: '96%',
-      itemStyle: { borderColor: '#ffffff', borderWidth: 1 },
-      label: showLabels
-        ? { show: true, position: 'right', color: C.textSecondary, fontSize: 11,
-            formatter: (p) => `${p.name} · ${fmt(p.value)}` }
-        : { show: false },
-      labelLine: { length: 12, lineStyle: { color: C.borderDark } },
+      type: 'funnel',
+      data: data.map((d, i) => {
+        const fill = seriesColor(i)
+        return { name: d.name, value: d.value, label: { color: labelInkFor(fill) } }
+      }),
+      sort: pyramid ? 'ascending' : 'descending',
+      // A real gap between bands, like a Salesforce funnel — 2px read as a
+      // seam, not a separation.
+      gap: 3,
+      // The chart now uses the WHOLE tile. It used to reserve 26% on the right
+      // for outside labels, which still were not wide enough: the names ran off
+      // the edge and their leader lines crossed the bands (Nicholas: "This
+      // funnel is crazy... unbelievably unattractive"). Names live in the
+      // legend now, where they have room and can be read.
+      left: 6, right: 6, top: 6, bottom: 6,
+      // The floor is what stops a funnel becoming a wide head on a hairline
+      // stem. At 33 → 1 the old 14% floor drew a band two pixels wide; a stage
+      // that exists has to be visible, and the taper still reads from top to
+      // bottom because every band above it is wider.
+      minSize: '38%', maxSize: '100%',
+      itemStyle: { borderColor: '#ffffff', borderWidth: 1, borderRadius: 2 },
+      // Inside the band, in ink chosen from that band's own fill, and never a
+      // leader line — the leader lines ARE what collided.
+      label: labelMode === 'none'
+        ? { show: false }
+        : { show: true, position: 'inside', fontSize: 11, fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            formatter: (p) => dataLabelText(labelMode, {
+              value: p.value, percent: share(p.value), fmt, autoMode: 'value',
+            }) },
+      labelLine: { show: false },
+      emphasis: { disabled: false },
       cursor: canDrill ? 'pointer' : 'default',
     }],
   }
   const onSeriesClick = canDrill ? (p) => drillTo?.(byName[p.name]?.rawValue) : undefined
-  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+
+  return (
+    <div ref={hostRef} style={{
+      height: '100%', minHeight: 0, display: 'flex', gap: 10, overflow: 'hidden',
+      flexDirection: legendBeside ? 'row' : 'column',
+    }}>
+      <div style={{ flex: '1 1 0%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <LeapEChart option={option} onSeriesClick={onSeriesClick} minHeight={0} />
+      </div>
+      {showLegend && (
+        <SeriesLegend
+          data={data} total={total} fmt={fmt} share={share}
+          beside={legendBeside} width={pieLegendWidth(width)} onPick={onSeriesClick}
+          showValue={cfg.legend_show_value !== false}
+          showPercent={cfg.legend_show_percent !== false}
+          valuePosition={cfg.legend_value_position || 'right'}
+        />
+      )}
+    </div>
+  )
 }
 
 // Ranked list — the readable form for a many-category breakdown (county,

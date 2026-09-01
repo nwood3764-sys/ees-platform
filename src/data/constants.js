@@ -36,7 +36,60 @@ export const C = {
   purple: '#a78bfa',
 };
 
-export const CHART_COLORS = ['#3ecf8e','#7eb3e8','#1e466b','#a78bfa','#2aab72','#5eead4','#8fa0b8'];
+// Chart series colours — identity, assigned in this fixed order, never
+// re-ordered. Re-stepped 2026-08-31 (Nicholas: "re-step all seven") because the
+// previous set failed every readability check that can be computed:
+//
+//   #3ecf8e #7eb3e8 #1e466b #a78bfa #2aab72 #5eead4 #8fa0b8
+//     · #1e466b sat at OKLCH L 0.384 and #5eead4 at 0.855 — one nearly black,
+//       one nearly white, so the seven did not read as one family
+//     · #7eb3e8, #1e466b and #8fa0b8 were below the 0.10 chroma floor: they
+//       read as gray and stopped doing identity work at all
+//     · six of the seven fell under 3:1 against the white card, which is why a
+//       pale slice vanished into the surface
+//
+// The order IS the safety mechanism, so it is not decorative. Three facts
+// forced this exact shape, each established by measurement (see
+// scripts/chart-palette-fixture.mjs, which re-runs all of it):
+//
+//  1. Seven identities cannot ride on hue alone. Deuteranopia collapses the
+//     red-green axis: at one lightness, teal and magenta land 0.9 ΔE apart —
+//     the same colour. So the set alternates a LIGHT step (~L 0.65) and a DEEP
+//     one (~L 0.46) and lets lightness carry part of the identity.
+//  2. A pie of n slices is a RING — slice n touches slice 1 — so slot 1 borders
+//     every other slot at some series count. Both greens cannot be early: the
+//     first attempt put emerald at slot 1 and moss at slot 7 and they met at
+//     ΔE 3.2. Emerald owns the green end; nothing else here is green.
+//  3. Emerald leads because it is LEAP's accent and the colour a single-series
+//     chart gets. It is deeper than the #3ecf8e accent on purpose — that hue at
+//     its UI lightness cannot clear 3:1 on a white card.
+//
+// Every colour clears 3:1 on BOTH card surfaces (#ffffff and #f7f9fc), sits in
+// the OKLCH lightness band and above the chroma floor, and every adjacent pair
+// AND every pie ring from 2 to 7 slices separates by at least ΔE 9.2 under
+// simulated protanopia and deuteranopia. No red, no orange — the design
+// system's rule — and clear of the amber that means "warning".
+export const CHART_COLORS = ['#009c65','#623e96','#1398e2','#813075','#7a89e7','#008d9b','#b776d4'];
+
+// A slot beyond the palette. The colours are assigned in fixed order and must
+// NEVER be cycled: `CHART_COLORS[i % length]` paints the 8th series the same
+// emerald as the 1st, which is not a near-miss — it is two different things
+// wearing one identity. Caught on a live 8-row funnel where "Westminster
+// Company" came out the same colour as "Lutheran Social Services".
+//
+// There is no 8th hue to invent: seven is what the legal window (no red, no
+// orange) holds at the separation the checks demand. So an overflow slot is
+// drawn in a deliberate neutral — visibly NOT one of the seven, which is the
+// truth — and the widget should be folding its tail into "Other" instead. The
+// pie already does; this is the backstop for the ones that do not.
+export const CHART_COLOR_OVERFLOW = '#8fa0b8';
+
+/** The colour for series `i`. Never cycles — see CHART_COLOR_OVERFLOW. */
+export function seriesColor(i) {
+  const n = Number(i)
+  if (!Number.isFinite(n) || n < 0) return CHART_COLOR_OVERFLOW
+  return n < CHART_COLORS.length ? CHART_COLORS[n] : CHART_COLOR_OVERFLOW
+}
 
 export const STATUS_CFG = {
   // Opportunity

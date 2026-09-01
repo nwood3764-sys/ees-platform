@@ -3810,9 +3810,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'\u2014';
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
-  /* ================= refined brand palette (deep navy + a single emerald
-     accent, cool neutrals; no red/orange, per house style) ================= */
-  const NAVY=[30,36,46], EM=[120,130,144], EMd=[30,36,46], EMlt=[120,130,144],
+  /* ================= EES brand palette — a blue accent distinguishes the EES
+     proposals from the green Sealed documents; body text stays black. ========= */
+  const BLUE=[33,102,172];
+  const NAVY=BLUE, EM=[120,130,144], EMd=BLUE, EMlt=[120,130,144],
         PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
   const _state=stateFullName(m.state);
   /* ---- letterhead: company (left) + document title/meta (right) over a thin
@@ -3820,7 +3821,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      logo badge, no bubbly meta panel. ---- */
   const _dt=isAudit?'AUDIT INVOICE':(isInv?'INVOICE':'PROPOSAL');
   const docNo=isAudit?(F.pjInvNo||''):(isInv?(F.pjProjInvNo||''):'');
-  const dlab=isAudit?'Audit Invoice':(isInv?'Project Invoice':'Project Proposal');
+  const dlab=isAudit?'Multifamily Energy Assessment':(isInv?'Project Invoice':'Project Proposal');
   /* ---- party blocks: EES contractor / project / customer. Drawn as part of the
      header so the WHOLE header — not just the title — repeats on any page 2. ---- */
   // Three balanced columns matching the Sealed layout: on the generic proposal
@@ -3841,28 +3842,32 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     t(M,pT+8,'PRIMARY IRA CONTRACTOR');
     t(x2,pT+8,'PROJECT INFORMATION');
     t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
-    let cy=pT+25,ly=pT+25,ry=pT+25; tc(C.ink); font(9);
+    let cy=pT+21,ly=pT+21,ry=pT+21; tc(C.ink); font(9);
     for(const v of cLines) for(const ln of wrap(v,wCol)){t(M,cy,ln); cy+=11.5;}
     for(const v of lLines) for(const ln of wrap(v,wCol)){t(x2,ly,ln); ly+=11.5;}
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
-    st.y=Math.max(cy,ly,ry)+6; };
-  const drawHead=()=>{
-    tc(NAVY); font(14,'bold'); t(W/2,st.y+12,dlab,{align:'center'});
-    tc(NAVY); font(11,'bold'); t(W/2,st.y+27,_state+' IRA Multifamily HOMES Program',{align:'center'});
-    st.y+=34; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=16;
-    drawParties(); };
-  const contPage=()=>{ d.addPage(); st.y=M; drawHead(); };   // continuation page keeps the FULL header
+    // isolate the header block from the sections below with a horizontal rule, kept close to the content
+    st.y=Math.max(cy,ly,ry)+6; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
+  const drawHead=(withParties)=>{
+    st.y=18;                                                          // tight top margin — title sits near the top, not floating in white space
+    tc(BLUE);       font(12,'bold');   t(W/2,st.y+11,'Energy Efficiency Services of '+_state,{align:'center'});
+    tc(C.ink);      font(15,'bold');   t(W/2,st.y+31,dlab,{align:'center'});
+    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+47,_state+' IRA Multifamily HOMES Program',{align:'center'});
+    st.y+=54; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    // party blocks appear on the FIRST page only; continuation pages carry just the title header
+    if(withParties){ st.y+=10; drawParties(); } else { st.y+=14; } };
+  const contPage=()=>{ d.addPage(); st.y=M; drawHead(false); };   // continuation page: title header only, no party columns
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
-  drawHead();
+  drawHead(true);
   /* ---- section heading: navy label, hairline rule with a short emerald tab ---- */
-  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
-    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(BLUE); font(10.5,'bold');
+    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke(BLUE); d.setLineWidth(.9);
     d.line(M,st.y,W-M,st.y); st.y+=5;};
   // A section total drawn on the RIGHT: label right-aligned just left of its
   // figure, both anchored to the right edge, so the eye lands on the money.
-  const AMTW=92;
   const rlineE=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
-    t(W-M-AMTW,st.y+11,lbl,{align:'right'}); t(W-M,st.y+11,val,{align:'right'});};
+    const vw=d.getTextWidth(String(val));               // label sits a fixed gap left of the ACTUAL figure, so it never floats mid-page
+    t(W-M,st.y+11,val,{align:'right'}); t(W-M-vw-14,st.y+11,lbl,{align:'right'});};
   /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader=(cols)=>{ // cols: [{x0,x1,lbl,align}]
     const h=16; need(h+4);
@@ -3878,7 +3883,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     for(const c of cols) d.line(c.x0,st.y,c.x0,st.y+h);
     d.line(M,st.y+h,W-M,st.y+h);};
   /* ---- line items ---- */
-  head(isAudit?'Audit Services':'Project Scope of Work',12);
+  head(isAudit?'Audit Services':'Project Scope of Work',24);
   if(isAudit){
     const CA=[{x0:M+22,x1:M+300,lbl:'SERVICE DESCRIPTION'},{x0:M+300,x1:M+340,lbl:'QTY',align:'right'},
       {x0:M+340,x1:M+400,lbl:'UNIT'},{x0:M+400,x1:M+466,lbl:'RATE',align:'right'},
@@ -3886,9 +3891,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     gridHeader(CA);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const rows=[['1','Whole-Building Energy Audit \u2014 Multifamily','1','Building','$2,000.00','$2,000.00'],
-      ['2','Per-Unit Blower Door and Diagnostic Testing','','Unit','','Included'],
-      ['3','Common Area and Building Envelope Assessment','1','Lump Sum','','Included'],
-      ['4','Mechanical Systems Survey','1','Lump Sum','','Included']];
+      ['2','Whole Building Blower Door and Diagnostic Testing','1','Building','Included','Included'],
+      ['3','Common Area and Building Envelope Assessment','1','Building','Included','Included'],
+      ['4','Mechanical Systems Survey','1','Building','Included','Included'],
+      ['5','Energy Modeling — Asset Score (HPXML / BuildingSync)','1','Building','Included','Included'],
+      ['6','Program Energy Audit Report (ASHRAE Level II)','1','Building','Included','Included'],
+      ['7','Customer Report / Building Assessment Tool Report','1','Building','Included','Included']];
     rows.forEach((r,i)=>{const h=16;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}
       if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
@@ -3932,7 +3940,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const tableHeader=()=>{
       need(headH+8);
       fill(PANEL); d.rect(M,st.y,CW,headH,'F');
-      stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+      stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
       tc(NAVY); font(8,'bold'); t(M+5,st.y+headH/2+3,'ENERGY EFFICIENCY MEASURE');
       numCols.forEach(([lbl,,w,rx])=>{const wl=wrap(lbl,w-8); const ty=st.y+(headH-wl.length*9)/2+7;
         wl.forEach((ln,k)=>t(rx-4,ty+k*9,ln,{align:'right'}));});
@@ -3962,7 +3970,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       const numY=y0+h/2+3;
       numCols.forEach(([lbl,fn,w,rx],c)=>{
         font(9.5,c===numCols.length-1?'bold':'normal');
-        tc(c===numCols.length-1?NAVY:[64,78,96]);
+        tc(c===numCols.length-1?C.ink:[64,78,96]);
         t(rx-4,numY,fn(r),{align:'right'});});
       st.y=y0+h;
       colRules(y0,st.y);                                        // vertical separators
@@ -3974,9 +3982,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   // close the Scope of Work with its total — the full cost of the work above
   {needH(34); st.y+=6; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
    rlineE('Total Project Cost',_money(gross),true); st.y+=14;
-   stroke([120,130,144]); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
+   stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   const credits=[];
-  if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
+  if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','Income-Qualified Multifamily Energy Assessment Rebate per Building',iraAmt]);
   else{
     if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
     if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+'  \u00b7  '+(m.units||0)+' units \u00d7 '+_money(m.tier.perUnit)+' per unit = '+_money(iraAmt),iraAmt]);
@@ -3984,8 +3992,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   // clean rebate rows (matching the line-item table), heading kept with the
   // column header and first credit line so a title is never orphaned.
   needH((m.foe?250:190));   // keep rebates + totals together on one page
-  head(isAudit?'Rebates & Incentives Applied':'Available Rebates & Incentives',12);
-  {stroke(EM); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  head(isAudit?'Rebates & Incentives Applied':'Available Rebates & Incentives',24);
+  {stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
    st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
    credits.forEach(([nm,desc,amt])=>{
@@ -3997,16 +4005,16 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
      if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2;
        dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
-     tc(EMd); font(10,'bold'); t(W-M,y0+h/2+3,_money(amt),{align:'right'});
+     tc(C.ink); font(10,'bold'); t(W-M,y0+h/2+3,_money(amt),{align:'right'});
      st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;});}
   const reb=foeAmt+iraAmt, due=Math.round((gross-reb)*100)/100;
   const dueVal=Math.abs(due)<0.005?0:due;
   // close the rebate section with its total (positive — a contribution)
   {st.y+=4; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
    rlineE('Total Rebate Amount',_money(reb),true); st.y+=14;
-   stroke([120,130,144]); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
+   stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   /* ---- Project Summary: a full-width section mirroring the Sealed layout ---- */
-  head('Project Summary',16);
+  head('Project Summary',32);
   {const trows=[['Total Project Cost',_money(gross),false],
      ['Total Rebate Amount Applied as Instant Discount','('+_money(reb)+')',false],
      [isInv?'Total Due':'Total Remaining Amount',_money(dueVal),true]];
@@ -4014,22 +4022,15 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      if(strong){ rlineE(lb,v,true); }
      else{ tc(C.ink); font(9,'normal'); t(M,st.y+11,lb); t(W-M,st.y+11,v,{align:'right'}); }
      stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+15,W-M,st.y+15); st.y+=16;}}
-  /* ---- deliverables (audit only) ---- */
-  if(isAudit){
-    head('Deliverables',10);
-    ['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
-     'HPXML v4 / BuildingSync file from Asset Score',
-     'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
-      need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
-  }
+  /* deliverables now appear as line items in the audit service table above */
   /* ---- acknowledgment + signature: INVOICES ONLY. Proposals carry no
      acknowledgment/signature block (Nicholas). ---- */
   if(isAudit||isInv){
-    head('Acknowledgment & Acceptance',10);
+    head('Acknowledgment & Acceptance',20);
     const _ees='EES-'+(m.state||'WI');
     const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
     {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
-     al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
+     al.forEach((ln,k)=>t(W/2,st.y+9+k*10,ln,{align:'center'})); st.y+=al.length*10+4;}
     need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
     d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
@@ -4228,16 +4229,17 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // ---- one deliberate type scale, used everywhere ----
   //  18 title · 12 program · 11 stage + section headers · 9 labels/body/totals · 8 table + fine print
   const SGAP=26;                                   // clear space above every section header, so each section reads as its own block
-  const bh=(txt,x,yy,al)=>{tc(C.ink); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
-  // one identical section-header treatment for all three sections
-  const sh=(txt)=>{st.y+=SGAP; need(48); tc(C.ink); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
-    stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const GREEN=[33,131,82];                          // Sealed brand accent (green) — visually distinguishes Sealed documents from the EES proposals
+  const bh=(txt,x,yy,al)=>{tc(GREEN); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
+  // one identical section-header treatment for all three sections — Sealed orange
+  const sh=(txt)=>{st.y+=SGAP; need(48); tc(GREEN); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
+    stroke(GREEN); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   // A total drawn on the RIGHT: the label right-aligns just left of its figure,
   // both anchored to the page's right edge, so the reader's eye lands on the money.
-  const AMTW=92;
   const rline=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
-    t(W-M-AMTW,st.y+10,lbl,{align:'right'}); t(W-M,st.y+10,val,{align:'right'});};
+    const vw=d.getTextWidth(String(val));               // label sits a fixed gap left of the ACTUAL figure, so it never floats mid-page
+    t(W-M,st.y+10,val,{align:'right'}); t(W-M-vw-14,st.y+10,lbl,{align:'right'});};
   const docLabel=isInv?'Project Invoice':'Project Proposal';
   const docNo=F.pjProjInvNo||F.pjIQ||'';
   const stageLabel=isInv?'Final Project Payment Request':'Project Reservation';
@@ -4246,7 +4248,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const drawTitle=()=>{
     tc(C.ink); font(14,'bold'); t(W/2,st.y+11,docLabel,{align:'center'});
     tc(C.ink);      font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HOMES Program - '+stageLabel,{align:'center'});
-    st.y+=32; stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
+    st.y+=32; stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
   const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };   // a continuation page keeps the header
   const needH=h=>{ if(st.y+h>H-M-16) contPage(); };             // page break that redraws the header
   drawTitle();
@@ -4263,6 +4265,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   let y2=lines9(projInfo,CX2,st.y+13);
   let y3=lines9(ci,CX3,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
+  // isolate the header block from the sections below with a horizontal rule
+  st.y+=8; stroke(GREEN); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2;
   /* ===== Section 1: Project Scope of Work ===== */
   sh('Project Scope of Work');
   /* items table — narrow Contractor/Measure columns, wide readable Description;
@@ -4270,7 +4274,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const cW=84, mX=M+cW, mW=86, dX=mX+mW, dW=(W-M-64)-dX;   // column geometry
   tc(C.ink); font(8,'bold');
   t(M,st.y+12,'CONTRACTOR'); t(mX,st.y+12,'MEASURE'); t(dX,st.y+12,'DESCRIPTION'); t(W-M,st.y+12,'TOTAL',{align:'right'});
-  st.y+=16; stroke(C.line); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+  st.y+=16; stroke(GREEN); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
   const CLH=9, RH=10;
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
@@ -4293,7 +4297,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
    stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=4;}
   /* ===== Section 2: Rebates & Incentives ===== keep the whole rebate block and
      the project summary together so the summary never lands nearly alone. */
-  needH((m.foe?244:198)+(isInv?118:0));             // keep rebates + summary (+ invoice signature) together
+  needH((m.foe?244:198)+(isInv?150:0));             // keep rebates + summary (+ invoice acknowledgment) together
   sh('Available Rebates & Incentives');
   const sect=(title,desc,name,amt)=>{need(36); st.y+=9; bh(title,M,st.y);
     st.y+=4; stroke(C.line); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
@@ -4321,14 +4325,16 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     if(strong){ rline(lbl,val,true); }
     else{ tc(C.ink); font(9,'normal'); t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'}); }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
-  // signature — invoice / project payment request only; reserved with the block above so it is never orphaned
+  // Acknowledgment & Acceptance — invoice / payment request only, matching the
+  // EES invoice; reserved with the block above so it is never orphaned.
   if(isInv){
-    st.y+=26;
-    const sl=wrap('By signing below, the customer and the contractor confirm that the project described above has been completed.',CW);
-    tc(C.ink); font(8.5); sl.forEach((ln,k)=>t(M,st.y+k*11,ln)); st.y+=sl.length*11+36;
-    stroke([68,68,68]); d.setLineWidth(1);
-    d.line(M,st.y,M+230,st.y); d.line(W-M-230,st.y,W-M,st.y);
-    tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-230,st.y+11,'Contractor Signature');
+    sh('Acknowledgment & Acceptance');
+    const _ees='EES-'+(m.state||'WI');
+    const ack='Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.';
+    const al=wrap(ack,CW); tc(C.ink); font(9); al.forEach((ln,k)=>t(W/2,st.y+9+k*10,ln,{align:'center'})); st.y+=al.length*10+4;
+    st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
+    d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
+    tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
   }
   _stampSealedFooters(P,docLabel,docNo,F.pjInvDate);
   return d.output('blob');

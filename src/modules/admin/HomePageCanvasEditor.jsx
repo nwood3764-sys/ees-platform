@@ -18,6 +18,7 @@ import LeapCanvas from '../../builder/LeapCanvas'
 import { homeRegistry } from '../../builder/registries/homeRegistry'
 import { Field, inputStyle } from '../../builder/inspectorControls'
 import { loadHomePageForCanvas, saveHomePageFromCanvas } from '../../builder/adapters/homePageAdapter'
+import { toSourceOptions } from '../../lib/builderSourceOptions'
 
 export default function HomePageCanvasEditor() {
   const [pages, setPages] = useState([])
@@ -104,12 +105,15 @@ function HomePageEditorCanvas({ pageId, onClose, onSaved }) {
       fetchRoles().catch(() => []),
     ]).then(([dbs, reps, lvs, rls]) => {
       if (cancelled) return
+      // Every one of these binds a <select> to a uuid FK, so they all resolve
+      // their option values through the one rule. Mapping them by hand is what
+      // put the Admin role's DISPLAY id (FA6C5203) into hp_role_id.
       setSources({
-        dashboards: dbs.map(d => ({ id: d._id, name: d.name || 'Dashboard' })),
-        reports:    reps.map(r => ({ id: r._id, name: r.name || 'Report' })),
-        listViews:  lvs.map(v => ({ id: v._id || v.id, name: v.name || v.label || 'List View' })),
+        dashboards: toSourceOptions(dbs, 'Dashboard'),
+        reports:    toSourceOptions(reps, 'Report'),
+        listViews:  toSourceOptions(lvs, 'List View'),
       })
-      setRoles(rls.map(r => ({ id: r.id, name: r.name || r.role_name || 'Role' })))
+      setRoles(toSourceOptions(rls, 'Role'))
     })
     return () => { cancelled = true }
   }, [])
