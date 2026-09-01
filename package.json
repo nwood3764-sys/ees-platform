@@ -18,7 +18,8 @@
     "verify:layout-cards": "node tools/layout-card-check/run.mjs",
     "verify:video-preview": "node tools/video-preview-check/run.mjs",
     "verify:report-column-widths": "node tools/report-column-width-check/run.mjs",
-    "verify:dashboard-filters": "node tools/dashboard-filter-check/run.mjs"
+    "verify:dashboard-filters": "node tools/dashboard-filter-check/run.mjs",
+    "verify:topbar-menus": "node tools/topbar-menu-check/run.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

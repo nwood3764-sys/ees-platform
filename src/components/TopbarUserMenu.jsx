@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import { getCurrentUserProfile } from '../data/layoutService'
+import AnchoredPopover from './AnchoredPopover'
 
 /**
  * Salesforce-style user menu for the top-right corner of the global topbar.
@@ -24,7 +25,7 @@ export default function TopbarUserMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [profile, setProfile] = useState(null)
-  const wrapRef = useRef(null)
+  const btnRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -33,20 +34,6 @@ export default function TopbarUserMenu({
       .catch(() => { /* fall back to email-derived display below */ })
     return () => { cancelled = true }
   }, [])
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
-    }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
 
   const emailDerivedName = userEmail
     ? userEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -68,8 +55,9 @@ export default function TopbarUserMenu({
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div style={{ display: 'inline-block' }}>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen(v => !v)}
         aria-haspopup="menu"
@@ -90,22 +78,23 @@ export default function TopbarUserMenu({
         {displayInitials || 'U'}
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            right: 0,
-            minWidth: 240,
-            background: C.card,
-            border: `1px solid ${C.border}`,
-            borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
-            padding: 6,
-            zIndex: 500,
-          }}
-        >
+      {/* Portalled, never `position:absolute` — see AnchoredPopover.jsx. */}
+      <AnchoredPopover
+        anchorRef={btnRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        role="menu"
+        width={240}
+        align="right"
+        maxHeight={420}
+        panelStyle={{
+          background: C.card,
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          padding: 6,
+        }}
+      >
           {/* Account summary — context only, not interactive */}
           <div style={{ padding: '8px 10px 10px', borderBottom: `1px solid ${C.border}`, marginBottom: 6 }}>
             <div style={{
@@ -147,8 +136,7 @@ export default function TopbarUserMenu({
             label="Sign out"
             onClick={fire(onSignOut)}
           />
-        </div>
-      )}
+      </AnchoredPopover>
     </div>
   )
 }
