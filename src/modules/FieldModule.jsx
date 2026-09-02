@@ -18,7 +18,17 @@ import { getCurrentUserProfile } from '../data/layoutService'
 
 const CODE_SECTIONS = [
   { id:'home',                 label:'Home'                },
+  // Two different screens, two different names. "Service Appointments" is the
+  // OBJECT's list view — every appointment, past and future, with the filters,
+  // columns and saved views every other object gets. "Appointment Inbox" is the
+  // dispatcher's console for the days ahead. Until 2026-09-02 the inbox was
+  // what the "Service Appointments" tab showed, so the tab named after the
+  // object could not show a single past appointment (Nicholas: "Why can't I
+  // ever see past service appointments? It just gives me a dropdown for
+  // future.") — and since every appointment in the platform is in the past, it
+  // showed nothing at all.
   { id:'service_appointments', label:'Service Appointments'},
+  { id:'appointment_inbox',    label:'Appointment Inbox'   },
   { id:'projects',             label:'Projects'            },
   { id:'workorders',           label:'Work Orders'         },
   { id:'reviews',              label:'Verification Reviews'},
@@ -543,21 +553,26 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 }
 
 // ─── ServiceAppointmentsInbox ───────────────────────────────────────────────
-// Dispatcher console for incoming customer-self-scheduled Service Appointments.
+// Dispatcher console for the days AHEAD. Reads scheduled service appointments
+// from the start of today through the end of the `days` window and groups them
+// by Chicago calendar day, so the dispatcher can scan: "tomorrow Javier has 2,
+// Kenji has 4."
 //
-// Reads service_appointments where sa_status='scheduled' AND start time is in
-// the upcoming `days` window (default 14). Groups by Chicago calendar day so
-// the dispatcher can scan: "tomorrow Javier has 2, Kenji has 4, etc."
+// Each row shows everything needed to either pick up the phone (customer name
+// + phone + email) or roll a truck (address, work type, time, assigned
+// auditor). Clicking a row opens the appointment record.
 //
-// Each row shows everything the dispatcher needs to either pick up the phone
-// (customer name + phone + email) or roll a truck (address, work type, time,
-// assigned auditor). Click the record number to open the SA record in
-// RecordDetail for full editing.
+// This is NOT the service appointments list view, and must never be mistaken
+// for it again: it answers one question — what is coming up — and by
+// construction cannot show a past appointment. The object's own list view, on
+// the Service Appointments tab, is where every appointment lives. The empty
+// state says so rather than leaving a person to conclude there are none.
 //
-// Refresh: manual button + auto-refetch on mount. Background polling could
-// be added later but a manual refresh keeps the UI predictable.
+// The window starts at the start of TODAY, not at this instant: an appointment
+// that began at 8am is still the dispatcher's problem at 9am, and dropping it
+// off the board the moment it starts is how a running job goes unnoticed.
 
-function ServiceAppointmentsInbox({ onOpenRecord }) {
+function ServiceAppointmentsInbox({ onOpenRecord, onSeeAll }) {
   const [rows,    setRows]    = useState([])
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
@@ -602,20 +617,21 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
         }}>
           <div>
             <h2 style={{ fontSize:20, fontWeight:600, marginBottom:4, display:'flex', alignItems:'center', gap:6 }}>
-              Upcoming Service Appointments — next {days} days
+              Appointment Inbox — today through the next {days} days
               <HelpIcon
                 anchors={[
                   { type: 'concept', concept: 'service-appointments-inbox' },
+                  { type: 'concept', concept: 'service-appointment-list-view' },
                   { type: 'object',  object:  'service_appointments' },
                   { type: 'concept', concept: 'customer-scheduling' },
                   { type: 'concept', concept: 'manage-link' },
                 ]}
-                title="Service Appointments Inbox"
+                title="Appointment Inbox"
               />
             </h2>
             <div style={{ fontSize:13, color:C.textSecondary }}>
               {rows.length === 0
-                ? 'No upcoming customer-self-scheduled service appointments.'
+                ? 'Nothing scheduled in this window. This board only looks forward — past appointments are on the Service Appointments tab.'
                 : `${rows.length} service appointment${rows.length === 1 ? '' : 's'} scheduled across ${byDay.length} day${byDay.length === 1 ? '' : 's'}.`}
             </div>
           </div>
@@ -634,6 +650,13 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
               borderRadius:6, background:C.card, color:C.textSecondary, cursor:'pointer',
               fontWeight:500,
             }}>Refresh</button>
+            {onSeeAll && (
+              <button onClick={onSeeAll} style={{
+                padding:'6px 12px', fontSize:13, border:`1px solid ${C.border}`,
+                borderRadius:6, background:C.card, color:C.emeraldMid, cursor:'pointer',
+                fontWeight:500,
+              }}>All service appointments</button>
+            )}
           </div>
         </div>
 
@@ -642,8 +665,19 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
             background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
             padding:48, textAlign:'center', color:C.textMuted, fontSize:14,
           }}>
-            No service appointments in this window. Customers can schedule at
-            {' '}<a href="/sa" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/sa</a>.
+            <div>No service appointments scheduled between today and the end of this window.</div>
+            <div style={{ marginTop:10 }}>
+              {onSeeAll && (
+                <button onClick={onSeeAll} style={{
+                  background:'none', border:'none', padding:0, font:'inherit',
+                  color:C.emeraldMid, cursor:'pointer', fontWeight:500,
+                }}>See every service appointment, past and future →</button>
+              )}
+            </div>
+            <div style={{ marginTop:10, fontSize:13 }}>
+              Customers can schedule at
+              {' '}<a href="/sa" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/sa</a>.
+            </div>
           </div>
         ) : (
           byDay.map(([dayLabel, dayRows]) => (
@@ -787,6 +821,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
   const [todayCrews, setTodayCrews] = useState([])
 
   const SEC_TABLE = {
+    service_appointments: 'service_appointments',
     projects:    'projects',
     workorders:  'work_orders',
     technicians: 'contacts',
@@ -941,7 +976,9 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             moduleId="field" />
         )}
         {sec==='home'                 && <FieldHome setSec={setSec} onOpenRecord={setSelectedRecord} onNavigateToModule={onNavigateToModule} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
-        {sec==='service_appointments' && <ServiceAppointmentsInbox onOpenRecord={openRecord} />}
+        {sec==='appointment_inbox' && <ServiceAppointmentsInbox
+          onOpenRecord={(rec) => setSelectedRecord({ ...rec, mode: 'view' })}
+          onSeeAll={() => changeSection('service_appointments')} />}
         {sec==='reviews' && (reviewWorkOrder
           ? <WorkOrderReviewScreen
               workOrderId={reviewWorkOrder.id}

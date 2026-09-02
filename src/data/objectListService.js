@@ -158,7 +158,18 @@ function valueTypeOf(c) {
 //   { kind: 'picklist', object, field }  — managed picklist_values definition
 //   { kind: 'lookup',   table }          — search records in a referenced table
 //   undefined                            — free text/number/date (manual entry)
-function ownColumnDescriptor(c, group, ownerTable, idContext) {
+// `labelPrefix` is the object's own column prefix. A column is labelled without
+// it, exactly as a RELATED column already is (stripParentPrefix, below): under
+// a list of Service Appointments the column is "Status", not "Sa Status", and
+// under Properties it is "City", not "Property City" — the list already says
+// which object it is. Own columns were the one place the platform did not do
+// this, which read as a bug on any object whose prefix is an abbreviation.
+function ownColumnDescriptor(c, group, ownerTable, idContext, labelPrefix) {
+  const label = (name) => titleize(
+    labelPrefix && name.startsWith(`${labelPrefix}_`) && name.length > labelPrefix.length + 1
+      ? name.slice(labelPrefix.length + 1)
+      : name
+  )
   // columnName is the real DB column the ListView writes back to for inline /
   // bulk edit. For FK columns the visible `field` is the *__label display
   // column, but edits target the underlying FK column — so carry both, and tell
@@ -170,14 +181,14 @@ function ownColumnDescriptor(c, group, ownerTable, idContext) {
   if ((c.is_foreign_key && c.references_table === 'picklist_values')
       || (idContext && isPicklistValuedColumn(c, idContext))) {
     return {
-      field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group,
+      field: `${c.column_name}__label`, label: label(c.column_name), type: 'text', group,
       columnName: c.column_name, labelField: `${c.column_name}__label`,
       valueSource: { kind: 'picklist', object: ownerTable, field: c.column_name },
     }
   }
   if (c.is_foreign_key && c.references_table === 'users') {
     return {
-      field: `${c.column_name}__label`, label: userFkLabel(c.column_name), type: 'text', group,
+      field: `${c.column_name}__label`, label: userFkLabel(c.column_name, label), type: 'text', group,
       columnName: c.column_name, labelField: `${c.column_name}__label`,
       valueSource: { kind: 'lookup', table: 'users' },
     }
@@ -186,7 +197,7 @@ function ownColumnDescriptor(c, group, ownerTable, idContext) {
   // (object, column_name); the sidebar resolves this lazily and falls back to
   // free text when no definition exists.
   const type = columnType(c)
-  const base = { field: c.column_name, label: titleize(c.column_name), type, group, columnName: c.column_name }
+  const base = { field: c.column_name, label: label(c.column_name), type, group, columnName: c.column_name }
   const linkType = linkTypeOf(c)
   if (linkType) base.linkType = linkType
   const valueType = valueTypeOf(c)
@@ -254,8 +265,8 @@ function titleize(name) {
 // "Account Owner") collides with the legal/physical owner of the property or
 // account, so record-ownership FKs always render as "Record Owner". Other user
 // FKs (e.g. a "verified_by" lookup) keep their titleized name.
-function userFkLabel(columnName) {
-  return /_owner$/.test(columnName) ? 'Record Owner' : titleize(columnName)
+function userFkLabel(columnName, label = titleize) {
+  return /_owner$/.test(columnName) ? 'Record Owner' : label(columnName)
 }
 
 // Which column says a row is deleted, discovered from the table's own columns.
@@ -270,6 +281,15 @@ function softDeleteColumn(table, colNames) {
 }
 
 // Identify the record-number and name columns by the platform convention.
+// The object's own column prefix, read off the one column every record-carrying
+// table has: `<prefix>_record_number`. Derived, never a hand-kept table→prefix
+// map — a list nothing checks is the defect, not the thing the list forgot.
+// Used only to LABEL a column; the id-resolution prefix stays where it is.
+export function columnLabelPrefix(cols) {
+  const rn = (cols || []).map(c => c.column_name).find(n => /_record_number$/.test(n))
+  return rn ? rn.slice(0, -'_record_number'.length) : null
+}
+
 function identityColumns(table, cols) {
   const names = cols.map(c => c.column_name)
   const recordNumber =
@@ -296,6 +316,7 @@ export async function buildObjectColumns(table) {
   ])
   const { recordNumber, nameCol } = identityColumns(table, cols)
   const idContext = idColumnContextFor(table, picklists)
+  const labelPrefix = columnLabelPrefix(cols)
   const objectGroup = titleize(table.replace(/ies$/, 'y').replace(/s$/, ''))
 
   const out = []
@@ -309,7 +330,7 @@ export async function buildObjectColumns(table) {
   for (const c of cols) {
     if (!isListableColumn(c, { recordNumber, nameCol, idContext })) continue
     if (businessCount >= MAX_BUSINESS_COLS) break
-    out.push(ownColumnDescriptor(c, objectGroup, table, idContext))
+    out.push(ownColumnDescriptor(c, objectGroup, table, idContext, labelPrefix))
     businessCount++
   }
   return out
@@ -339,6 +360,7 @@ export async function buildObjectColumnCatalog(table) {
   ])
   const { recordNumber, nameCol } = identityColumns(table, cols)
   const idContext = idColumnContextFor(table, picklists)
+  const labelPrefix = columnLabelPrefix(cols)
   const objectGroup = titleize(table.replace(/ies$/, 'y').replace(/s$/, ''))
 
   const catalog = []
@@ -360,7 +382,7 @@ export async function buildObjectColumnCatalog(table) {
     // Table FKs are not added as a direct column; they become a related group
     // below (and their __label is offered if picklist/user).
     if (c.is_foreign_key && !LABELED_FK_TABLES.has(c.references_table)) continue
-    catalog.push(ownColumnDescriptor(c, objectGroup, table, idContext))
+    catalog.push(ownColumnDescriptor(c, objectGroup, table, idContext, labelPrefix))
   }
 
   // Related (one-hop) columns. Follow each expandable table FK to its parent.

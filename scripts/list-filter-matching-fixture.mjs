@@ -15,6 +15,11 @@
 // Run with: node scripts/list-filter-matching-fixture.mjs
 
 import { readFileSync } from 'node:fs'
+// matchFilter now delegates date comparisons to the platform's date kernel, so
+// the extracted function is evaluated with those two helpers in scope. They are
+// the REAL ones, not stand-ins — a date question must get the same answer here
+// as it does on screen.
+import { isDateFilterRow, evaluateDateFilter } from '../src/lib/listFilterDates.js'
 
 let failures = 0
 let checks = 0
@@ -40,9 +45,14 @@ for (; i < src.length; i++) {
 const body = src.slice(start, end)
 const BLANK_FILTER_VALUE = '__BLANK__'
 // eslint-disable-next-line no-new-func
-const matchFilter = new Function('BLANK_FILTER_VALUE', `${body}; return matchFilter;`)(BLANK_FILTER_VALUE)
+const matchFilter = new Function(
+  'BLANK_FILTER_VALUE', 'isDateFilterRow', 'evaluateDateFilter',
+  `${body}; return matchFilter;`
+)(BLANK_FILTER_VALUE, isDateFilterRow, evaluateDateFilter)
 
-const m = (value, op, target) => matchFilter(value, { op, value: target })
+// `type` defaults to null: an untyped filter row behaves exactly as it always
+// did, which is what every existing check below asserts.
+const m = (value, op, target, type = null) => matchFilter(value, { op, value: target }, type)
 
 // ── Text ───────────────────────────────────────────────────────────────────
 check('contains matches a substring', m('Lutheran Social Services', 'contains', 'social'), true)
@@ -103,6 +113,32 @@ check('after is strict', m('2026-08-25', 'gt', '2026-08-25'), false)
 check('before is strict', m('2026-08-25', 'lt', '2026-08-25'), false)
 check('date between is inclusive', m('2026-08-25', 'between', ['2026-08-01', '2026-08-31']), true)
 check('a blank date matches no range', m(null, 'between', ['2026-08-01', '2026-08-31']), false)
+
+// ── Dates on a DATE column — a timestamp is an instant, not a string ───────
+// Every check above passes a bare date string with no column type, which is
+// what an untyped filter row is; these pass type 'date', which is what the
+// column catalog now supplies. The difference matters on a timestamp column,
+// where the cell carries a time of day and the filter does not.
+check('a timestamp equals the calendar date it falls on',
+  m('2026-08-12T13:00:00+00:00', 'equals', '2026-08-12', 'date'), true)
+check('and that is the case string comparison got wrong',
+  m('2026-08-12T13:00:00+00:00', 'equals', '2026-08-12'), false)
+check('on or before a date includes the whole of that day',
+  m('2026-08-12T13:00:00+00:00', 'to', '2026-08-12', 'date'), true)
+check('before that date still excludes it',
+  m('2026-08-12T13:00:00+00:00', 'lt', '2026-08-12', 'date'), false)
+check('a relative literal is a date question whatever the column type says',
+  m('2000-01-01T09:00:00+00:00', 'lt', 'TODAY'), true)
+check('and a future instant is not before today',
+  m('2099-01-01T09:00:00+00:00', 'lt', 'TODAY'), false)
+check('a multi-value date equals is "any of these days"',
+  m('2026-08-12T13:00:00+00:00', 'equals', ['2026-08-11', '2026-08-12'], 'date'), true)
+check('and its negation is "none of them"',
+  m('2026-08-12T13:00:00+00:00', 'not_equals', ['2026-08-11', '2026-08-12'], 'date'), false)
+check('a blank date is still blank on a typed column',
+  m(null, 'is_blank', null, 'date'), true)
+check('a blank date answers no date comparison',
+  m(null, 'lt', 'TODAY', 'date'), false)
 
 // ── An unknown operator must not silently drop records ─────────────────────
 check('an unrecognised operator keeps the record rather than hiding it',

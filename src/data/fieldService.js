@@ -353,25 +353,41 @@ export async function fetchSchedule(date = new Date()) {
 // contact + service address + assigned auditor + work type. Sorted ascending
 // by scheduled start.
 //
-// Filter: sa_status='scheduled' AND sa_scheduled_start_time IN [now, now+days].
+// Filter: sa_status = Scheduled AND sa_scheduled_start_time between the start
+// of today and the end of the window.
+//
+// The window starts at the START OF TODAY, not at this instant. A stop that
+// began at 8am is still the dispatcher's problem at 9am, and an inbox that
+// drops a job the moment it starts is an inbox that hides the running work.
+//
+// This board is deliberately forward-only, so it can never answer "what
+// happened last month" — that is the service appointments LIST VIEW's job.
+//
 // Customer-self-scheduled is distinguished by having exactly one SAA pointing at
 // a Technician contact; we don't have an explicit "creation_source" column yet
 // (worth adding when we need to distinguish from internally-created SAs).
 
 export async function fetchUpcomingServiceAppointments(days = 14) {
-  // Direct picklist lookup — no helper for value-to-id in outreachService.
+  // The status field is `sa_status`, and its values are Title Case. This read
+  // named the field `status` with a value of `scheduled` — the pre-2026 legacy
+  // picklist, every row of which is now INACTIVE. It therefore resolved to
+  // nothing and the status filter below was silently dropped, so the board was
+  // never actually restricted to scheduled work. Look the value up rather than
+  // hardcoding its uuid: a literal id is wrong on any database whose picklists
+  // were seeded separately.
   const { data: statusRow } = await supabase
     .from('picklist_values')
     .select('id')
     .eq('picklist_object', 'service_appointments')
-    .eq('picklist_field',  'status')
-    .eq('picklist_value',  'scheduled')
+    .eq('picklist_field',  'sa_status')
+    .eq('picklist_value',  'Scheduled')
     .eq('picklist_is_active', true)
     .maybeSingle()
   const scheduledStatusId = statusRow?.id
 
   const now = new Date()
-  const end = new Date(now.getTime() + days * 24 * 3600 * 1000)
+  const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const end = new Date(windowStart.getTime() + (days + 1) * 24 * 3600 * 1000)
 
   let query = supabase
     .from('service_appointments')
@@ -403,7 +419,7 @@ export async function fetchUpcomingServiceAppointments(days = 14) {
         )
       )
     `)
-    .gte('sa_scheduled_start_time', now.toISOString())
+    .gte('sa_scheduled_start_time', windowStart.toISOString())
     .lte('sa_scheduled_start_time', end.toISOString())
     .eq('sa_is_deleted', false)
     .order('sa_scheduled_start_time', { ascending: true })
