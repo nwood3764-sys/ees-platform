@@ -1,6 +1,7 @@
 import { supabase, fetchAllPaged } from '../lib/supabase'
 import { isSystemAuditColumn } from '../lib/systemAuditFields'
 import { softDeleteColumnFor } from '../lib/softDeleteColumn'
+import { mergeFilterOptions } from '../lib/picklistFilterOptions'
 
 // =====================================================================
 // fieldMetadataService
@@ -34,6 +35,9 @@ import { softDeleteColumnFor } from '../lib/softDeleteColumn'
 
 const _columnsCache = new Map()    // tableName → Promise<FieldMeta[]>
 const _picklistOptionsCache = new Map() // `${object}.${field}` → Promise<Option[]>
+// Filter options are a DIFFERENT list from editor options (retired-but-used
+// values are offered for finding, never for choosing), so they cache apart.
+const _picklistFilterOptionsCache = new Map() // `${object}.${field}` → Promise<Option[]>
 
 const SYSTEM_COLUMN_PATTERNS = [
   /^id$/,
@@ -136,6 +140,25 @@ export function getEditableFieldsForTable(tableName) {
   return promise
 }
 
+// Picklist_field is stored inconsistently across (and even within) tables:
+// some rows use the full column name (enrollment_status), others the
+// prefix-stripped name (record_type, property_type). Match ANY plausible
+// spelling so the option list resolves regardless of how the values were
+// seeded — the same defensive approach loadPicklistLabels uses.
+function picklistFieldCandidates(object, field) {
+  return Array.from(new Set([
+    field,
+    field.includes('_') ? field.slice(field.indexOf('_') + 1) : field, // strip leading prefix
+    `${guessPrefix(object) || ''}_${field}`.replace(/^_/, ''),          // add the table prefix
+  ].filter(Boolean)))
+}
+
+// Status/lifecycle fields keep their workflow sort_order; every other picklist
+// is a choice list and sorts alphabetically by label.
+function isLifecycleField(field) {
+  return field === 'status' || /_status$/.test(field) || field === 'stage' || /_stage$/.test(field)
+}
+
 /**
  * Returns the active picklist options for a given (object, field) pair.
  * Used by the picklist editor to populate the dropdown.
@@ -146,21 +169,10 @@ export function getPicklistOptions(object, field) {
   const key = `${object}.${field}`
   if (_picklistOptionsCache.has(key)) return _picklistOptionsCache.get(key)
 
-  // Picklist_field is stored inconsistently across (and even within) tables:
-  // some rows use the full column name (enrollment_status), others the
-  // prefix-stripped name (record_type, property_type). Match ANY plausible
-  // spelling so the option list resolves regardless of how the values were
-  // seeded — the same defensive approach loadPicklistLabels uses.
-  const fieldCandidates = Array.from(new Set([
-    field,
-    field.includes('_') ? field.slice(field.indexOf('_') + 1) : field, // strip leading prefix
-    `${guessPrefix(object) || ''}_${field}`.replace(/^_/, ''),          // add the table prefix
-  ].filter(Boolean)))
+  const fieldCandidates = picklistFieldCandidates(object, field)
 
   const promise = (async () => {
-    // Status/lifecycle fields keep their workflow sort_order; every other
-    // picklist is a choice list and sorts alphabetically by label.
-    const isLifecycle = field === 'status' || /_status$/.test(field) || field === 'stage' || /_stage$/.test(field)
+    const isLifecycle = isLifecycleField(field)
     const data = await fetchAllPaged((from, to) => {
       let q = supabase
         .from('picklist_values')
@@ -184,6 +196,72 @@ export function getPicklistOptions(object, field) {
   })()
 
   _picklistOptionsCache.set(key, promise)
+  return promise
+}
+
+/**
+ * Returns the picklist options a FILTER may offer for a given (object, field).
+ *
+ * Not the same question as getPicklistOptions(), and deliberately a separate
+ * function rather than a flag on it. An EDITOR asks "what may be chosen?" and
+ * must answer with the active values only. A FILTER asks "what may be found?"
+ * — and a value that was retired after records were filed under it is still on
+ * screen in the column it names, so it has to stay searchable. Feeding both
+ * from one active-only list is what made the Technicians tab show seven
+ * contacts reading "Technician" while the Contact Record Type filter offered
+ * five values, none of them Technician (Nicholas, 2026-09-02).
+ *
+ * Retired values are included only when live records actually carry them, and
+ * are marked `retired` so the dropdown can say why they look different.
+ *
+ * Shape: [{ id, label, value, sortOrder, retired }]
+ */
+export function getPicklistFilterOptions(object, field) {
+  const key = `${object}.${field}`
+  if (_picklistFilterOptionsCache.has(key)) return _picklistFilterOptionsCache.get(key)
+
+  const fieldCandidates = picklistFieldCandidates(object, field)
+
+  const promise = (async () => {
+    const isLifecycle = isLifecycleField(field)
+
+    const valuesPromise = fetchAllPaged((from, to) => {
+      let q = supabase
+        .from('picklist_values')
+        .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+        .eq('picklist_object', object)
+        .in('picklist_field', fieldCandidates)
+      if (isLifecycle) {
+        q = q.order('picklist_sort_order', { ascending: true }).order('id', { ascending: true })
+      } else {
+        q = q.order('picklist_label', { ascending: true }).order('id', { ascending: true })
+      }
+      return q.range(from, to)
+    })
+
+    // The in-use lookup is allowed to fail. Passing null through to
+    // mergeFilterOptions falls back to the active list — exactly the behaviour
+    // this replaced, so a filter is never LOST by asking the extra question.
+    const inUsePromise = supabase
+      .rpc('picklist_values_in_use', { p_object: object, p_field: field })
+      .then(({ data, error }) => (error ? null : (data || []).map(r => r.picklist_value_id)))
+      .catch(() => null)
+
+    const [values, inUseIds] = await Promise.all([valuesPromise, inUsePromise])
+
+    return mergeFilterOptions(
+      values.map(r => ({
+        id:        r.id,
+        label:     r.picklist_label || r.picklist_value,
+        value:     r.picklist_value,
+        sortOrder: r.picklist_sort_order || 0,
+        isActive:  r.picklist_is_active !== false,
+      })),
+      inUseIds,
+    )
+  })()
+
+  _picklistFilterOptionsCache.set(key, promise)
   return promise
 }
 

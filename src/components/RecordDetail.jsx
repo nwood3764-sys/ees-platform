@@ -39,6 +39,7 @@ const WorkPlanRunner                       = lazy(() => import('../fieldMobile/W
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { formatUsPhoneDisplay } from '../lib/fieldLinks'
+import { formatDateOnly, formatInstant, isDateOnlyValue } from '../lib/dateDisplay'
 import { holdAppReload } from '../lib/appUpdate'
 import { contractorContactPairsFor, resolveContractorContact } from '../lib/contractorContact'
 import FieldValueLink from './FieldValueLink'
@@ -110,6 +111,7 @@ import {
   getRecordTypeColumn,
   fetchAvailableRecordTypes,
   fetchConstrainingParentForCreate,
+  fetchDerivationParentForCreate,
   fetchConstrainingParentCandidates,
   fetchOpportunityInheritedFields,
   fetchProgramStateForCreate,
@@ -196,8 +198,8 @@ function formatByReturnType(raw, returnType) {
   switch (returnType) {
     case 'currency': return `$${Number(raw).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     case 'percent':  return `${Number(raw)}%`
-    case 'date':     return raw ? new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
-    case 'datetime': return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
+    case 'date':     return (raw ? formatDateOnly(raw) : null) ?? '—'
+    case 'datetime': return (raw ? formatInstant(raw) : null) ?? '—'
     case 'boolean':  return raw ? 'Yes' : 'No'
     case 'number':   return Number(raw).toLocaleString()
     case 'phone':    return formatUsPhoneDisplay(raw)
@@ -296,18 +298,19 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     case 'percent':    return `${Number(raw)}%`
     case 'date': {
       if (!raw) return '—'
-      const d = new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw)
       // Optional per-field display format. 'MM/DD/YY' matches external program
       // forms that use a 2-digit year (e.g. the pre-approval application).
       if (fieldDef.format === 'MM/DD/YY') {
+        const d = new Date(isDateOnlyValue(raw) ? `${String(raw).trim()}T00:00:00` : raw)
+        if (isNaN(d.getTime())) return '—'
         const mm = String(d.getMonth() + 1).padStart(2, '0')
         const dd = String(d.getDate()).padStart(2, '0')
         const yy = String(d.getFullYear()).slice(-2)
         return `${mm}/${dd}/${yy}`
       }
-      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+      return formatDateOnly(raw) ?? '—'
     }
-    case 'datetime':   return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
+    case 'datetime':   return (raw ? formatInstant(raw) : null) ?? '—'
     case 'boolean':    return raw ? 'Yes' : 'No'
     case 'number':     return raw != null ? Number(raw).toLocaleString() : '—'
     case 'multiselect': {
@@ -5684,6 +5687,21 @@ function RelatedListWidget({
       }
     }
 
+    // A separate question from the one above: which parent DECIDES this
+    // child's record type by default. A contact created on a Property Owner
+    // account is a Property Owner Contact (Nicholas, 2026-09-02) — nothing is
+    // forbidden there, so accounts -> contacts has a derivation rule and no
+    // eligibility edge, and reading it from the eligibility table would never
+    // fire. Transient __ keys, stripped before the insert; the database
+    // stamps the same value independently if the field arrives blank.
+    {
+      const derivationParent = await fetchDerivationParentForCreate(childTable, prefillObj)
+      if (derivationParent) {
+        prefillObj.__derivationParentObject       = derivationParent.parentObject
+        prefillObj.__derivationParentRecordTypeId = derivationParent.parentRecordTypeId
+      }
+    }
+
     // A work order always lives on a project, but the record it was created from
     // often doesn't have one — an assessment, for instance, links the property,
     // building, and opportunity but no project. Resolve the opportunity's most
@@ -7304,6 +7322,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // unconstrained, which is the case for most objects.
   const prefillParentObject       = prefill?.__parentObject || null
   const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
+  // The parent that DECIDES the record type (record_type_derivation), which is
+  // not always the one that CONSTRAINS it (record_type_eligibility). Falls back
+  // to the constraining parent so an object governed by both behaves as before.
+  const prefillDerivationParentObject =
+    prefill?.__derivationParentObject || prefill?.__parentObject || null
+  const prefillDerivationParentRecordTypeId =
+    prefill?.__derivationParentRecordTypeId || prefill?.__parentRecordTypeId || null
   // The create came from a building/property running more than one program, so
   // WHICH parent this belongs to is a question the picker asks before offering
   // any record type (see seedConstrainingParent). Answering it also carries the
@@ -9145,6 +9170,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         state={prefillState}
         parentObject={prefillParentObject}
         parentRecordTypeId={prefillParentRecordTypeId}
+        derivationParentObject={prefillDerivationParentObject}
+        derivationParentRecordTypeId={prefillDerivationParentRecordTypeId}
         parentChoices={prefillParentChoices}
         takenOnBuildingId={prefillTakenOnBuildingId}
         onPick={async (rt, parentPick) => {

@@ -9,6 +9,7 @@ import { fetchSavedViewsForObject } from '../data/listViewsService'
 import { useNav } from '../lib/navContext'
 import { isUrlAddressableTable, getTableListUrl } from '../lib/urlNav'
 import { useDataRefresh } from '../lib/dataRefresh'
+import { scopeForSection } from '../lib/objectSectionScopes'
 
 // ---------------------------------------------------------------------------
 // ObjectListSection — renders the universal list view for any object, on any
@@ -26,7 +27,7 @@ import { useDataRefresh } from '../lib/dataRefresh'
 // re-run with those fields so the parent-join resolves their values.
 // ---------------------------------------------------------------------------
 
-export default function ObjectListSection({ objectTable, moduleId, initialFilters = null }) {
+export default function ObjectListSection({ objectTable, moduleId, initialFilters = null, sectionId = null }) {
   // When the app shell provides navigation (the default in the running app),
   // open records by pushing a real record URL (`/<table>/<id>`) so every record
   // is shareable, bookmarkable, and visible to the topbar gear (Salesforce
@@ -42,6 +43,11 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   // (Salesforce related-list page parity) rather than the whole object. A
   // stable key drives a re-fetch when the scope changes.
   const listScope = (nav?.listScope && nav.listScope.table === objectTable) ? nav.listScope : null
+
+  // A section whose object list is SCOPED rather than filtered — Field >
+  // Technicians is users where user_is_field_technician. Applied to the fetch,
+  // so there is no filter row to clear and no saved view that can widen it.
+  const objectScope = scopeForSection(moduleId, sectionId, objectTable)
   const scopeKey = listScope
     ? `${listScope.fk}|${listScope.parentId}|${(listScope.via || []).map(v => `${v.table}:${v.fk}`).join('>')}`
     : ''
@@ -79,7 +85,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   }
 
   const fetchRows = useCallback(async (relatedFields) => {
-    const rows = await fetchObjectRecords(objectTable, { activeFields: relatedFields, relatedScope: listScope })
+    const rows = await fetchObjectRecords(objectTable, { activeFields: relatedFields, relatedScope: listScope, objectScope })
     return rows
   }, [objectTable, scopeKey])   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -88,7 +94,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     try {
       const [cat, savedViews] = await Promise.all([
         buildObjectColumnCatalog(objectTable),
-        fetchSavedViewsForObject(objectTable).catch(() => []),
+        fetchSavedViewsForObject(objectTable, moduleId).catch(() => []),
       ])
       const seeded = seedRelatedFromViews(savedViews)
       const rows = await fetchRows(seeded)
@@ -110,10 +116,10 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       try {
         const [cat, savedViews] = await Promise.all([
           buildObjectColumnCatalog(objectTable),
-          fetchSavedViewsForObject(objectTable).catch(() => []),
+          fetchSavedViewsForObject(objectTable, moduleId).catch(() => []),
         ])
         const seeded = seedRelatedFromViews(savedViews)
-        const rows = await fetchObjectRecords(objectTable, { activeFields: seeded, relatedScope: listScope })
+        const rows = await fetchObjectRecords(objectTable, { activeFields: seeded, relatedScope: listScope, objectScope })
         if (cancelled) return
         lastRowsRef.current = rows
         setCatalog(cat.catalog); setGroups(cat.groups)

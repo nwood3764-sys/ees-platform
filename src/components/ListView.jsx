@@ -10,7 +10,10 @@ import HelpIcon from './help/HelpIcon';
 import FieldValueLink from './FieldValueLink';
 import { formatUsPhoneDisplay } from '../lib/fieldLinks';
 import { formatCurrency } from '../lib/currencyFormat';
+import { formatDateValue } from '../lib/dateDisplay';
 import { collectRelatedFields, collectViewFields } from '../lib/listViewFields';
+import { isDateFilterRow, evaluateDateFilter } from '../lib/listFilterDates';
+import { DATE_LITERALS, isDateLiteral, parseDateLiteral, dateLiteralLabel } from '../lib/reportFilters';
 import { useColumnResize } from '../lib/columnWidths';
 import {
   numberFilters, compileFilterLogic, logicAfterRemoval, validateFilterLogic,
@@ -19,6 +22,7 @@ import {
 import {
   getEditableFieldsForTable,
   getPicklistOptions,
+  getPicklistFilterOptions,
   searchLookupOptions,
   bulkUpdateRecords,
   bulkSoftDeleteRecords,
@@ -256,13 +260,37 @@ function defaultOperatorForType(type) {
 }
 
 // Evaluate one filter row against one record's raw cell value.
-function matchFilter(rawValue, filter) {
+//
+// `type` is the column's declared type from the column catalog. It matters for
+// exactly one thing — dates — because a timestamp cell does not compare
+// lexically against a date, and a relative literal ("TODAY") is not a string
+// to compare at all. Both go to the platform's date kernel; see
+// ../lib/listFilterDates.
+function matchFilter(rawValue, filter, type, now) {
   const v = (rawValue === null || rawValue === undefined) ? '' : String(rawValue);
   const blank = v.trim() === '';
   const { op } = filter;
 
   if (op === 'is_blank') return blank;
   if (op === 'is_not_blank') return !blank;
+
+  // A date question is answered as an instant range, never as text. This is
+  // ahead of the multi-select branch on purpose: an `equals` on a date column
+  // means "any time that day", not "this exact string".
+  if (isDateFilterRow(type, filter.value, op)) {
+    const values = (op === 'equals' || op === 'not_equals')
+      ? (Array.isArray(filter.value) ? filter.value : [filter.value])
+      : [filter.value];
+    // A multi-value date equals is "any of these days"; not_equals is "none of
+    // them", so the negation wraps the whole set rather than each member.
+    if (op === 'equals' || op === 'not_equals') {
+      const hit = values.some(val => (
+        val === BLANK_FILTER_VALUE ? blank : evaluateDateFilter(rawValue, 'equals', val, now)
+      ));
+      return op === 'equals' ? hit : !hit;
+    }
+    return evaluateDateFilter(rawValue, op, filter.value, now);
+  }
 
   // Multi-select equals/not_equals: value is an array (or single legacy value).
   if (op === 'equals' || op === 'not_equals') {
@@ -310,6 +338,9 @@ function describeFilter(filter, colLabel) {
   const opMeta = Object.values(OPERATORS).flat().find(o => o.op === filter.op);
   const opLabel = opMeta?.label || filter.op;
   if (VALUELESS_OPS.has(filter.op)) return `${colLabel} ${opLabel}`;
+  // A relative date reads as what it means. "Scheduled Start on or after
+  // TODAY" is a token on screen; "on or after Today" is a sentence.
+  if (isDateLiteral(filter.value)) return `${colLabel} ${opLabel} ${dateLiteralLabel(filter.value)}`;
   if (filter.op === 'equals' && Array.isArray(filter.value)) {
     const shown = filter.value.map(v => v === BLANK_FILTER_VALUE ? '(Blanks)' : v);
     return `${colLabel}: ${shown.join(', ')}`;
@@ -1737,10 +1768,14 @@ function FilterValueEditor({ row, onChange }) {
       (async () => {
         setLoadingOpts(true);
         try {
-          const list = await getPicklistOptions(vs.object, vs.field);
+          // The FILTER list, not the editor list: a value retired after
+          // records were filed under it is still on screen in the column it
+          // names, so it has to stay findable. getPicklistOptions() is the
+          // editors' active-only list and stays that way.
+          const list = await getPicklistFilterOptions(vs.object, vs.field);
           if (cancelled || stale()) return;
           if ((!list || list.length === 0) && vs.maybe) setOpts('TEXT');
-          else setOpts((list || []).map(o => ({ label: o.label })));
+          else setOpts((list || []).map(o => ({ label: o.label, retired: !!o.retired })));
         } catch {
           if (!cancelled && !stale()) setOpts(vs?.maybe ? 'TEXT' : []);
         } finally {
@@ -1834,6 +1869,12 @@ function FilterValueEditor({ row, onChange }) {
                     </span>
                   )}
                   {o.label}
+                  {o.retired && (
+                    <span title="Retired: no longer offered on new records, still carried by existing ones"
+                      style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 10, letterSpacing: '0.04em', textTransform: 'uppercase', color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 3, padding: '1px 4px' }}>
+                      Retired
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -1846,6 +1887,49 @@ function FilterValueEditor({ row, onChange }) {
 
   // ── Manual inputs ───────────────────────────────────────────────────────
   const inputType = row.type === 'date' ? 'date' : (row.type === 'number' ? 'number' : 'text');
+
+  // A date filter may name a RELATIVE period instead of a calendar date, so a
+  // saved view can mean "today" forever rather than freezing one morning's
+  // date into itself. The picker is offered on date columns and on any row
+  // that already carries a literal — a saved filter must always be editable in
+  // the vocabulary it was written in, and a `type="date"` box shows a literal
+  // as blank and then overwrites it on the first keystroke.
+  const literal = parseDateLiteral(row.value);
+  if ((row.type === 'date' || literal) && !isRange) {
+    const literalDef = literal ? DATE_LITERALS.find(d => d.token === literal.token) : null;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <select
+          value={literal ? literal.token : ''}
+          onChange={e => {
+            const token = e.target.value;
+            if (!token) { onChange(''); return; }
+            const def = DATE_LITERALS.find(d => d.token === token);
+            onChange(def?.needsN ? `${token}:${literal?.n ?? 30}` : token);
+          }}
+          style={baseStyle}
+        >
+          <option value="">Fixed date…</option>
+          {DATE_LITERALS.map(d => <option key={d.token} value={d.token}>{d.label}</option>)}
+        </select>
+        {literalDef?.needsN && (
+          <input
+            type="number" min={1} value={literal.n ?? ''}
+            onChange={e => {
+              const n = parseInt(e.target.value, 10);
+              onChange(`${literal.token}:${Number.isFinite(n) && n > 0 ? n : 1}`);
+            }}
+            onKeyDown={blockNegativeKeys()}
+            placeholder="How many?" style={baseStyle}
+          />
+        )}
+        {!literal && (
+          <input type="date" value={Array.isArray(row.value) ? (row.value[0] || '') : (row.value || '')}
+            onChange={e => onChange(e.target.value)} style={baseStyle} />
+        )}
+      </div>
+    );
+  }
 
   if (isRange) {
     const [lo, hi] = Array.isArray(row.value) ? row.value : ['', ''];
@@ -2049,7 +2133,19 @@ export function ListView({
   // When set, it's an array of column field names to show, in the catalog's
   // order. The record-identity columns ('name', and the record-number 'id'
   // shown first) are always kept so a row is never un-clickable / unlabeled.
-  const [visibleColumns, setVisibleColumns] = useState(null);
+  //
+  // Seeded from the first view, like the sort and the filters above it. It used
+  // to start null while those two came from the view, so the list opened
+  // two-thirds of a view: the right rows in the right order under the wrong
+  // columns, and a view that exists to put Scheduled Start beside Status
+  // delivered neither until you re-picked it from the selector. An empty
+  // selection still falls back to the default columns (see effectiveColumns),
+  // so a view that saved no columns is unaffected.
+  const [visibleColumns, setVisibleColumns] = useState(
+    Array.isArray(firstView?.visibleColumns) && firstView.visibleColumns.length > 0
+      ? firstView.visibleColumns
+      : null
+  );
   const [showColPicker, setShowColPicker] = useState(false);
   const [colPickerRect, setColPickerRect] = useState(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -2554,7 +2650,14 @@ export function ListView({
       // Parse the expression ONCE for the whole list, not once per row.
       const evaluate = compileFilterLogic(filterEntries, filterLogic);
       const entryKeys = filterEntries.map(e => rowKeyFor(e.field));
-      d = d.filter(r => evaluate((entry, i) => matchFilter(r[entryKeys[i]], entry)));
+      // The column's declared type, resolved once per filter rather than once
+      // per row, and one clock for the whole pass — a relative literal must
+      // mean the same instant for the first row and the last.
+      const entryTypes = filterEntries.map(e =>
+        (columnByField.get(e.field) || columnByField.get(rowKeyFor(e.field)))?.type || e.type || null
+      );
+      const now = new Date();
+      d = d.filter(r => evaluate((entry, i) => matchFilter(r[entryKeys[i]], entry, entryTypes[i], now)));
     }
     if (sortField) {
       const sk = rowKeyFor(sortField);
@@ -2564,7 +2667,7 @@ export function ListView({
       });
     }
     return d;
-  }, [activeFilters, filterLogic, sortField, sortDir, globalSearch, data, fieldAlias]);
+  }, [activeFilters, filterLogic, sortField, sortDir, globalSearch, data, fieldAlias, columnByField]);
 
   // Filters whose field this object no longer offers. A saved view can carry
   // one: a filter authored against a column that has since been withdrawn —
@@ -2693,6 +2796,16 @@ export function ListView({
     // A money column reads as money. Mono, like every other number in LEAP.
     if (col.valueType === 'currency') {
       return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v == null || v === '' ? C.textMuted : C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12, textAlign: 'right', whiteSpace: 'nowrap' }}>{formatCurrency(v)}</td>;
+    }
+    // A date cell is WRITTEN, not dumped. Without this a timestamptz column
+    // printed its stored instant verbatim — "2026-09-02T15:00:00.000Z" — in
+    // UTC, on a screen made for scanning. An unparseable value falls through to
+    // the raw text below rather than being replaced with "Invalid Date".
+    if (col.type === 'date') {
+      const shownDate = formatDateValue(v);
+      if (shownDate) {
+        return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textSecondary, whiteSpace: 'nowrap' }}>{shownDate}</td>;
+      }
     }
     if (col.linkType) {
       const shownLink = col.linkType === 'phone' && v ? formatUsPhoneDisplay(v) : v;
