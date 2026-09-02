@@ -8,11 +8,11 @@
 // that's actually relevant to this record, not a curated subset.
 //
 // Record-type scoping: the widget calls the picklist_values_for_record_type
-// RPC, which returns only values either (a) explicitly assigned to the
-// record's record_type via picklist_value_record_type_assignments or
-// (b) universal (zero assignment rows for that value — applies everywhere).
-// Until an admin authors any scoped assignments, every value falls through
-// to (b) and renders on every layout, preserving the pre-scoping behavior.
+// RPC, which returns the values selected for the record's record type — and,
+// for a LIFECYCLE field, nothing at all when nobody has selected any. A strip
+// of every status the object owns is not this record type's path; it is the
+// absence of one, and it now says so rather than painting 36 chevrons.
+// The record's own status is always returned, wherever the selection stands.
 //
 // Stage states:
 //   complete — index < current's index (filled emerald)
@@ -131,12 +131,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
   const [picklistValues, setPicklistValues] = useState(null)
   const [transitions, setTransitions]       = useState(null)
 
-  // Record type for the current record. Used to filter the chevron strip via
-  // the picklist_values_for_record_type RPC, which applies the universal-
-  // fallback rule: a picklist value with zero rows in
-  // picklist_value_record_type_assignments renders on every record type
-  // (so the migration is non-destructive — every status value continues to
-  // appear on every layout until someone explicitly scopes it).
+  // Record type for the current record — what the chevron strip is filtered by.
   const recordTypeId = useMemo(() => getRecordTypeValue(record), [record])
 
   useEffect(() => {
@@ -144,9 +139,12 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
     let alive = true
     Promise.all([
       supabase.rpc('picklist_values_for_record_type', {
-        p_object:      tableName,
-        p_field:       statusField,
-        p_record_type: recordTypeId || null,
+        p_object:       tableName,
+        p_field:        statusField,
+        p_record_type:  recordTypeId || null,
+        // Where the record already stands is always a stage on its own path,
+        // even if that value is not in the record type's configured set.
+        p_current_value: (statusField ? record?.[statusField] : null) || null,
       }),
       supabase.from('status_transitions')
         .select('st_from_status_id, st_to_status_id, st_description')
@@ -164,7 +162,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
         if (alive) { setPicklistValues([]); setTransitions([]) }
       })
     return () => { alive = false }
-  }, [tableName, statusField, recordTypeId])
+  }, [tableName, statusField, recordTypeId, statusField ? record?.[statusField] : null])
 
   const currentStatusId = statusField ? record?.[statusField] : null
   const currentIdx = useMemo(
@@ -182,7 +180,24 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
   )
 
   if (picklistValues === null) return null
-  if (picklistValues.length === 0) return null
+  // No stages configured for this record type. The strip used to vanish, which
+  // looks identical to a layout with no path on it; say what is missing instead,
+  // because the answer is a configuration a person has to author.
+  if (picklistValues.length === 0) {
+    return (
+      <div style={{
+        border: `1px dashed ${C.borderDark || C.border}`, borderRadius: 8,
+        background: C.cardSecondary, padding: '14px 16px',
+        fontSize: 12.5, color: C.textSecondary, lineHeight: 1.45,
+      }}>
+        <strong style={{ color: C.textPrimary, fontWeight: 600 }}>
+          No statuses are set up for this record type.
+        </strong>
+        {' '}Choose the statuses that make up its lifecycle in Object Manager →
+        this object → Fields &amp; Relationships → {statusField} → Record Types.
+      </div>
+    )
+  }
 
   const currentStage = currentIdx >= 0 ? picklistValues[currentIdx] : null
   const currentLabel = currentStage ? currentStage.picklist_label : null
