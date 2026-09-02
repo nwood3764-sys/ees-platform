@@ -12,6 +12,7 @@ import {
   reorderFieldValues,
   reorderFieldValuesForRecordType,
   fetchRecordTypeValueOrder,
+  fetchPicklistFieldScoping,
 } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -22,9 +23,14 @@ import {
 //   * Selected Values (right)  = the values this record type shows, IN ORDER.
 // Drag values between panels, drag or use ↑/↓ to order the Selected side.
 //
-// Selected empty  ⇒  the record type shows ALL values (no restriction), incl.
-// any added later. Putting values on the right restricts + orders it. So the
-// left panel ALWAYS shows the full list — nothing is hidden behind a prompt.
+// What Selected-empty means depends on the FIELD, and the screen says which:
+//   * an attribute picklist  ⇒ the record type shows ALL values, incl. any
+//     added later;
+//   * a record LIFECYCLE field (picklist_field_record_type_scoping) ⇒ the
+//     record type shows NONE, because "every status the object owns" is not a
+//     lifecycle. It has to be authored here.
+// Either way the left panel ALWAYS shows the full list — nothing is hidden
+// behind a prompt.
 //
 // A collapsible section below manages the field's master value list (add,
 // rename, describe, activate, reorder) — the values that feed both panels.
@@ -71,6 +77,8 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   const [valDragId, setValDragId] = useState(null)
   const [valDragOverId, setValDragOverId] = useState(null)
   const [valBusy, setValBusy] = useState(false)
+  // 'show_none' (a lifecycle) or 'show_all' (an attribute picklist).
+  const [emptyMeans, setEmptyMeans] = useState('show_all')
 
   const valuesById = useMemo(() => {
     const m = {}
@@ -97,8 +105,10 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
       fetchFieldValues(objectName, field),
       fetchRecordTypesFor(objectName),
       fetchRecordTypeValueAssignments(objectName, field),
-    ]).then(async ([vals, rts, asg]) => {
+      fetchPicklistFieldScoping(objectName, field),
+    ]).then(async ([vals, rts, asg, scoping]) => {
       if (cancelled) return
+      setEmptyMeans(scoping)
       const map = asg.map || {}
       setValues(vals)
       setRecordTypes(rts)
@@ -224,7 +234,9 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
       })
       setSavedSelected([...selected])
       setSavedNote(selected.length === 0
-        ? 'Saved — this record type shows all values.'
+        ? (emptyMeans === 'show_none'
+            ? 'Saved — this record type now shows NO values until you select some.'
+            : 'Saved — this record type shows all values.')
         : `Saved — ${selected.length} value${selected.length === 1 ? '' : 's'} for this record type.`)
     } catch (e) {
       setSavedNote('Save failed: ' + (e.message || e))
@@ -375,13 +387,21 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 220 }}>
               <span style={{
                 alignSelf: 'flex-start', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 4,
-                background: isUniversal ? '#e8f8f2' : '#e8f3fb', color: isUniversal ? '#1a7a4e' : '#1a5a8a',
+                background: isUniversal && emptyMeans === 'show_none' ? '#fdf4e3'
+                          : isUniversal ? '#e8f8f2' : '#e8f3fb',
+                color:      isUniversal && emptyMeans === 'show_none' ? '#8a6314'
+                          : isUniversal ? '#1a7a4e' : '#1a5a8a',
               }}>
-                {isUniversal ? 'SHOWS ALL VALUES' : `${selected.length} VALUE${selected.length === 1 ? '' : 'S'}`}
+                {isUniversal
+                  ? (emptyMeans === 'show_none' ? 'SHOWS NO VALUES' : 'SHOWS ALL VALUES')
+                  : `${selected.length} VALUE${selected.length === 1 ? '' : 'S'}`}
               </span>
               <span style={{ fontSize: 11.5, color: C.textSecondary, lineHeight: 1.4 }}>
                 Drag values from <strong>Available</strong> into <strong>Selected</strong> to choose and order what this
-                record type shows. Leave Selected empty to show every value.
+                record type shows.{' '}
+                {emptyMeans === 'show_none'
+                  ? 'This field is a record lifecycle, so an empty Selected list shows no values at all — the lifecycle has to be chosen here.'
+                  : 'Leave Selected empty to show every value.'}
               </span>
             </div>
           )}

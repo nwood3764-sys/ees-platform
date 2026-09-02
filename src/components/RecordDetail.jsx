@@ -2623,6 +2623,22 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
 
     case 'picklist': {
       const opts = picklistOpts || []
+      // Loaded and empty is a configuration answer, not a control. An empty
+      // <select> reads as broken; it has to say why it is empty and where the
+      // values come from, which for a lifecycle field is the record type's own
+      // selection in Object Manager.
+      if (Array.isArray(picklistOpts) && opts.length === 0) {
+        return (
+          <div style={{
+            ...inputBase, display: 'flex', alignItems: 'center', cursor: 'default',
+            background: C.cardSecondary, color: C.textSecondary, fontSize: 12.5, lineHeight: 1.35,
+            height: 'auto', minHeight: 34, paddingTop: 7, paddingBottom: 7,
+          }}>
+            No values are set up for this record type — add them in Object Manager
+            under this field&rsquo;s Record Types.
+          </div>
+        )
+      }
       // Radio-button rendering (field.display === 'radio') for picklists that
       // mirror a radio-group on an external form, so the LEAP field matches the
       // source form's input type instead of collapsing to a dropdown. Same
@@ -8021,7 +8037,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const recordState = recordStateValue(currentRecord, getTableColumnPrefix(tableName))
       const opts = {}
       await Promise.all(pickFields.map(async fn => {
-        try { opts[fn] = await fetchPicklistOptions(tableName, fn, recordTypeId, recordState) } catch { opts[fn] = [] }
+        // The record's own value goes in so the resolver always returns it —
+        // a status outside (or ahead of) its record type's configured set stays
+        // visible and selectable rather than vanishing from its own record.
+        try { opts[fn] = await fetchPicklistOptions(tableName, fn, recordTypeId, recordState, currentRecord?.[fn] || null) } catch { opts[fn] = [] }
       }))
       setAllPicklistOpts(opts)
     }

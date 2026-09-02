@@ -1760,7 +1760,7 @@ export async function saveRecord(tableName, recordId, changes) {
  * first — and does nothing at all to a set where none do, which is every other
  * picklist in the platform.
  */
-export async function fetchPicklistOptions(objectName, fieldName, recordTypeId = null, state = null) {
+export async function fetchPicklistOptions(objectName, fieldName, recordTypeId = null, state = null, currentValue = null) {
   // Status / lifecycle fields are the ONE place where sort_order is the
   // logical order (To Be Scheduled -> Scheduled -> In Progress ...). Every
   // other picklist is a choice list and must be alphabetical ascending so the
@@ -1774,9 +1774,14 @@ export async function fetchPicklistOptions(objectName, fieldName, recordTypeId =
   // admin's per-record-type value selection (picklist_value_record_type_assignments)
   // via the picklist_values_for_record_type resolver — so a status dropdown shows
   // ONLY the statuses selected for that record type, matching the status path.
-  // The resolver may legitimately return zero (a record type with no selection),
-  // so we first confirm which field-name spelling actually holds values (to avoid
-  // mistaking a wrong field name for a strict-zero result), then scope that one.
+  //
+  // Zero is a real answer, not an error. A LIFECYCLE field (declared in
+  // picklist_field_record_type_scoping) whose record type has no selection
+  // returns nothing at all, because "every status of three different objects"
+  // is not a lifecycle — it has to be authored. An ATTRIBUTE picklist with no
+  // selection still returns every active value. We first confirm which
+  // field-name spelling actually holds values, so a wrong field name is never
+  // mistaken for that legitimate zero, then scope that one.
   if (recordTypeId && !isRecordTypeField(fieldName)) {
     const prefix = getTableColumnPrefix(objectName)
     const shortField = (prefix && fieldName.startsWith(`${prefix}_`)) ? fieldName.slice(prefix.length + 1) : null
@@ -1789,8 +1794,13 @@ export async function fetchPicklistOptions(objectName, fieldName, recordTypeId =
       if (count && count > 0) { resolvedField = f; break }
     }
     if (resolvedField) {
+      // p_current_value: the value this record already holds. The resolver
+      // always returns it, even when it sits outside the record type's
+      // selection (or the selection is empty), so a stored status can never be
+      // hidden by configuration and can never be silently cleared on save.
       const { data, error } = await supabase.rpc('picklist_values_for_record_type', {
         p_object: objectName, p_field: resolvedField, p_record_type: recordTypeId,
+        p_current_value: currentValue || null,
       })
       if (!error && Array.isArray(data)) {
         const lc = isLifecycleField(resolvedField)

@@ -2564,3 +2564,30 @@ export async function fetchResourceAbsences() {
     ra_notes: r.ra_notes,
   }))
 }
+
+/**
+ * What an EMPTY per-record-type value selection means for this picklist field.
+ *
+ * 'show_none' — the field is a record LIFECYCLE (declared in
+ *   picklist_field_record_type_scoping). A record type that has selected
+ *   nothing offers nothing, and its lifecycle has to be authored.
+ * 'show_all'  — an ordinary attribute picklist: nothing selected means every
+ *   active value, which is the platform default and needs no row.
+ *
+ * Read from the database, never guessed from the column name — 27 of the 33
+ * fields whose name ends in _status or _stage are attributes (Occupied/Vacant,
+ * a combustion test result), not lifecycles.
+ */
+export async function fetchPicklistFieldScoping(objectName, field) {
+  const { data, error } = await supabase
+    .from('picklist_field_record_type_scoping')
+    .select('pfrs_empty_selection, pfrs_field, pfrs_notes')
+    .eq('pfrs_object', objectName)
+    .eq('pfrs_is_active', true)
+    .or('pfrs_is_deleted.is.null,pfrs_is_deleted.eq.false')
+  if (error) return 'show_all'
+  // Picklist rows use either the bare field name ('status') or the column name
+  // ('project_status'); match whichever this field is spelled as.
+  const row = (data || []).find(r => r.pfrs_field === field)
+  return row?.pfrs_empty_selection === 'show_none' ? 'show_none' : 'show_all'
+}
