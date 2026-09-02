@@ -84,6 +84,29 @@ export const CHART_COLORS = ['#009c65','#623e96','#1398e2','#813075','#7a89e7','
 // pie already does; this is the backstop for the ones that do not.
 export const CHART_COLOR_OVERFLOW = '#8fa0b8';
 
+/**
+ * The mark colour for a chart with ONE series.
+ *
+ * A single-series bar, line, gauge or sparkline used the UI accent (#3ecf8e)
+ * directly, so after the palette was re-stepped a bar chart and a stacked bar
+ * on the same dashboard showed two different greens — and the accent cannot
+ * clear 3:1 on a white card at its own lightness, which is why it was replaced
+ * for series work in the first place. One series is slot 1.
+ */
+export const CHART_INK = CHART_COLORS[0];
+
+/**
+ * Sequential ramp for MAGNITUDE — heatmaps, calendar heatmaps, choropleths.
+ *
+ * One hue (the palette's emerald, OKLCH H 160), lightness stepping steadily
+ * from 0.95 to 0.43 and never doubling back. That monotonicity IS the encoding:
+ * a rainbow or a ramp that brightens in the middle makes a reader compare hues
+ * instead of reading a quantity. Not a categorical palette and never used as
+ * one — these steps are deliberately too close together to tell apart as
+ * identities.
+ */
+export const CHART_SEQUENTIAL = ['#def5e8','#b6e4ca','#7fcfa4','#44b782','#0da26b','#007f4e','#00613a'];
+
 /** The colour for series `i`. Never cycles — see CHART_COLOR_OVERFLOW. */
 export function seriesColor(i) {
   const n = Number(i)
