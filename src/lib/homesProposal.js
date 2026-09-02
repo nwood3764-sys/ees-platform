@@ -871,9 +871,11 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   drawTitle();
   // three balanced columns across the page: Contractor | Project Information | Proposal Details
   const CX2=M+200, CX3=W-M;
+  // Date lines print ONLY when a value exists — a bare "Est. Start Date:" with
+  // nothing after it reads as an unfinished document, not a project detail.
   const projInfo=isInv
-    ?[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
-    :[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),'Est. Start Date: '+(F.pjEstStart||''),'Est. Completion Date: '+(F.pjEstEnd||'')];
+    ?[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),(F.pjStart?('Start Date: '+F.pjStart):''),(F.pjEnd?('Completion Date: '+F.pjEnd):'')]
+    :[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),(F.pjEstStart?('Est. Start Date: '+F.pjEstStart):''),(F.pjEstEnd?('Est. Completion Date: '+F.pjEstEnd):'')];
   const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail];
   bh('Primary IRA Contractor:',M,st.y);
   bh('Project Information:',CX2,st.y);
