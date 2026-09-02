@@ -869,8 +869,9 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
         ? `Photo captured (${leg}) · ${step.name}`
         : `${uploadResultLabel({ uploaded, failed, rejected })} · ${step.name}`)
     }
+    // uploaded + failed always equals list.length here, and the empty list
+    // returned above — so a failure count is the only thing left to report.
     if (failed > 0) onPhotoError(lastError?.message || 'Photo upload failed.')
-    else if (uploaded === 0) onPhotoError(uploadResultLabel({ rejected }) || 'Photo upload failed.')
     if (lastRow) {
       photoGpsMissing(lastRow).then((missing) => {
         if (missing) {
