@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { applyRecordInsertDefaults } from '../lib/recordInsertDefaults'
 import { normalizeStateCode, programStateFromSeed, statesInRecordTypes, stateHasNoPrograms }
   from '../lib/programStateScope'
 import { loadPicklists } from './outreachService'
@@ -1918,140 +1919,49 @@ export async function insertRecord(tableName, fields) {
  * This helper is shared between RecordDetail.handleSave and the picker
  * modal's inline-create flow so both paths produce identical inserts.
  */
-export function applyInsertDefaults(tableName, fields, userId) {
-  // Explicit table -> column-prefix map. Replaces a previous pluralization-
-  // guessing loop that broke for y->ies words (properties, opportunities,
-  // assessments-was-fine-but-companies/categories etc would have failed
-  // too). Map covers every standard-prefix Energy Efficiency Services
-  // business table. Short-prefix tables (incentive_applications -> ia_, etc.)
-  // are handled by the explicit branches below.
-  const TABLE_PREFIX = {
-    accounts:       'account',
-    assessments:    'assessment',
-    buildings:      'building',
-    contacts:       'contact',
-    enrollments:    'enrollment',
-    equipment:      'equipment',   // already singular
-    opportunities:  'opportunity',
-    opportunity_line_items:  'oli',
-    opportunity_record_type_price_books: 'ortpb',
-    price_books:             'price_book',
-    price_book_entries:      'price_book_entry',
-    products:       'product',
-    projects:       'project',
-    properties:     'property',
-    skills:         'skill',
-    units:          'unit',
-    vehicles:       'vehicle',
-    work_orders:    'work_order',
+export async function applyInsertDefaults(tableName, fields, userId) {
+  // The audit columns come from the TABLE'S OWN COLUMNS, never from a list of
+  // table names. See src/lib/recordInsertDefaults.js for why the anchor is
+  // `<prefix>_record_number` and not `_owner` or the table name — both of those
+  // are wrong on real LEAP tables. This replaced a ~34-entry hand-written map
+  // while 86 tables carry a NOT NULL owner, so most objects could not be
+  // created from the UI at all and every newly added object joined them
+  // silently.
+  const columns = await fetchTableColumnNames(tableName)
+  applyRecordInsertDefaults(columns, fields, userId)
+
+  // Derived names are a different question — a business rule about what the
+  // record is CALLED, not about who owns it, so they stay explicit.
+  if (!fields.contact_name && fields.contact_first_name) {
+    fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
   }
-  const p = TABLE_PREFIX[tableName]
-  if (p) {
-    if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
-    if (!fields[`${p}_owner`])         fields[`${p}_owner`]         = userId
-    if (!fields[`${p}_created_by`])    fields[`${p}_created_by`]    = userId
-    // Auto-derive contact_name when only first/last were typed
-    if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
-      fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
-    }
-    // Auto-derive account_name from organization_name when present
-    if (p === 'account' && !fields.account_name && fields.account_organization_name) {
-      fields.account_name = fields.account_organization_name
-    }
-    return fields
-  }
-  // Short-prefix special cases
-  if (tableName === 'incentive_applications') {
-    if (!fields.ia_record_number) fields.ia_record_number = 'NEW'
-    if (!fields.ia_owner)         fields.ia_owner         = userId
-    if (!fields.ia_created_by)    fields.ia_created_by    = userId
-  } else if (tableName === 'project_payment_requests') {
-    if (!fields.ppr_record_number) fields.ppr_record_number = 'NEW'
-    if (!fields.ppr_owner)         fields.ppr_owner         = userId
-    if (!fields.ppr_created_by)    fields.ppr_created_by    = userId
-  } else if (tableName === 'work_step_templates') {
-    // wst_record_number is populated by trg_wst_rn (BEFORE INSERT). We set a
-    // placeholder here so NOT NULL + findMissingRequired both pass; the trigger
-    // overwrites it unconditionally.
-    if (!fields.wst_record_number) fields.wst_record_number = 'NEW'
-    if (!fields.wst_owner)         fields.wst_owner         = userId
-    if (!fields.wst_created_by)    fields.wst_created_by    = userId
-  } else if (tableName === 'work_plan_templates') {
-    // wpt_record_number is populated by trg_wpt_rn (BEFORE INSERT) — same
-    // pattern as WST. The trigger overwrites the placeholder unconditionally.
-    if (!fields.wpt_record_number) fields.wpt_record_number = 'NEW'
-    if (!fields.wpt_owner)         fields.wpt_owner         = userId
-    if (!fields.wpt_created_by)    fields.wpt_created_by    = userId
-  } else if (tableName === 'account_contact_relations') {
-    if (!fields.acr_record_number) fields.acr_record_number = 'NEW'
-    if (!fields.acr_owner)         fields.acr_owner         = userId
-    if (!fields.acr_created_by)    fields.acr_created_by    = userId
-  } else if (tableName === 'opportunity_contact_roles') {
-    // No owner column — a contact role belongs to its parent opportunity.
-    // ocr_record_number is populated by trg_ocr_rn (BEFORE INSERT); ocr_name
-    // is populated by trg_ocr_name. Pass a placeholder record number so NOT
-    // NULL + findMissingRequired both pass; the trigger overwrites it.
-    if (!fields.ocr_record_number) fields.ocr_record_number = 'NEW'
-    if (!fields.ocr_created_by)    fields.ocr_created_by    = userId
-  } else if (tableName === 'opportunity_record_type_price_books') {
-    // ortpb_record_number is populated by trg_ortpb_rn (BEFORE INSERT); the
-    // placeholder just satisfies NOT NULL + findMissingRequired.
-    if (!fields.ortpb_record_number) fields.ortpb_record_number = 'NEW'
-    if (!fields.ortpb_owner)         fields.ortpb_owner         = userId
-    if (!fields.ortpb_created_by)    fields.ortpb_created_by    = userId
-  } else if (tableName === 'contact_skills') {
-    if (!fields.cs_record_number) fields.cs_record_number = 'NEW'
-    if (!fields.cs_owner)         fields.cs_owner         = userId
-    if (!fields.cs_created_by)    fields.cs_created_by    = userId
-  } else if (tableName === 'work_type_skill_requirements') {
-    if (!fields.wtsr_record_number) fields.wtsr_record_number = 'NEW'
-    if (!fields.wtsr_owner)         fields.wtsr_owner         = userId
-    if (!fields.wtsr_created_by)    fields.wtsr_created_by    = userId
-  } else if (tableName === 'project_report_templates') {
-    // prt_record_number populated by trg_prt_rn (BEFORE INSERT, unconditional).
-    if (!fields.prt_record_number) fields.prt_record_number = 'NEW'
-    if (!fields.prt_owner)         fields.prt_owner         = userId
-    if (!fields.prt_created_by)    fields.prt_created_by    = userId
-  } else if (tableName === 'project_report_template_record_type_assignments') {
-    // PRTRTA has no owner column — assignments belong to their parent PRT.
-    if (!fields.prtrta_record_number) fields.prtrta_record_number = 'NEW'
-    if (!fields.prtrta_created_by)    fields.prtrta_created_by    = userId
-  } else if (tableName === 'project_report_template_sections') {
-    // PRTS has no owner column — sections belong to their parent PRT.
-    if (!fields.prts_record_number) fields.prts_record_number = 'NEW'
-    if (!fields.prts_created_by)    fields.prts_created_by    = userId
-  } else if (tableName === 'email_templates') {
-    // Bare-column table — record_number uses et_ short prefix per the
-    // BEFORE INSERT trigger (trg_et_rn). Owner / created_by are the bare
-    // columns owner_id / created_by because the table predates the
-    // prefixed-column convention.
-    if (!fields.et_record_number) fields.et_record_number = 'NEW'
-    if (!fields.owner_id)         fields.owner_id         = userId
-    if (!fields.created_by)       fields.created_by       = userId
-  } else if (tableName === 'document_templates') {
-    // Same shape as email_templates but with dt_ short prefix on record_number.
-    if (!fields.dt_record_number) fields.dt_record_number = 'NEW'
-    if (!fields.owner_id)         fields.owner_id         = userId
-    if (!fields.created_by)       fields.created_by       = userId
-  } else if (tableName === 'envelopes') {
-    // env_record_number is populated by the BEFORE INSERT auto-numbering trigger.
-    // env_status has a column DEFAULT pointing at the Draft picklist UUID, so we
-    // intentionally do NOT pre-fill it here — Postgres handles it. The Draft
-    // default also makes env_status excluded from required_fields metadata.
-    if (!fields.env_record_number) fields.env_record_number = 'NEW'
-    if (!fields.env_owner)         fields.env_owner         = userId
-    if (!fields.created_by)        fields.created_by        = userId
-  } else if (tableName === 'envelope_recipients') {
-    if (!fields.recipient_record_number) fields.recipient_record_number = 'NEW'
-    if (!fields.created_by)              fields.created_by              = userId
-  } else if (tableName === 'envelope_tabs') {
-    if (!fields.tab_record_number) fields.tab_record_number = 'NEW'
-    if (!fields.created_by)        fields.created_by        = userId
-  } else if (tableName === 'envelope_events') {
-    if (!fields.event_record_number) fields.event_record_number = 'NEW'
-    if (!fields.created_by)          fields.created_by          = userId
+  if (!fields.account_name && fields.account_organization_name) {
+    fields.account_name = fields.account_organization_name
   }
   return fields
+}
+
+/**
+ * Every column name on a table, memoised for the session. Backed by
+ * describe_object_columns, the same source the layout renderer and the create
+ * modal already use, so there is one description of a table in the client.
+ */
+const _tableColumnNamesCache = new Map()
+export async function fetchTableColumnNames(tableName) {
+  if (!tableName) return []
+  if (_tableColumnNamesCache.has(tableName)) return _tableColumnNamesCache.get(tableName)
+  const promise = (async () => {
+    const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
+    if (error) {
+      // Do not cache a failure: a transient error would otherwise poison every
+      // later create on this table for the rest of the session.
+      _tableColumnNamesCache.delete(tableName)
+      throw new Error(`Could not read the columns of ${tableName}: ${error.message}`)
+    }
+    return (data || []).map(c => c.column_name).filter(Boolean)
+  })()
+  _tableColumnNamesCache.set(tableName, promise)
+  return promise
 }
 
 /**

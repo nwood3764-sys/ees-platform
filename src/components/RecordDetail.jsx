@@ -1937,7 +1937,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
     setSaving(true)
     try {
       const userId = await getCurrentUserId()
-      const payload = applyInsertDefaults(table, { ...resolvedSeed, ...draft }, userId)
+      const payload = await applyInsertDefaults(table, { ...resolvedSeed, ...draft }, userId)
       // Normalize phone fields to the bare 10-digit form the DB constraint wants.
       normalizePhoneFieldsInPlace(payload, new Set(fields.filter(f => f.type === 'phone').map(f => f.name)))
       for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
@@ -6366,7 +6366,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
           if (maxErr) throw maxErr
           nextOrder = Number(maxRows?.[0]?.[orderField] || 0) + 1
         }
-        const payload = applyInsertDefaults(config.table, { ...draft }, userId)
+        const payload = await applyInsertDefaults(config.table, { ...draft }, userId)
         for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
         payload[fk] = parentRecordId
         if (orderField) payload[orderField] = nextOrder
@@ -6382,7 +6382,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
       }
 
       // Junction-picker mode (existing path)
-      const fields = applyInsertDefaults(picker.source_table, { ...draft }, userId)
+      const fields = await applyInsertDefaults(picker.source_table, { ...draft }, userId)
       for (const [k, v] of Object.entries(fields)) if (v === '') fields[k] = null
 
       const created = await insertRecord(picker.source_table, fields)
@@ -8872,7 +8872,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // INSERT path — runs for true create and for clone
       try {
         const userId = await getCurrentUserId()
-        const fields = applyInsertDefaults(tableName, { ...draft }, userId)
+        const fields = await applyInsertDefaults(tableName, { ...draft }, userId)
 
         // Cross-object (related) field values live under dotted keys — they are
         // display-only reflections of a parent record's columns and are not

@@ -80,7 +80,7 @@ export async function listAddableProducts(opportunityId) {
  */
 export async function addOpportunityProduct(opportunityId, productId, sortOrder) {
   const userId = await getCurrentUserId()
-  const fields = applyInsertDefaults(OLI, {
+  const fields = await applyInsertDefaults(OLI, {
     opportunity_id: opportunityId,
     product_id: productId,
     oli_quantity: 1,
