@@ -12,7 +12,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
-import { fetchAvailableRecordTypes } from '../data/layoutService'
+import { fetchAvailableRecordTypes, fetchDerivedChildRecordType } from '../data/layoutService'
+import { derivedSelectableId } from '../lib/recordTypeDerivation'
 import { scopedToState, statesInRecordTypes, needsStateChoice as recordOwesState }
   from '../lib/programStateScope'
 import { parentChoiceOutstanding, describeParentOption }
@@ -21,6 +22,10 @@ import { parentChoiceOutstanding, describeParentOption }
 export default function RecordTypePicker({
   tableName, objectLabel, state = null,
   parentObject = null, parentRecordTypeId = null,
+  // Which parent DECIDES the record type by default. Not always the one that
+  // CONSTRAINS it: accounts -> contacts has a derivation rule and no
+  // eligibility edge. Falls back to the constraining parent.
+  derivationParentObject = null, derivationParentRecordTypeId = null,
   parentChoices = null,
   takenOnBuildingId = null,
   onPick, onCancel,
@@ -122,6 +127,23 @@ export default function RecordTypePicker({
           emitPick(selectable[0])
           return
         }
+        // More than one choice, but the platform may already know which one:
+        // a contact created on a Property Owner account is a Property Owner
+        // Contact (Nicholas, 2026-09-02). Preselect what the database would
+        // stamp if this were left blank, so the pop-up shows the inherited
+        // answer instead of asking blind — and leave it changeable, because a
+        // derivation is a default, not a constraint.
+        const derivFrom = derivationParentObject || effectiveParentObject
+        const derivRt    = derivationParentRecordTypeId || effectiveParentRecordTypeId
+        if (derivFrom && derivRt) {
+          fetchDerivedChildRecordType(tableName, derivFrom, derivRt)
+            .then(derivedId => {
+              if (cancelled) return
+              const preselect = derivedSelectableId(rts, derivedId)
+              if (preselect) setChosenId(preselect)
+            })
+            .catch(() => {})
+        }
         if (selectable.length === 0 && rts.length > 0) return  // render, and say why
         if (rts.length === 0) {
           // No record types — caller should skip the picker entirely. Signal
@@ -138,6 +160,7 @@ export default function RecordTypePicker({
     // actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableName, state, effectiveParentObject, effectiveParentRecordTypeId,
+      derivationParentObject, derivationParentRecordTypeId,
       takenOnBuildingId, owesParent])
 
   // Cancel on Escape

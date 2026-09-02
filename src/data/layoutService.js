@@ -429,6 +429,91 @@ async function applyRecordTypesTakenOnBuilding(recordTypes, objectName, building
  * database enforces the same rule on save, so a missed narrowing is a worse
  * prompt, never a bad record.
  */
+/**
+ * The record type a new child should INHERIT from its parent's record type.
+ *
+ * Reads record_type_derivation, the same rows the database's own
+ * trg_0_derive_contact_record_type trigger reads — so the pop-up shows exactly
+ * what would be stamped if the field were left blank, rather than a second
+ * opinion. Read directly rather than through derive_record_type_from_parent(),
+ * whose EXECUTE is revoked: a SECURITY DEFINER function granted to
+ * `authenticated` is an advisor lint, and a plain RLS-governed table read
+ * needs no grant at all.
+ *
+ * Any failure returns null, which leaves the picker exactly as it was before
+ * this existed — asking, rather than guessing.
+ */
+/**
+ * The parent whose record type a new child should INHERIT from, when the
+ * create was launched from one.
+ *
+ * Deliberately separate from fetchConstrainingParentForCreate. That reads
+ * record_type_eligibility and answers "which parent RESTRICTS this child's
+ * record types"; this reads record_type_derivation and answers "which parent
+ * DECIDES this child's record type by default". accounts -> contacts has a
+ * derivation rule and no eligibility edge — a contact on a Property Owner
+ * should default to Property Owner Contact without any type being forbidden —
+ * so keying the second question off the first table would never fire.
+ *
+ * Returns { parentObject, parentRecordTypeId } or null.
+ */
+export async function fetchDerivationParentForCreate(childTable, seed) {
+  if (!childTable || !seed || typeof seed !== 'object') return null
+  try {
+    const { data: rules, error } = await supabase
+      .from('record_type_derivation')
+      .select('rtd_parent_object')
+      .eq('rtd_child_object', childTable)
+      .eq('rtd_is_active', true)
+      .eq('rtd_is_deleted', false)
+    if (error) throw error
+
+    for (const parentObject of new Set((rules || []).map(r => r.rtd_parent_object))) {
+      const prefix = TABLE_COLUMN_PREFIX[parentObject]
+      if (!prefix) continue
+      // The FK to that parent, by LEAP's column convention. A child can also
+      // carry it under its OWN prefix (contacts.contact_account_id), so both
+      // spellings are tried before giving up.
+      const candidates = [`${prefix}_id`, `${TABLE_COLUMN_PREFIX[childTable] || ''}_${prefix}_id`]
+      const fkColumn = candidates.find(c => c && seed[c] && UUID_RE.test(String(seed[c])))
+      if (!fkColumn) continue
+
+      const rtColumn = getRecordTypeColumn(parentObject)
+      const { data: row, error: rowErr } = await supabase
+        .from(parentObject).select(rtColumn).eq('id', seed[fkColumn]).maybeSingle()
+      if (rowErr) throw rowErr
+      const parentRecordTypeId = row?.[rtColumn]
+      if (parentRecordTypeId && UUID_RE.test(String(parentRecordTypeId))) {
+        return { parentObject, parentRecordTypeId }
+      }
+    }
+  } catch (err) {
+    console.warn('fetchDerivationParentForCreate: lookup failed', err)
+  }
+  return null
+}
+
+export async function fetchDerivedChildRecordType(childTable, parentObject, parentRecordTypeId) {
+  if (!childTable || !parentObject || !parentRecordTypeId) return null
+  if (!UUID_RE.test(String(parentRecordTypeId))) return null
+  try {
+    const { data, error } = await supabase
+      .from('record_type_derivation')
+      .select('rtd_child_record_type_id')
+      .eq('rtd_child_object', childTable)
+      .eq('rtd_parent_object', parentObject)
+      .eq('rtd_parent_record_type_id', parentRecordTypeId)
+      .eq('rtd_is_active', true)
+      .eq('rtd_is_deleted', false)
+      .maybeSingle()
+    if (error) throw error
+    return data?.rtd_child_record_type_id || null
+  } catch (err) {
+    console.warn('fetchDerivedChildRecordType: lookup failed', err)
+    return null
+  }
+}
+
 export async function fetchConstrainingParentForCreate(childTable, seed) {
   if (!childTable || !seed || typeof seed !== 'object') return null
   try {
