@@ -60,6 +60,59 @@ export function imageFilesFromDrop(dataTransfer) {
 }
 
 /**
+ * The image files from a file-input `change` event — snapshotted, then the
+ * input cleared.
+ *
+ * THE ORDER IS THE WHOLE POINT. `input.files` is a LIVE FileList: clearing the
+ * input (`input.value = ''`, which every picker handler does so the same file
+ * can be chosen twice in a row) EMPTIES THAT SAME OBJECT. A handler that keeps
+ * the FileList reference and clears the input before reading it ends up with
+ * zero files — the upload loop runs no times, and the screen goes quiet with no
+ * photo, no error and no way to tell the difference from a slow network.
+ *
+ * That is not hypothetical. It is what stopped work steps accepting photos on
+ * 2026-08-22 (#520), when the inline step card was converted from one file
+ * (`e.target.files[0]` — which captures the File itself, so it survives the
+ * clear) to many (`e.target.files` — which captures the list). Technicians
+ * marked required evidence steps "Not Applicable / Photo does not upload" for
+ * eleven days. The guided-flow handler in the same commit read its files first
+ * and never broke, which is exactly why two surfaces behaved differently while
+ * both read as correct.
+ *
+ * So there is ONE function that owns the order, and no picker handler does it
+ * by hand. Returns the same shape as imageFilesFromDrop so a caller reports a
+ * skipped non-image the same way whichever route it arrived by.
+ *
+ * @returns {{files: File[], rejected: number}}
+ */
+export function imageFilesFromInputEvent(event) {
+  const input = event?.target || null
+  // Snapshot FIRST — Array.from copies the entries out of the live list.
+  const all = input?.files ? Array.from(input.files) : []
+  // Clear SECOND, so re-picking the same file fires `change` again.
+  if (input) {
+    try { input.value = '' } catch { /* a detached or read-only input: nothing to reset */ }
+  }
+  const files = all.filter(isImageFile)
+  return { files, rejected: all.length - files.length }
+}
+
+/**
+ * The single file from a file-input `change` event, with the input cleared.
+ * Same ordering rule as above; used by the video pickers, which take one file.
+ *
+ * @returns {File|null}
+ */
+export function fileFromInputEvent(event) {
+  const input = event?.target || null
+  const file = (input?.files && input.files[0]) || null
+  if (input) {
+    try { input.value = '' } catch { /* noop */ }
+  }
+  return file
+}
+
+/**
  * True when a dragenter/dragover carries files at all — a text selection or a
  * link dragged across the window should not light up the drop zone.
  */
