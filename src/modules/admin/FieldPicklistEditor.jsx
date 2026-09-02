@@ -14,6 +14,7 @@ import {
   fetchRecordTypeValueOrder,
   fetchPicklistFieldScoping,
 } from '../../data/adminService'
+import { valuesScopedElsewhere, availableEmptyMessage } from '../../lib/picklistValueSharing'
 
 // ---------------------------------------------------------------------------
 // Field Picklist Editor — Salesforce "record type → picklist values" model.
@@ -298,17 +299,18 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   const isUniversal = selected.length === 0
   const selectedSet = useMemo(() => new Set(selected), [selected])
 
-  // Values that belong to a DIFFERENT record type. This field's stages are
-  // scoped 1:1 to a record type (never shared), so we hide other record types'
-  // copies — editing one record type never shows another's, no fake duplicates.
-  const scopedElsewhere = useMemo(() => {
-    const s = new Set()
-    for (const [rtId, set] of Object.entries(assignments)) {
-      if (rtId === activeRtId) continue
-      for (const vid of set) s.add(vid)
-    }
-    return s
-  }, [assignments, activeRtId])
+  // Values that belong to a DIFFERENT record type, hidden only when this
+  // field's values are genuinely exclusive to one record type.
+  //
+  // The old rule hid them unconditionally. That is right for opportunity
+  // stages, which LEAP scopes 1:1 and never shares, and WRONG for a shared
+  // lifecycle: enrollment_status's eight values already served seven record
+  // types, so every one was hidden as "assigned elsewhere" and the two
+  // Project-Reservation record types could never be configured at all --
+  // Available 0, Selected empty, nothing to drag. See picklistValueSharing.
+  const scopedElsewhere = useMemo(
+    () => valuesScopedElsewhere(assignments, activeRtId),
+    [assignments, activeRtId])
 
   const availableValues = useMemo(() => {
     let list = values.filter(v => v.active && !selectedSet.has(v._id) && !scopedElsewhere.has(v._id))
@@ -479,7 +481,11 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                 ))}
                 {availableValues.length === 0 && (
                   <div style={{ padding: 16, fontSize: 12, color: C.textMuted, textAlign: 'center' }}>
-                    {availSearch.trim() ? 'No matches.' : 'Every value is in Selected.'}
+                    {availableEmptyMessage({
+                      searching: !!availSearch.trim(),
+                      selectedCount: selected.length,
+                      totalActiveValues: values.filter(v => v.active).length,
+                    })}
                   </div>
                 )}
               </div>

@@ -39,6 +39,7 @@ const WorkPlanRunner                       = lazy(() => import('../fieldMobile/W
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { formatUsPhoneDisplay } from '../lib/fieldLinks'
+import { formatDateOnly, formatInstant, isDateOnlyValue } from '../lib/dateDisplay'
 import { holdAppReload } from '../lib/appUpdate'
 import { contractorContactPairsFor, resolveContractorContact } from '../lib/contractorContact'
 import FieldValueLink from './FieldValueLink'
@@ -196,8 +197,8 @@ function formatByReturnType(raw, returnType) {
   switch (returnType) {
     case 'currency': return `$${Number(raw).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     case 'percent':  return `${Number(raw)}%`
-    case 'date':     return raw ? new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
-    case 'datetime': return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
+    case 'date':     return (raw ? formatDateOnly(raw) : null) ?? '—'
+    case 'datetime': return (raw ? formatInstant(raw) : null) ?? '—'
     case 'boolean':  return raw ? 'Yes' : 'No'
     case 'number':   return Number(raw).toLocaleString()
     case 'phone':    return formatUsPhoneDisplay(raw)
@@ -296,18 +297,19 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     case 'percent':    return `${Number(raw)}%`
     case 'date': {
       if (!raw) return '—'
-      const d = new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw)
       // Optional per-field display format. 'MM/DD/YY' matches external program
       // forms that use a 2-digit year (e.g. the pre-approval application).
       if (fieldDef.format === 'MM/DD/YY') {
+        const d = new Date(isDateOnlyValue(raw) ? `${String(raw).trim()}T00:00:00` : raw)
+        if (isNaN(d.getTime())) return '—'
         const mm = String(d.getMonth() + 1).padStart(2, '0')
         const dd = String(d.getDate()).padStart(2, '0')
         const yy = String(d.getFullYear()).slice(-2)
         return `${mm}/${dd}/${yy}`
       }
-      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+      return formatDateOnly(raw) ?? '—'
     }
-    case 'datetime':   return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
+    case 'datetime':   return (raw ? formatInstant(raw) : null) ?? '—'
     case 'boolean':    return raw ? 'Yes' : 'No'
     case 'number':     return raw != null ? Number(raw).toLocaleString() : '—'
     case 'multiselect': {
