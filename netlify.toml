@@ -18,17 +18,18 @@
 [build]
   command  = "npm run build:safe"
   publish  = "dist"
-  # Build LEAP only when LEAP changed. This repo also feeds the Audit Template
-  # Builder site (based in audit-template-builder/), and Netlify's default is to
-  # rebuild every site connected to a repo on every commit regardless of what
-  # changed — so audit-only commits were rebuilding all of LEAP from identical
-  # code. Over the 30 days to 2026-08-16: 23 such builds out of 58 commits, at
-  # ~15 credits each. The command runs before the build and cancels it for free
-  # when nothing outside audit-template-builder/ changed since LEAP's last
-  # build. Exit 0 cancels, anything else builds — so if CACHED_COMMIT_REF is
-  # unset and git errors, the build proceeds. It fails toward building, never
-  # toward silently skipping.
-  ignore   = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ':(exclude)audit-template-builder'"
+  # Build LEAP only when LEAP changed. This repo also feeds two single-file
+  # sites — the Audit Template Builder (audit-template-builder/) and the Income
+  # Qualification Builder (income-qualification-builder/) — and Netlify's
+  # default is to rebuild every site connected to a repo on every commit
+  # regardless of what changed, so a commit to either of those was rebuilding
+  # all of LEAP from identical code. Over the 30 days to 2026-08-16: 23 such
+  # builds out of 58 commits, at ~15 credits each. The command runs before the
+  # build and cancels it for free when nothing outside those two directories
+  # changed since LEAP's last build. Exit 0 cancels, anything else builds — so
+  # if CACHED_COMMIT_REF is unset and git errors, the build proceeds. It fails
+  # toward building, never toward silently skipping.
+  ignore   = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ':(exclude)audit-template-builder' ':(exclude)income-qualification-builder'"
 
 [build.environment]
   VITE_SUPABASE_URL      = "https://flyjigrijjjtcsvpgzvk.supabase.co"

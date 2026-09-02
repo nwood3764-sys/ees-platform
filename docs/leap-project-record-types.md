@@ -64,9 +64,10 @@ Four things in that table are defects on their own:
   Level 1* on any project inserted without a record type. That is an audit
   deliverable being used as the platform fallback — the same defect class as
   FOE-2024-WI being the opportunity default, fixed 2026-08-23.
-- **16 of 18 active types have no `project_status` assignments**, so they fall
+- ~~**16 of 18 active types have no `project_status` assignments**, so they fall
   through to all 36 `project_status` values, which mix three objects'
-  vocabularies (already logged, 2026-09-01).
+  vocabularies.~~ **Fixed 2026-09-02** — the list is now seven project statuses
+  and every record type carries them. See Phase 6.
 - **`MF-AIR`, `MF-EQUIPMENT`, `MF-APP`, `SINGLE-FAMILY`, `TRUTEAM-ILLINOIS-INS`
   hold zero records** and only two of them can be interpreted from their names.
 
@@ -298,12 +299,14 @@ enabled so names, audit log and rollups all follow, and are re-counted
 afterwards — the migration raises rather than shipping a record the Phase 4
 trigger would make uneditable.
 
-**Phase 6 — Statuses per record type (named, not folded in).**
-Each new and renamed project record type needs its own
-`project_status` assignments; 16 of 18 have none today and fall through to 36
-values from three vocabularies. Separate change, tracked in
-`docs/leap-reports-enterprise-todo.md`'s sibling list; do not fold it into
-Phases 1–5.
+**Phase 6 — Statuses per record type. DONE for the existing types, 2026-09-02.**
+The 36 `project_status` values were three objects' vocabularies in one list;
+they are now **seven**: Project Planning → Project Pre-Construction Meeting To
+Be Scheduled → Project To Be Scheduled → Project Scheduled → Project Underway →
+Project To Be Verified → Project Completed, carried by all 18 active project
+record types, with the transition graph rebuilt to match. What remains for this
+workstream: **every record type created in Phase 1 must be given the same seven**
+in the same migration, or it ships showing no statuses at all.
 
 ---
 
