@@ -69,8 +69,31 @@ are struck through as they ship, with the PR that did it.
       stage is a visible band rather than a hairline stem, and the names in the
       shared legend. One legend definition (`SeriesLegend`) now serves the pie,
       donut and funnel.
-- [ ] **Same audit for bar/line** — axis titles, label density, legend
-      placement, and the same literal-layout rule.
+- [x] **Every chart audited by rendering all 30 widget types and looking at
+      them.** Four real defects, none of which reading the code would have
+      found:
+      (1) **A gauge widget CRASHED on any real dashboard** — it recomputed its
+      number from `result.rows`, but the runner sends it down the
+      single-aggregate query, which returns no rows at all. "Cannot read
+      properties of undefined". Every other single-value widget beside it read
+      `aggregatedSingle`; only the gauge did not.
+      (2) **The palette re-step never reached half the charts** — bar, line,
+      area, waterfall, pareto, combo, sparkline, gauge, ranked list and both
+      heatmaps still drew the old `#3ecf8e` UI accent, so a bar and a stacked
+      bar on one dashboard were two different greens. `CHART_INK` now.
+      (3) **Long category labels truncated to "Enrollmen…" on every vertical
+      chart.** Angled at 30° now, above 12 characters only.
+      (4) **The rose chart had the pie's old disease** (leader lines, a legend
+      paginated to "1/4") and the **sunburst knotted its labels** in the centre.
+      Both use the shared legend now.
+      Also: heatmaps got a real single-hue sequential ramp, and combo's legend
+      names the measure instead of saying "Bars".
+- [x] **`npm run verify:charts`** renders all 30 types, fails on any widget
+      that throws, any that fails to render, and any that paints nothing — and
+      feeds the single-value widgets exactly what their query shape returns,
+      which is the only way the gauge crash is visible.
+- [ ] Axis titles are still absent everywhere (the dataviz mark spec calls for
+      them where the unit is not obvious).
 - [ ] ~~`CHART_COLORS[i % length]` cycles.~~ An 8th series wraps to slot 1 and
       gets an identical colour to the first — the palette is meant to be
       assigned in fixed order and never cycled. Six modules do this inline. The

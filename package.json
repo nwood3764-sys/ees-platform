@@ -20,6 +20,7 @@
     "verify:report-column-widths": "node tools/report-column-width-check/run.mjs",
     "verify:status-path": "node tools/status-path-check/run.mjs",
     "verify:dashboard-filters": "node tools/dashboard-filter-check/run.mjs",
+    "verify:charts": "node tools/chart-audit/run.mjs",
     "verify:topbar-menus": "node tools/topbar-menu-check/run.mjs"
   },
   "dependencies": {

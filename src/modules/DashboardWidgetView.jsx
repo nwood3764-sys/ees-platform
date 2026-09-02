@@ -1,4 +1,4 @@
-import { C, CHART_COLORS, seriesColor } from '../data/constants'
+import { C, CHART_COLORS, seriesColor, CHART_INK, CHART_SEQUENTIAL } from '../data/constants'
 import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell, pinnedFooterCell } from '../lib/pinnedTableHeader'
 import { useState, useRef, useEffect } from 'react'
 import { getRowValue, saveWidgetColumnWidths } from '../data/reportsService'
@@ -406,7 +406,10 @@ export function buildChartData(result, widget) {
   // (e.g. the status UUID), not the human label.
   const buckets = new Map()
   const rawByKey = new Map()
-  for (const row of result.rows) {
+  // Guarded for the same reason as the gauge above: a widget routed to an
+  // aggregate query has no rows, and reaching this code with none is a crash,
+  // not an empty chart.
+  for (const row of (result.rows || [])) {
     const k = getRowValue(row, groupField, result) ?? '—'
     const key = String(k)
     if (!buckets.has(key)) {
@@ -505,6 +508,46 @@ function pivot2D(rows, groupLimit = 20, seriesLimit = 10) {
   return { groups: limitedGroups, seriesNames, get: (g, s) => cell.get(g + '\u0000' + s) }
 }
 
+// What a series is MEASURING, for a legend that would otherwise name the shape
+// ("Bars", "Line") and tell the reader nothing.
+function measureName(cfg, fallback) {
+  const t = cfg?.measure_type
+  if (!t || t === 'count') return 'Count'
+  const field = cfg?.measure_field
+  if (!field) return fallback
+  const label = String(field).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const word = t === 'sum' ? 'Sum of' : t === 'avg' ? 'Average' : t === 'min' ? 'Min of' : t === 'max' ? 'Max of' : ''
+  return word ? `${word} ${label}` : label
+}
+
+// A category axis whose labels a person can actually read.
+//
+// The audit found "Enrollmen…" on every vertical chart: six status names in a
+// 460px tile gives each label ~70px, and truncating to that is the same as
+// printing nothing. A HORIZONTAL bar has the full tile width per row and needs
+// none of this — which is exactly why the plain bar chart reads perfectly and
+// the stacked, clustered, combo, pareto and waterfall charts did not.
+//
+// For the vertical ones the label is angled instead. An angled label is a real
+// tradeoff, not a free win — it is slower to read than a horizontal one — but
+// it is legible, and "Enrollment Submitted To Program" at 30° beats
+// "Enrollmen…" at 0° every time. Short labels stay flat: rotating "WI" would
+// be pure cost. The tooltip carries the full name regardless.
+const CATEGORY_LABEL_ROTATE_OVER = 12   // characters
+function categoryAxisLabel(names, horizontal) {
+  if (horizontal) return { interval: 0, width: 140, overflow: 'truncate', hideOverlap: false }
+  const longest = (names || []).reduce((m, n) => Math.max(m, String(n ?? '').length), 0)
+  if (longest <= CATEGORY_LABEL_ROTATE_OVER) return { interval: 0, hideOverlap: true }
+  return {
+    interval: 0, rotate: 30, align: 'right', verticalAlign: 'top',
+    // Still capped, because a 60-character owner name angled across the tile
+    // would eat the plot. 22 characters at 30° is about 150px of run.
+    width: 150, overflow: 'truncate', hideOverlap: false, fontSize: 10.5,
+  }
+}
+
+
+
 function BarWidget({ result, widget, canDrill, drillTo }) {
   const data = buildChartData(result, widget)
   const cfg = widget.dw_widget_config || {}
@@ -521,7 +564,7 @@ function BarWidget({ result, widget, canDrill, drillTo }) {
   const catAxis = {
     type: 'category', data: display.map(d => d.name),
     name: horizontal ? (cfg.y_axis_title || undefined) : (cfg.x_axis_title || undefined),
-    axisLabel: { interval: 0, width: horizontal ? 140 : undefined, overflow: 'truncate', hideOverlap: !horizontal },
+    axisLabel: categoryAxisLabel(data.map(d => d.name), horizontal),
   }
   const valAxis = {
     type: 'value', axisLabel: { formatter: axisTick },
@@ -538,7 +581,7 @@ function BarWidget({ result, widget, canDrill, drillTo }) {
     series: [{
       type: 'bar', data: display.map(d => d.value),
       barMaxWidth: 26,
-      itemStyle: { color: C.emerald, borderRadius: horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
+      itemStyle: { color: CHART_INK, borderRadius: horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
       label: {
         show: showLabels, position: horizontal ? 'right' : 'top',
         color: C.textPrimary, fontSize: 10.5, formatter: (p) => fmt(p.value),
@@ -571,10 +614,10 @@ function LineWidget({ result, widget, canDrill, drillTo }) {
     yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
     series: [{
       type: 'line', data: data.map(d => d.value),
-      lineStyle: { width: 2, color: C.emerald },
-      itemStyle: { color: C.emerald, borderColor: '#ffffff', borderWidth: 2 },
+      lineStyle: { width: 2, color: CHART_INK },
+      itemStyle: { color: CHART_INK, borderColor: '#ffffff', borderWidth: 2 },
       symbol: 'circle', symbolSize: 7,
-      areaStyle: { color: C.emerald, opacity: 0.06 },
+      areaStyle: { color: CHART_INK, opacity: 0.06 },
       label: { show: showLabels, color: C.textPrimary, fontSize: 10.5, formatter: (p) => fmt(p.value) },
       markLine: referenceMarkLine(cfg),
       cursor: canDrill ? 'pointer' : 'default',
@@ -967,7 +1010,7 @@ function RankedListWidget({ result, widget, canDrill, drillTo }) {
             <div style={{ fontSize:13, color:C.textPrimary, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
               title={d.name}>{d.name}</div>
             <div style={{ height:8, background:C.cardSecondary, borderRadius:4, overflow:'hidden' }}>
-              <div style={{ width:`${pct}%`, height:'100%', background:C.emerald, borderRadius:4 }} />
+              <div style={{ width:`${pct}%`, height:'100%', background:CHART_INK, borderRadius:4 }} />
             </div>
             <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace', minWidth:48, textAlign:'right' }}>
               {fmtValue(d.value)}
@@ -987,12 +1030,23 @@ function GaugeWidget({ result, widget, canDrill, drillWhole }) {
   const measureType  = cfg.measure_type  || 'count'
   const measureField = cfg.measure_field || null
 
+  // The server already computed this. The gauge was the ONE widget on the
+  // single-aggregate path that recomputed the number from result.rows instead
+  // — and that path returns no rows at all, so every gauge on a real dashboard
+  // threw "Cannot read properties of undefined (reading 'length')" and took the
+  // tile down with it. The KPI, stat, speedometer and bullet beside it all read
+  // aggregatedSingle; only this one did not.
+  //
+  // The row fallback stays for the degraded path, where runWidgetData drops
+  // back to a full row fetch after a fast-path failure and rows ARE present.
   let value
-  if (measureType === 'count' || !measureField) {
-    value = result.rows.length
+  if (typeof result.aggregatedSingle === 'number') {
+    value = result.aggregatedSingle
+  } else if (measureType === 'count' || !measureField) {
+    value = (result.rows || []).length
   } else {
     const nums = []
-    for (const row of result.rows) {
+    for (const row of (result.rows || [])) {
       const v = getRowValue(row, { name: measureField }, result)
       if (v == null || v === '') continue
       const n = typeof v === 'number' ? v : parseFloat(v)
@@ -1017,7 +1071,7 @@ function GaugeWidget({ result, widget, canDrill, drillWhole }) {
       type: 'gauge',
       startAngle: 210, endAngle: -30,
       min: 0, max: Math.max(target, value, 1),
-      progress: { show: true, roundCap: true, width: 14, itemStyle: { color: C.emerald } },
+      progress: { show: true, roundCap: true, width: 14, itemStyle: { color: CHART_INK } },
       axisLine: { roundCap: true, lineStyle: { width: 14, color: [[1, '#e4e9f2']] } },
       pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
       anchor: { show: false },
@@ -1056,7 +1110,7 @@ function SeriesBarWidget({ result, widget, mode, canDrill, drillTo }) {
     g, seriesNames.reduce((a, s) => a + (get(g, s)?.value || 0), 0) || 1,
   ]))
 
-  const catAxis = { type: 'category', data: displayGroups, axisLabel: { interval: 0, width: horizontal ? 140 : undefined, overflow: 'truncate', hideOverlap: !horizontal } }
+  const catAxis = { type: 'category', data: displayGroups, axisLabel: categoryAxisLabel(displayGroups, horizontal) }
   const valAxis = {
     type: 'value',
     max: pct ? 100 : undefined,
@@ -1112,13 +1166,13 @@ function HeatmapWidget({ result, widget, canDrill, drillTo }) {
     grid: { left: 8, right: 16, top: 8, bottom: 36, containLabel: true },
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) =>
       `${groups[p.value[0]]} · ${seriesNames[p.value[1]]}<br/><b>${fmt(p.value[2])}</b>` },
-    xAxis: { type: 'category', data: groups, axisLabel: { interval: 0, overflow: 'truncate', width: 90, hideOverlap: true } },
+    xAxis: { type: 'category', data: groups, axisLabel: categoryAxisLabel(groups, false) },
     yAxis: { type: 'category', data: seriesNames, axisLabel: { overflow: 'truncate', width: 120 } },
     visualMap: {
       min: 0, max: Math.max(max, 1), orient: 'horizontal', left: 'center', bottom: 0,
       itemWidth: 10, itemHeight: 70, text: ['More', ''],
       textStyle: { color: C.textMuted, fontSize: 10 },
-      inRange: { color: ['#eefaf4', '#9fe8c9', C.emerald, '#2aab72'] },
+      inRange: { color: CHART_SEQUENTIAL },
     },
     series: [{
       type: 'heatmap', data,
@@ -1218,7 +1272,7 @@ function WaterfallWidget({ result, widget, canDrill, drillTo }) {
     animationDuration: 250,
     grid: { left: 8, right: 14, top: 14, bottom: 4, containLabel: true },
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(delta[p.dataIndex])}</b>` },
-    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: { interval: 0, overflow: 'truncate', width: 80, hideOverlap: true } },
+    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: categoryAxisLabel(data.map(d => d.name), false) },
     yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
     series: [
       { type: 'bar', stack: 'w', silent: true,
@@ -1227,7 +1281,7 @@ function WaterfallWidget({ result, widget, canDrill, drillTo }) {
       { type: 'bar', stack: 'w', barMaxWidth: 32,
         data: delta.map(v => ({
           value: Math.abs(v),
-          itemStyle: { color: v >= 0 ? C.emerald : C.sky, borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: v >= 0 ? CHART_INK : C.sky, borderRadius: [4, 4, 0, 0] },
         })),
         label: { show: cfg.show_data_labels !== false, position: 'top', fontSize: 10, color: C.textPrimary,
           formatter: (p) => fmt(delta[p.dataIndex]) },
@@ -1295,7 +1349,7 @@ function HistogramWidget({ result, widget, canDrill, drillWhole }) {
     xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 9.5, hideOverlap: true } },
     yAxis: { type: 'value' },
     series: [{ type: 'bar', data: bins, barCategoryGap: '8%',
-      itemStyle: { color: C.emerald, borderRadius: [3, 3, 0, 0] },
+      itemStyle: { color: CHART_INK, borderRadius: [3, 3, 0, 0] },
       label: { show: cfg.show_data_labels === true, position: 'top', fontSize: 10, color: C.textPrimary },
       cursor: canDrill ? 'pointer' : 'default' }],
   }
@@ -1356,9 +1410,9 @@ function StatWidget({ result, widget, canDrill, drillWhole }) {
       return `${p.name}<br/><b>${fmt(p.value)}</b>`
     } },
     series: [{ type: 'line', data: trend.map(t => t.value),
-      lineStyle: { width: 2, color: C.emerald }, symbol: 'none',
-      areaStyle: { color: C.emerald, opacity: 0.10 },
-      emphasis: { itemStyle: { color: C.emerald } } }],
+      lineStyle: { width: 2, color: CHART_INK }, symbol: 'none',
+      areaStyle: { color: CHART_INK, opacity: 0.10 },
+      emphasis: { itemStyle: { color: CHART_INK } } }],
   } : null
   return (
     <div onClick={canDrill ? () => drillWhole?.() : undefined}
@@ -1398,7 +1452,7 @@ function ComboWidget({ result, widget, canDrill, drillTo }) {
       return `${list[0]?.name}<br/>` + list.map(p =>
         `${p.seriesName}: <b>${p.seriesIndex === 0 ? fmt(p.value) : fmt2(p.value)}</b>`).join('<br/>')
     } },
-    xAxis: { type: 'category', data: names, axisLabel: { interval: 0, overflow: 'truncate', width: 90, hideOverlap: true } },
+    xAxis: { type: 'category', data: names, axisLabel: categoryAxisLabel(names, false) },
     yAxis: dual
       ? [
           { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
@@ -1407,14 +1461,17 @@ function ComboWidget({ result, widget, canDrill, drillTo }) {
       : { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
     series: [
       {
-        name: cfg.measure_label || 'Bars', type: 'bar', barMaxWidth: 26,
-        itemStyle: { color: C.emerald, borderRadius: [4, 4, 0, 0] },
+        // "Bars" and "Line" name the SHAPE, not the measure — a legend reading
+        // "Bars / Line" tells the reader nothing they cannot already see. Fall
+        // back to what is actually being measured.
+        name: cfg.measure_label || measureName(cfg, 'Value'), type: 'bar', barMaxWidth: 26,
+        itemStyle: { color: CHART_INK, borderRadius: [4, 4, 0, 0] },
         data: data.map(d => d.value),
         label: { show: cfg.show_data_labels === true, position: 'top', fontSize: 10, color: C.textPrimary, formatter: (p) => fmt(p.value) },
         cursor: canDrill ? 'pointer' : 'default',
       },
       ...(second.length ? [{
-        name: cfg.measure2_label || 'Line', type: 'line',
+        name: cfg.measure2_label || measureName({ measure_type: cfg.measure2_type, measure_field: cfg.measure2_field }, 'Comparison'), type: 'line',
         yAxisIndex: dual ? 1 : 0,
         data: names.map(n => secondByName.get(n) ?? 0),
         lineStyle: { width: 2, color: C.navy },
@@ -1553,7 +1610,7 @@ function CalendarHeatmapWidget({ result, widget, canDrill, drillWhole }) {
       min: 0, max: Math.max(max, 1), orient: 'horizontal', left: 'center', bottom: 0,
       itemWidth: 10, itemHeight: 70, text: ['More', ''],
       textStyle: { color: C.textMuted, fontSize: 10 },
-      inRange: { color: ['#eefaf4', '#9fe8c9', C.emerald, '#2aab72'] },
+      inRange: { color: CHART_SEQUENTIAL },
     },
     calendar: {
       range, left: 34, right: 10, top: 22, bottom: 34, cellSize: ['auto', 'auto'],
@@ -1608,7 +1665,7 @@ function RatingWidget({ result, widget, canDrill, drillWhole }) {
   const fmt = widgetFmt(cfg)
   const star = (frac, i) => (
     <svg key={i} width="26" height="26" viewBox="0 0 24 24">
-      <defs><linearGradient id={`rw-${widget.id || 'x'}-${i}`}><stop offset={`${frac * 100}%`} stopColor={C.emerald} /><stop offset={`${frac * 100}%`} stopColor={C.borderDark} /></linearGradient></defs>
+      <defs><linearGradient id={`rw-${widget.id || 'x'}-${i}`}><stop offset={`${frac * 100}%`} stopColor={CHART_INK} /><stop offset={`${frac * 100}%`} stopColor={C.borderDark} /></linearGradient></defs>
       <path fill={`url(#rw-${widget.id || 'x'}-${i})`} d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z" />
     </svg>
   )
@@ -1752,7 +1809,7 @@ function SpeedometerWidget({ result, widget, canDrill, drillWhole }) {
   const stops = [
     [Math.max(0.02, Math.min(1, low / max)),  C.sky],
     [Math.max(0.04, Math.min(1, high / max)), '#e8a949'],
-    [1, C.emerald],
+    [1, CHART_INK],
   ]
   const option = {
     animationDuration: 250,
@@ -1841,7 +1898,7 @@ function ProgressRingWidget({ result, widget, canDrill, drillWhole }) {
       startAngle: 90, silent: true,
       label: { show: false }, labelLine: { show: false },
       data: [
-        { value: pct, itemStyle: { color: pct >= 100 ? C.emerald : pct >= 50 ? C.emerald : C.sky, borderRadius: 8 } },
+        { value: pct, itemStyle: { color: pct >= 50 ? CHART_INK : C.sky, borderRadius: 8 } },
         { value: 100 - pct, itemStyle: { color: '#e4e9f2' } },
       ],
     }],
@@ -1873,14 +1930,14 @@ function ParetoWidget({ result, widget, canDrill, drillTo }) {
       const ln  = list.find(p => p.seriesType === 'line')
       return `${list[0]?.name}<br/><b>${fmt(bar?.value ?? 0)}</b>${ln ? ` · ${ln.value}% cumulative` : ''}`
     } },
-    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: { interval: 0, overflow: 'truncate', width: 70, hideOverlap: true } },
+    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: categoryAxisLabel(data.map(d => d.name), false) },
     yAxis: [
       { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
       { type: 'value', min: 0, max: 100, axisLabel: { formatter: (v) => `${v}%` }, splitLine: { show: false } },
     ],
     series: [
       { type: 'bar', data: data.map(d => d.value), barMaxWidth: 26,
-        itemStyle: { color: C.emerald, borderRadius: [4, 4, 0, 0] },
+        itemStyle: { color: CHART_INK, borderRadius: [4, 4, 0, 0] },
         cursor: canDrill ? 'pointer' : 'default' },
       { type: 'line', yAxisIndex: 1, data: cum,
         lineStyle: { width: 2, color: '#1e466b' },
@@ -1896,24 +1953,62 @@ function ParetoWidget({ result, widget, canDrill, drillTo }) {
 function RoseWidget({ result, widget, canDrill, drillTo }) {
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
-  const data = buildChartData(result, widget)
+  const raw = buildChartData(result, widget)
+  const data = raw.map(d => ({ ...d, name: categoryLabel(d.name) }))
   const byName = Object.fromEntries(data.map(d => [d.name, d]))
+  const total = data.reduce((a, d) => a + (Number(d.value) || 0), 0)
+  const share = (v) => (total > 0 ? (Number(v) || 0) / total * 100 : 0)
+  const showLegend = cfg.show_legend !== false
+  const hostRef = useRef(null)
+  const width = useElementWidth(hostRef)
+  const legendPos = cfg.legend_position || 'right'
+  const legendBeside = showLegend && (
+    legendPos === 'right' ? true : legendPos === 'bottom' ? false
+      : (width === 0 || width >= PIE_LEGEND_MIN_WIDTH))
+
   const option = {
     animationDuration: 250,
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b> · ${p.percent}%` },
-    legend: cfg.show_legend !== false ? { type: 'scroll', bottom: 0, left: 'center' } : { show: false },
+    legend: { show: false },   // the legend is HTML, beside this
     series: [{
       type: 'pie', roseType: 'radius',
-      radius: ['16%', '72%'], center: ['50%', cfg.show_legend !== false ? '44%' : '50%'],
+      radius: ['16%', '78%'], center: ['50%', '50%'],
       itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 4 },
-      label: { show: cfg.show_data_labels !== false, color: C.textSecondary, fontSize: 10.5, formatter: (p) => p.name },
-      labelLine: { length: 8, length2: 6, lineStyle: { color: C.borderDark } },
-      data: data.map(d => ({ name: d.name, value: d.value })),
+      // The category names used to be drawn AROUND the rose on leader lines,
+      // which collided with each other and with the wedges, and the ECharts
+      // legend under it paginated to "1/4" with arrows — the reader could see
+      // three of six categories at a time. Names live in the shared legend now,
+      // exactly as the pie's do; only the share stays on the wedge, and only
+      // where a wedge is big enough to hold it.
+      label: { show: cfg.show_data_labels !== false, position: 'inside',
+               fontSize: 10.5, fontWeight: 600,
+               fontFamily: "'JetBrains Mono', monospace",
+               formatter: (p) => (p.percent >= PIE_INSIDE_LABEL_MIN_PCT ? `${Math.round(p.percent)}%` : '') },
+      labelLine: { show: false },
+      data: data.map((d, i) => ({ name: d.name, value: d.value, label: { color: labelInkFor(seriesColor(i)) } })),
       cursor: canDrill ? 'pointer' : 'default',
     }],
   }
   const onSeriesClick = canDrill ? (p) => drillTo?.(byName[p.name]?.rawValue) : undefined
-  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+  return (
+    <div ref={hostRef} style={{
+      height: '100%', minHeight: 0, display: 'flex', gap: 10, overflow: 'hidden',
+      flexDirection: legendBeside ? 'row' : 'column',
+    }}>
+      <div style={{ flex: '1 1 0%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <LeapEChart option={option} onSeriesClick={onSeriesClick} minHeight={0} />
+      </div>
+      {showLegend && (
+        <SeriesLegend
+          data={data} total={total} fmt={fmt} share={share}
+          beside={legendBeside} width={pieLegendWidth(width)} onPick={onSeriesClick}
+          showValue={cfg.legend_show_value !== false}
+          showPercent={cfg.legend_show_percent !== false}
+          valuePosition={cfg.legend_value_position || 'right'}
+        />
+      )}
+    </div>
+  )
 }
 
 // Radar: each series draws a polygon across the group-value axes.
@@ -1953,15 +2048,26 @@ function RadarWidget({ result, widget, canDrill, drillWhole }) {
 }
 
 // Sunburst: two-ring hierarchy — inner = group, outer = its series split.
+//
+// It carries NO labels on the arcs, which is a decision and not an omission.
+// The audit tried both directions: radial labels converge on the centre and
+// knot together, tangential ones follow the arc and run across the ring
+// boundary into the outer ring's text. Neither is a tuning problem — a
+// 27-character status name does not fit in a band 40px deep, whichever way it
+// is turned. So the inner ring is named in the shared legend, exactly as the
+// pie and rose are, and the full path is on the tooltip. A chart that says
+// nothing legibly is worse than one that says it beside itself.
 function SunburstWidget({ result, widget, canDrill, drillTo }) {
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
   const rows2d = result.aggregated2d || []
+  const hostRef = useRef(null)
+  const width = useElementWidth(hostRef)
   if (!rows2d.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set Group by and Series in the inspector.</div>
   const { groups, seriesNames, get } = pivot2D(rows2d, cfg.limit || 10, 10)
   const rawByPath = new Map()
   const data = groups.map(g => ({
-    name: g,
+    name: categoryLabel(g),
     children: seriesNames
       .map(s => {
         const cell = get(g, s)
@@ -1971,13 +2077,26 @@ function SunburstWidget({ result, widget, canDrill, drillTo }) {
       })
       .filter(Boolean),
   })).filter(n => n.children.length)
+
+  const legendRows = data.map(n => ({
+    name: n.name, value: n.children.reduce((a, c) => a + (Number(c.value) || 0), 0),
+  }))
+  const total = legendRows.reduce((a, d) => a + d.value, 0)
+  const share = (v) => (total > 0 ? (Number(v) || 0) / total * 100 : 0)
+  const showLegend = cfg.show_legend !== false
+  const legendPos = cfg.legend_position || 'right'
+  const legendBeside = showLegend && (
+    legendPos === 'right' ? true : legendPos === 'bottom' ? false
+      : (width === 0 || width >= PIE_LEGEND_MIN_WIDTH))
+
   const option = {
     animationDuration: 250,
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.treePathInfo?.map(t => t.name).filter(Boolean).join(' · ') || p.name}<br/><b>${fmt(p.value)}</b>` },
     series: [{
-      type: 'sunburst', data, radius: ['12%', '85%'],
+      type: 'sunburst', data, radius: ['22%', '92%'],
       itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 3 },
-      label: { color: C.textPrimary, fontSize: 10, minAngle: 12 },
+      label: { show: false },
+      emphasis: { focus: 'ancestor' },
       nodeClick: false,
       cursor: canDrill ? 'pointer' : 'default',
     }],
@@ -1988,11 +2107,27 @@ function SunburstWidget({ result, widget, canDrill, drillTo }) {
         drillTo?.(path.length === 2 ? rawByPath.get(`${path[0]}>${path[1]}`) : undefined)
       }
     : undefined
-  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+  return (
+    <div ref={hostRef} style={{
+      height: '100%', minHeight: 0, display: 'flex', gap: 10, overflow: 'hidden',
+      flexDirection: legendBeside ? 'row' : 'column',
+    }}>
+      <div style={{ flex: '1 1 0%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <LeapEChart option={option} onSeriesClick={onSeriesClick} minHeight={0} />
+      </div>
+      {showLegend && (
+        <SeriesLegend
+          data={legendRows} total={total} fmt={fmt} share={share}
+          beside={legendBeside} width={pieLegendWidth(width)}
+          showValue={cfg.legend_show_value !== false}
+          showPercent={cfg.legend_show_percent !== false}
+          valuePosition={cfg.legend_value_position || 'right'}
+        />
+      )}
+    </div>
+  )
 }
 
-// Box plot: min / Q1 / median / Q3 / max of a numeric field per category,
-// computed client-side from the report rows.
 function BoxPlotWidget({ result, widget, canDrill, drillWhole }) {
   const cfg = widget.dw_widget_config || {}
   const fmt = widgetFmt(cfg)
@@ -2027,7 +2162,7 @@ function BoxPlotWidget({ result, widget, canDrill, drillWhole }) {
       const b = boxes[p.dataIndex] || []
       return `${cats[p.dataIndex]}<br/>max <b>${fmt(b[4])}</b><br/>Q3 <b>${fmt(b[3])}</b><br/>median <b>${fmt(b[2])}</b><br/>Q1 <b>${fmt(b[1])}</b><br/>min <b>${fmt(b[0])}</b>`
     } },
-    xAxis: { type: 'category', data: cats, axisLabel: { interval: 0, overflow: 'truncate', width: 80, hideOverlap: true } },
+    xAxis: { type: 'category', data: cats, axisLabel: categoryAxisLabel(cats, false) },
     yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
     series: [{
       type: 'boxplot', data: boxes,
