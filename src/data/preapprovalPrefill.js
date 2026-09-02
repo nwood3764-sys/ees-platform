@@ -34,6 +34,12 @@ export const WI_IRA_ASSESSMENT_APPLICATION_KEY = 'wi_ira_mf_homes_assessment_app
 // this target's resolver server-side, so nothing here knows the difference.
 export const WI_IRA_PAYMENT_REQUEST_KEY = 'wi_ira_mf_homes_project_payment_request'
 
+// The Project Reservation submission, from the Project Reservation ENROLLMENT.
+// It is the SAME Jotform as the payment request (250306438751960) — the form's
+// "I'm Applying for a(n)" radio selects the branch, and this target sets it to
+// "Project Reservation" and sources every other field from the enrollment.
+export const WI_IRA_PROJECT_RESERVATION_KEY = 'wi_ira_mf_homes_project_reservation'
+
 // The pure rules live in src/lib/externalFormPrefill.js so they can be tested
 // without a browser or a database. Re-exported here so existing importers of
 // this module are unchanged.
@@ -94,4 +100,10 @@ export function openPaymentRequestForm(incentiveApplicationId, targetWindow) {
 
 export function openAssessmentApplicationForm(incentiveApplicationId, targetWindow) {
   return openExternalPrefilledForm(incentiveApplicationId, WI_IRA_ASSESSMENT_APPLICATION_KEY, targetWindow)
+}
+
+// The Project Reservation submittal, opened from the WI-IRA-MF-HOMES Project
+// Reservation enrollment.
+export function openProjectReservationForm(enrollmentId, targetWindow) {
+  return openExternalPrefilledForm(enrollmentId, WI_IRA_PROJECT_RESERVATION_KEY, targetWindow)
 }
