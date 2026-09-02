@@ -113,6 +113,8 @@ import {
   fetchConstrainingParentCandidates,
   fetchOpportunityInheritedFields,
   fetchProgramStateForCreate,
+  prefetchTriggerWrittenColumns,
+  columnsFilledByTrigger,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
 import { resolveParentChoice } from '../lib/constrainingParentChoice'
@@ -640,30 +642,24 @@ const SYSTEM_REQUIRED_EXEMPT = /(^id$|_record_number$|_owner$|_created_by$|_crea
 // required-field check or the form blocks a save the database would accept.
 // Mirrors the DERIVED map in the create form. Example: opportunity_contact_roles
 // .ocr_name is generated as "<Role> — <Contact>" by trg_ocr_name.
-const TRIGGER_DERIVED_REQUIRED = {
-  contacts: ['contact_name'],
-  // opportunity_account_id is forced to the property's account by
-  // trg_opportunities_account_follows_property (sync_opportunity_account_from_property)
-  // on every insert/update — the user never sets it, so the NOT NULL column must
-  // never block a create the DB would happily complete. It's also prefilled from
-  // the property chain below, so in practice it's populated on the form too.
-  opportunities: ['opportunity_name', 'opportunity_account_id'],
-  buildings: ['building_name'],
-  units: ['unit_name'],
-  opportunity_contact_roles: ['ocr_name'],
-  opportunity_line_items: ['oli_name'],
-  projects: ['project_name'],
-  work_orders: ['work_order_name'],
-  // property_id is NOT NULL but is forced from the opportunity by
-  // trg_enrollment_inherit_from_opportunity — an enrollment is tied to a
-  // building through its opportunity, not to a property (Nicholas,
-  // 2026-08-17), so the create pop-up must never demand it.
-  enrollments: ['enrollment_name', 'property_id'],
-  // ia_name is composed from the opportunity/property + record type by
-  // trg_ia_autoname; ia_program_name is a defaulted legacy column. Neither is
-  // part of any intake form, so the create form must never demand them.
-  incentive_applications: ['ia_name', 'ia_program_name'],
-}
+// Columns a BEFORE INSERT/UPDATE trigger fills in are never DEMANDED on a
+// create form — the database composes the value and overwrites whatever was
+// typed, so asking for it makes a person invent something that is thrown away.
+//
+// This was a hand-written map of 10 tables. service_appointments was not one of
+// them, so the New Service Appointment pop-up asked for a Name that trg_sa_name
+// replaced with the property's address one statement later (Nicholas,
+// 2026-09-02: "auto create name of SA record"). The real figure is 769 columns
+// across 191 tables, which is not a list anybody maintains by hand — so the
+// database is asked instead, via trigger_written_columns. See
+// layoutService.prefetchTriggerWrittenColumns.
+//
+// NOTE this answers "must not be demanded", NOT "is read-only". Those differ:
+// ia_property_owner_name is trigger-filled and deliberately overridable
+// (HA-00192), so editability stays hand-curated in DERIVED_READONLY below,
+// where the intent is recorded per column.
+const triggerDerivedRequired = (tableName) =>
+  tableName ? columnsFilledByTrigger(tableName) : new Set()
 
 // Per-table name fields populated by a BEFORE INSERT/UPDATE trigger that the
 // DB overwrites on every write. These are never user-editable — any input the
@@ -725,7 +721,7 @@ const isDerivedReadonlyField = (table, name) =>
 // with the shared system-column rule in lib/createRecordFields.
 function createNeverAskColumns(tableName) {
   return new Set([
-    ...(TRIGGER_DERIVED_REQUIRED[tableName] || []),
+    ...triggerDerivedRequired(tableName),
     ...(DERIVED_READONLY[tableName] || []),
   ])
 }
@@ -1001,7 +997,7 @@ function describeWriteError(err) {
 // missing; `false` and `0` are valid values. System/auto-populated columns
 // are skipped so they never surface in the error message.
 function findMissingRequired(requiredFields, values, labelMap, tableName = null) {
-  const derived = new Set(TRIGGER_DERIVED_REQUIRED[tableName] || [])
+  const derived = triggerDerivedRequired(tableName)
   const missing = []
   for (const f of requiredFields || []) {
     if (SYSTEM_REQUIRED_EXEMPT.test(f)) continue
@@ -1707,8 +1703,9 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         // read-only — NOT NULL but never the user's to type (e.g.
         // projects.project_name is composed by trg_project_name). Same maps the
         // full create form uses, so both agree on what is never asked for.
+        await prefetchTriggerWrittenColumns(table)
         const derivedCols = new Set([
-          ...(TRIGGER_DERIVED_REQUIRED[table] || []),
+          ...triggerDerivedRequired(table),
           ...(DERIVED_READONLY[table] || []),
         ])
         // Extra fields to require on quick-create beyond the DB NOT NULL set,
@@ -7435,6 +7432,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setLoading(true); setError(null)
 
     if (isCreate) {
+      // Warm the trigger-written column set before anything reads it. The
+      // save-time required check is synchronous and answers from this cache, so
+      // a cold cache would demand a field the database fills — which is exactly
+      // the Name the New Service Appointment pop-up used to ask for.
+      prefetchTriggerWrittenColumns(tableName).catch(() => {})
       // Gate on picker evaluation. Until we know whether the picker is
       // needed (and the user has picked, if shown), don't fetch the layout.
       if (!pickerEvaluated) { setLoading(false); return }
