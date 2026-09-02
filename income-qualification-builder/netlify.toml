@@ -1,0 +1,24 @@
+# EESW HUD Multifamily Income Qualification Builder — build configuration.
+#
+# This is a single self-contained index.html: the whole application, plus the
+# HUD/LIHTC/USDA property dataset (6,371 WI + NC properties) inlined as a JS
+# constant. There is nothing to compile, so there is no build command — the
+# directory is published as-is.
+#
+# Netlify site: ees-income-qualification-builder
+#   (site id 43edf8e0-0b94-484c-9f59-115cddfaa5ce)
+#
+# For this file to take effect the site's "Base directory" must be set to
+# income-qualification-builder — see README.md in this directory.
+#
+# The ignore command runs BEFORE the build and cancels it (at no cost) when
+# nothing in this directory changed since this site's last build. This repo
+# feeds three Netlify sites and Netlify's default is to rebuild every one of
+# them on every commit regardless of what changed. Exit 0 = cancel, anything
+# else = build — so if CACHED_COMMIT_REF is unset and git errors, the command
+# exits non-zero and the build proceeds. It fails toward building, never
+# toward silently skipping.
+[build]
+  publish = "."
+  command = ""
+  ignore  = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- ."
