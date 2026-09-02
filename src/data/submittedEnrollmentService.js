@@ -26,8 +26,10 @@ import { companyNameForState, addressLines, cityStateZip } from '../lib/assessme
 import {
   SUBMITTED_ENROLLMENT_KIND, SUBMITTED_ENROLLMENT_DOCUMENT_KEY, SUBMITTED_ENROLLMENT_FIELD_GROUPS,
   submittedEnrollmentFor, buildSubmittedEnrollmentSummary, buildDocumentManifest,
-  documentDownloadName, submittedEnrollmentFileName,
+  documentDownloadName, submittedEnrollmentFileName, submittedFieldValue,
 } from '../lib/submittedEnrollment'
+import { groupsFromLayout, printsFromLayout } from '../lib/submittedEnrollmentLayout'
+import { loadRecordDetailData } from './layoutService'
 
 // A Submitted Enrollment is filed with a program and read months later, so its
 // links have to outlive the session that made it. One year matches the life of
@@ -171,9 +173,35 @@ export async function loadSubmittedEnrollmentContext(enrollmentId) {
   const documents = rawDocs.map(d => ({ ...d, uploaded_by_name: uploaderById.get(d.uploaded_by) || null }))
 
   // Summary, then names for any id inside it.
-  let summary = buildSubmittedEnrollmentSummary(enr, null, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
-  const labels = await resolveValueLabels(idsInSummary(summary))
-  if (labels.size) summary = buildSubmittedEnrollmentSummary(enr, labels, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
+  //
+  // A record type listed in LAYOUT_DRIVEN_RECORD_TYPES prints its OWN page
+  // layout -- same sections, same order, same labels the person filling it in
+  // saw -- because a document called "what was submitted" must describe the
+  // form that was actually filled. Everything else keeps the document it has
+  // today, untouched (Nicholas: "Only do this one right now. It's record type
+  // specific. Do not try to make changes on all of them.").
+  //
+  // loadRecordDetailData is reused rather than reimplemented: it already
+  // resolves the layout for this record's record type and merges cross-object
+  // (related) field values under their dotted names, which is how the
+  // contractor and payment blocks reach the page at all.
+  let summary
+  if (printsFromLayout(rt?.picklist_value)) {
+    const detail = await loadRecordDetailData('enrollments', enrollmentId)
+    // Lookup labels the record page already resolved -- contractor account and
+    // contact names -- so those need no second round trip.
+    const seeded = new Map()
+    for (const [id, v] of detail.lookups || []) if (v?.label) seeded.set(id, v.label)
+    const build = (labels) => groupsFromLayout(detail.sections, (f) =>
+      submittedFieldValue(detail.record, f.name, labels))
+    summary = build(seeded)
+    const more = await resolveValueLabels(idsInSummary(summary))
+    if (more.size) summary = build(new Map([...seeded, ...more]))
+  } else {
+    summary = buildSubmittedEnrollmentSummary(enr, null, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
+    const labels = await resolveValueLabels(idsInSummary(summary))
+    if (labels.size) summary = buildSubmittedEnrollmentSummary(enr, labels, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
+  }
 
   const textBlocks = await loadSubmittalTextBlocks(opportunity?.opportunity_record_type || null)
     .catch(() => ({}))
