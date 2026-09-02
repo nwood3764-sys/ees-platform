@@ -4070,9 +4070,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
 }
 /* Footer on EVERY page + "Page X of Y" on multi-page documents, so shuffled
    proposal pages can be identified. Runs after all content is laid out. */
-function _stampEesFooters(P,state,docDate){
+function _stampEesFooters(P,state,docDate,botMargin){
   const {d,W,H,M,font,t,stroke,tc}=P;
-  const fy=H-40, N=d.getNumberOfPages();
+  const fy=H-(botMargin||40), N=d.getNumberOfPages();
   const line1='Energy Efficiency Services of '+stateFullName(state)+'    |    112 Owen Rd. PO Box 6141, Monona, WI 53716';
   const line2=state==='NC'?'ncira@ees-nc.org    |    (704) 990-5614':'ira@ees-wi.org    |    (608) 460-7419';
   for(let p=1;p<=N;p++){
@@ -4168,11 +4168,11 @@ function buildHearPdfBlob(){
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
     st.y=Math.max(cy,ly,ry)+6; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
   const drawHead=(withParties)=>{
-    st.y=22;   // a little room above the title so it isn't squished against the top
+    st.y=18;   // a little room above the title so it isn't squished against the top
     tc(BLUE);       font(15,'bold');   t(W/2,st.y,'Project Proposal',{align:'center'});           // brand blue, sized in scale with the rest of the page
     tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+15,_state+' IRA Multifamily HEAR Program',{align:'center'});
     st.y+=23; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-    if(withParties){ st.y+=10; drawParties(); } else { st.y+=12; } };
+    if(withParties){ st.y+=8; drawParties(); } else { st.y+=10; } };
   const contPage=()=>{ d.addPage(); st.y=M; drawHead(false); };
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
   drawHead(true);
@@ -4182,7 +4182,7 @@ function buildHearPdfBlob(){
   const rlineE=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
     const vw=d.getTextWidth(String(val)); t(W-M,st.y+11,val,{align:'right'}); t(W-M-vw-14,st.y+11,lbl,{align:'right'});};
   /* scope table — always Quantity/Units · Labor · Material · Total */
-  head('Proposed Scope of Work — HEAR Program',16);
+  head('Proposed Scope of Work — HEAR Program',12);
   const cols=_hearScopeCols(_money,W,M);
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
   const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
@@ -4192,7 +4192,7 @@ function buildHearPdfBlob(){
     fill(PANEL); d.rect(M,st.y,CW,headH,'F');
     stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
-    cols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+    cols.forEach(([lbl,,w,rx])=>t(rx-w/2,st.y+13,lbl,{align:'center'}));
     colRules(st.y,st.y+headH);
     stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
     st.y+=headH;};
@@ -4216,7 +4216,7 @@ function buildHearPdfBlob(){
     cols.forEach(([lbl,fn,w,rx],c)=>{
       const isTot=(lbl==='TOTAL');
       font(9.5,isTot?'bold':'normal'); tc(isTot?NAVY:[64,78,96]);
-      t(rx-4,numY,fn(r),{align:'right'});});
+      t(rx-w/2,numY,fn(r),{align:'center'});});
     st.y=y0+h; colRules(y0,st.y);
     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
   });
@@ -4226,7 +4226,7 @@ function buildHearPdfBlob(){
   /* Available Rebates & Incentives — the IRA HEAR instant discount */
   const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
   needH(96);
-  head('Available Rebates & Incentives',16);
+  head('Available Rebates & Incentives',12);
   {stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+12,'PROGRAM'); t(W-M,st.y+12,'AMOUNT',{align:'right'});
    st.y+=15; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
@@ -4244,22 +4244,26 @@ function buildHearPdfBlob(){
    rlineE('Total Rebate Amount',_money(incentive),true); st.y+=13; stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   /* Project Summary — right-aligned totals, matching the HOMES proposal */
   needH(92);                                     // keep the header + all three rows off the footer
-  head('Project Summary',16);
+  head('Project Summary',12);
   {const trows=[['Total Project Cost',_money(m.totalCost),false],
      ['Total Rebate Amount Applied as Instant Discount','('+_money(incentive)+')',false],
      ['Total Remaining Amount',_money(dueVal),true]];
    for(const [lb,v,strong] of trows){
      if(strong){ rlineE(lb,v,true); } else { tc(C.ink); font(9,'normal'); t(M,st.y+10,lb); t(W-M,st.y+10,v,{align:'right'}); }
-     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+13,W-M,st.y+13); st.y+=14;}}
+     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+13,W-M,st.y+13); st.y+=13;}}
   /* Acceptance & Authorization — signature block (Nicholas, 2026-09-02: put it back) */
-  needH(86);
-  head('Acceptance & Authorization',16);
+  needH(118);
+  head('Acceptance & Authorization',12);
   {const ack='By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of '+_state+' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.';
-   const al=wrap(ack,CW-40); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(W/2,st.y+8+k*10,ln,{align:'center'})); st.y+=al.length*10+2;
-   st.y+=10; stroke([70,82,98]); d.setLineWidth(1);
-   d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
-   tc([70,82,98]); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative'); t(W-M-150,st.y+11,'Date');}
-  _stampEesFooters(P,m.state,pv(F.pjInvDate));
+   const al=wrap(ack,CW); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(M,st.y+9+k*10.5,ln)); st.y+=al.length*10.5+2;   // full width, left-aligned — fills the page, not a squished center column
+   const sigW=300, dateX=W-M-150;
+   st.y+=22; stroke([70,82,98]); d.setLineWidth(1);                                    // room above the line to actually sign
+   d.line(M,st.y,M+sigW,st.y); d.line(dateX,st.y,W-M,st.y);
+   tc([70,82,98]); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative — Signature'); t(dateX,st.y+11,'Date');
+   st.y+=24; stroke([70,82,98]); d.setLineWidth(1);                                    // separate printed-name line
+   d.line(M,st.y,M+sigW,st.y);
+   tc([70,82,98]); font(8.5); t(M,st.y+11,'Printed Name');}
+  _stampEesFooters(P,m.state,pv(F.pjInvDate),30);
   return d.output('blob');
 }
 // Sealed (green) HEAR proposal — same format as the Sealed HOMES proposal:
@@ -4313,7 +4317,7 @@ function buildHearSealedPdfBlob(){
     fill(PANEL); d.rect(M,st.y,CW,headH,'F');
     stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     tc(GREEN); font(8,'bold'); t(M+5,st.y+13,'CONTRACTOR'); t(measX+4,st.y+13,'MEASURE');
-    numDefs.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+    numDefs.forEach(([lbl,,w,rx])=>t(rx-w/2,st.y+13,lbl,{align:'center'}));
     colRules(st.y,st.y+headH);
     stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
     st.y+=headH;};
@@ -4337,7 +4341,7 @@ function buildHearSealedPdfBlob(){
     if(desl.length){dy+=3; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(measX+4,dy+k*10+8,ln)); dy+=descH;}
     const numY=y0+h/2+3;   // Qty/Labor/Material/Total centered vertically in the row
     numDefs.forEach(([lbl,fn,w,rx])=>{const isTot=(lbl==='TOTAL');
-      font(9.5,isTot?'bold':'normal'); tc(isTot?C.ink:[64,78,96]); t(rx-4,numY,fn(r),{align:'right'});});
+      font(9.5,isTot?'bold':'normal'); tc(isTot?C.ink:[64,78,96]); t(rx-w/2,numY,fn(r),{align:'center'});});
     st.y=y0+h; colRules(y0,st.y);
     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
   });
@@ -4366,13 +4370,17 @@ function buildHearSealedPdfBlob(){
     if(strong){ rline(lbl,val,true); } else { tc(C.ink); font(9,'normal'); t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'}); }
     stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
   /* Acceptance & Authorization — signature block (Nicholas, 2026-09-02: put it back) */
-  needH(84);
+  needH(118);
   sh('Acceptance & Authorization');
   {const ack='By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of '+stateFullName(m.state)+' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.';
-   const al=wrap(ack,CW-40); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(W/2,st.y+8+k*10.5,ln,{align:'center'})); st.y+=al.length*10.5+4;
-   st.y+=14; stroke([68,88,110]); d.setLineWidth(1);
-   d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
-   tc(C.mut); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative'); t(W-M-150,st.y+11,'Date');}
+   const al=wrap(ack,CW); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(M,st.y+9+k*10.5,ln)); st.y+=al.length*10.5+2;   // full width, left-aligned
+   const sigW=300, dateX=W-M-150;
+   st.y+=22; stroke([68,88,110]); d.setLineWidth(1);                                   // room above the line to actually sign
+   d.line(M,st.y,M+sigW,st.y); d.line(dateX,st.y,W-M,st.y);
+   tc(C.mut); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative — Signature'); t(dateX,st.y+11,'Date');
+   st.y+=24; stroke([68,88,110]); d.setLineWidth(1);                                   // separate printed-name line
+   d.line(M,st.y,M+sigW,st.y);
+   tc(C.mut); font(8.5); t(M,st.y+11,'Printed Name');}
   _stampSealedFooters(P,'Project Proposal',F.pjProjInvNo||F.pjIQ||'',F.pjInvDate);
   return d.output('blob');
 }
