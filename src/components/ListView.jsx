@@ -19,6 +19,7 @@ import {
 import {
   getEditableFieldsForTable,
   getPicklistOptions,
+  getPicklistFilterOptions,
   searchLookupOptions,
   bulkUpdateRecords,
   bulkSoftDeleteRecords,
@@ -1737,10 +1738,14 @@ function FilterValueEditor({ row, onChange }) {
       (async () => {
         setLoadingOpts(true);
         try {
-          const list = await getPicklistOptions(vs.object, vs.field);
+          // The FILTER list, not the editor list: a value retired after
+          // records were filed under it is still on screen in the column it
+          // names, so it has to stay findable. getPicklistOptions() is the
+          // editors' active-only list and stays that way.
+          const list = await getPicklistFilterOptions(vs.object, vs.field);
           if (cancelled || stale()) return;
           if ((!list || list.length === 0) && vs.maybe) setOpts('TEXT');
-          else setOpts((list || []).map(o => ({ label: o.label })));
+          else setOpts((list || []).map(o => ({ label: o.label, retired: !!o.retired })));
         } catch {
           if (!cancelled && !stale()) setOpts(vs?.maybe ? 'TEXT' : []);
         } finally {
@@ -1834,6 +1839,12 @@ function FilterValueEditor({ row, onChange }) {
                     </span>
                   )}
                   {o.label}
+                  {o.retired && (
+                    <span title="Retired: no longer offered on new records, still carried by existing ones"
+                      style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 10, letterSpacing: '0.04em', textTransform: 'uppercase', color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 3, padding: '1px 4px' }}>
+                      Retired
+                    </span>
+                  )}
                 </div>
               );
             })}
