@@ -72,6 +72,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_HOMES_PAYMENT_INVOICE:              'generate_homes_payment_invoice',
   GENERATE_HOMES_ASSESSMENT_INVOICE:           'generate_homes_assessment_invoice',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
+  GENERATE_PROJECT_RESERVATION_APPLICATION: 'generate_project_reservation_application',
   GENERATE_ASSESSMENT_APPLICATION:          'generate_assessment_application',
   GENERATE_PAYMENT_REQUEST_APPLICATION:     'generate_payment_request_application',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
@@ -334,6 +335,21 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    23,
     isAvailable: ({ tableName, editing, recordTypeLabel }) =>
       !editing && tableName === 'incentive_applications' && recordTypeLabel === 'WI-IRA-MF-HOMES-AUDIT',
+  },
+  // Open the Focus On Energy IRA HOMES Multifamily Project Submittal Form
+  // (hosted on Jotform), pre-filled from THIS Project Reservation enrollment.
+  // Same form as the payment request below; its "I'm Applying for a(n)" radio is
+  // set to "Project Reservation" and every field is sourced from the enrollment.
+  generate_project_reservation_application: {
+    key:                 ACTION_KEYS.GENERATE_PROJECT_RESERVATION_APPLICATION,
+    label:               'Open Project Reservation Application',
+    icon:                'M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5M15 3h6m0 0v6m0-6L10 14',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'primary',
+    defaultSortOrder:    23,
+    isAvailable: ({ tableName, editing, recordTypeLabel }) =>
+      !editing && tableName === 'enrollments' && recordTypeLabel === 'WI-IRA-MF-HOMES-Project-Reservation',
   },
   // Open the Focus On Energy IRA HOMES Multifamily Project Submittal Form
   // (hosted on Jotform), pre-filled from THIS payment request. The third form

@@ -54,6 +54,7 @@ import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
 import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, openPaymentRequestForm,
+         openProjectReservationForm,
          loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
@@ -6944,6 +6945,30 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }, [recordId, openingPreapproval])
 
+  // The Project Reservation submittal (Jotform), pre-filled from the Project
+  // Reservation enrollment. Same shape as the pre-approval handler; the shared
+  // missing-fields modal explains an incomplete record.
+  const [openingProjectReservation, setOpeningProjectReservation] = useState(false)
+  const handleOpenProjectReservationForm = useCallback(async () => {
+    if (openingProjectReservation) return
+    const win = window.open('', '_blank')
+    setOpeningProjectReservation(true)
+    try {
+      const { url, error, missing } = await openProjectReservationForm(recordId, win)
+      if (missing && missing.length) {
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the project reservation application.')
+      }
+    } finally {
+      setOpeningProjectReservation(false)
+    }
+  }, [recordId, openingProjectReservation])
+
   // The assessment rebate claim, from the WI-IRA-MF-HOMES-AUDIT incentive
   // application. Same shape as the pre-approval handler above and it shares the
   // same missing-fields modal — the gate is the form's own required set either
@@ -9465,6 +9490,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setHomesModalKind('invoice'),
     [ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE]:   () => setHomesModalKind('audit'),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
+    [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_APPLICATION]: handleOpenProjectReservationForm,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
@@ -9494,6 +9520,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const topbarPendingByKey = {
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: openingPreapproval,
+    [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_APPLICATION]: openingProjectReservation,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: openingApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: openingPaymentRequest,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
