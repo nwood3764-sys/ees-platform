@@ -113,12 +113,14 @@ import {
   fetchConstrainingParentCandidates,
   fetchOpportunityInheritedFields,
   fetchProgramStateForCreate,
+  deriveParentsFromForeignKeys,
   prefetchTriggerWrittenColumns,
   columnsFilledByTrigger,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
 import { resolveParentChoice } from '../lib/constrainingParentChoice'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
+import { mergeParentMeta } from '../lib/parentRelationships'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
@@ -845,9 +847,29 @@ const INHERITED_FROM_PARENT_COLUMNS = {
 // object. Bounded: it stops as soon as nothing is missing, and never walks more
 // than a few hops. Returns only the values it resolved; the caller decides what
 // to do with them.
+// A table's parent relationships: the curated TABLE_META entry plus every real
+// foreign key that is not an owner, a picklist value or a self-reference.
+// Union, never replacement — a curated entry can only gain relationships, so no
+// navigation that works today changes.
+async function mergedParentMeta(table) {
+  return mergeParentMeta(TABLE_META[table], await deriveParentsFromForeignKeys(table))
+}
+
 async function resolveInheritedParents(targetTable, known, { maxHops = 6 } = {}) {
-  const meta = TABLE_META[targetTable]
-  if (!meta || !Array.isArray(meta.parents) || meta.parents.length === 0) return {}
+  // TABLE_META is curated and covers 74 of the platform's 100+ record objects.
+  // An object missing from it used to inherit NOTHING — creating a Service
+  // Appointment from a work order left Work Type, Project and Opportunity blank
+  // while the work order carried all three (Nicholas, 2026-09-02: "it should
+  // obviously inherit everything possible from the work order, building,
+  // opportunity"). So when the map has no entry, the relationships are read off
+  // the table's real foreign keys instead. The curated entry still wins where
+  // one exists, so nothing that works today changes.
+  let meta = TABLE_META[targetTable]
+  if (!meta || !Array.isArray(meta.parents) || meta.parents.length === 0) {
+    const derived = await deriveParentsFromForeignKeys(targetTable)
+    if (!derived.parents.length) return {}
+    meta = derived
+  }
   // "property_id" / "project_account_id" / "work_order_account_id" all reduce to
   // the relationship they express: property_id, account_id, account_id.
   const relationshipKey = (col) => {
@@ -894,7 +916,14 @@ async function resolveInheritedParents(targetTable, known, { maxHops = 6 } = {})
     const key = `${table}:${id}`
     if (seen.has(key)) continue
     seen.add(key)
-    const ancestorMeta = TABLE_META[table]
+    // The ancestor's curated entry UNIONED with its real foreign keys. The
+    // curated lists are partial by design — TABLE_META.work_orders declares the
+    // four it navigates by (project, opportunity, property, building) and not
+    // work_type_id, so a Service Appointment created from a work order never
+    // saw the work type it was sitting on. Reading more columns here is safe:
+    // values are only NOTED, and fill() assigns exclusively to columns the
+    // TARGET declares, so nothing can be written that the child does not have.
+    const ancestorMeta = await mergedParentMeta(table)
     if (!ancestorMeta?.parents?.length) continue
     try {
       const { data: row } = await supabase
