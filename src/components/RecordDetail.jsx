@@ -1879,7 +1879,8 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
               ? await fetchDependentLookupOptions(
                   { name: f.name, lookup_dependency: { kind: f.scopedKind, depends_on: [f.scopedDependsOn || 'property_id'] } },
                   effectiveSeed)
-              : await fetchLookupOptions(f.lookup_table, f.lookup_field)
+              : await fetchLookupOptions(f.lookup_table, f.lookup_field, 50,
+                  f.lookup_filter ? { filter: f.lookup_filter } : {})
           } catch { fkOpts[f.name] = [] }
         }))
         // Options for required picklist columns. Unscoped here — the record
@@ -2054,7 +2055,8 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   onSearch={f.scopedKind ? null : async (term) => {
                     try {
                       const opts = await fetchLookupOptions(f.lookup_table, f.lookup_field, 50,
-                        term ? { search: term } : {})
+                        { ...(term ? { search: term } : {}),
+                          ...(f.lookup_filter ? { filter: f.lookup_filter } : {}) })
                       setFkLookupOpts(prev => ({ ...prev, [f.name]: opts }))
                     } catch { /* keep the current page on a failed search */ }
                   }}
@@ -2424,7 +2426,8 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
     // Empty term restores the base option page.
     if (!term) { setServerOpts(null); return }
     try {
-      const opts = await fetchLookupOptions(field.lookup_table, field.lookup_field, 50, { search: term })
+      const opts = await fetchLookupOptions(field.lookup_table, field.lookup_field, 50,
+        { search: term, ...(field.lookup_filter ? { filter: field.lookup_filter } : {}) })
       setServerOpts(opts)
     } catch { setServerOpts([]) }
   }, [canServerSearch, field.lookup_table, field.lookup_field])
@@ -6362,7 +6365,8 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
           fetchPicklistOptions(picklistOwnerTable, fn).catch(() => []).then(v => [fn, v])
         )).then(entries => Object.fromEntries(entries)),
         Promise.all(lookupFlds.map(lf =>
-          fetchLookupOptions(lf.lookup_table, lf.lookup_field).catch(() => []).then(v => [lf.name, v])
+          fetchLookupOptions(lf.lookup_table, lf.lookup_field, 50,
+            lf.lookup_filter ? { filter: lf.lookup_filter } : {}).catch(() => []).then(v => [lf.name, v])
         )).then(entries => Object.fromEntries(entries)),
       ])
       setPicklistOpts(pOpts)
@@ -8098,7 +8102,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 field: f,
               })
             } else {
-              lookupFields.push({ name: f.name, table: f.lookup_table, field: f.lookup_field })
+              lookupFields.push({ name: f.name, table: f.lookup_table, field: f.lookup_field,
+                                  filter: f.lookup_filter || null })
             }
           }
         }
@@ -8126,7 +8131,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     if (lookupFields.length) {
       const opts = {}
       await Promise.all(lookupFields.map(async lf => {
-        try { opts[lf.name] = await fetchLookupOptions(lf.table, lf.field) } catch { opts[lf.name] = [] }
+        try {
+          opts[lf.name] = await fetchLookupOptions(lf.table, lf.field, 50,
+            lf.filter ? { filter: lf.filter } : {})
+        } catch { opts[lf.name] = [] }
       }))
       setAllLookupOpts(prev => ({ ...prev, ...opts }))
     }
