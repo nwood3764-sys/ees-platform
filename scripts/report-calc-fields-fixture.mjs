@@ -9,7 +9,7 @@
 // someone is part-way through (never drop it — refuse the save and say what is
 // missing).
 
-import { classifyCalcFields, describeIncompleteCalcFields } from '../src/lib/reportCalcFields.js'
+import { classifyCalcFields, describeIncompleteCalcFields, calcColumnDescriptor } from '../src/lib/reportCalcFields.js'
 
 let pass = 0, fail = 0
 const check = (name, got, want) => {
@@ -91,6 +91,39 @@ ok('no message when nothing is incomplete', describeIncompleteCalcFields([]) ===
     { label: 'Margin', expression: '' }, { label: '', expression: 'a - b' },
   ]).incomplete)
   ok('two incomplete rows are both named', msg.includes('"Margin"') && msg.includes('calculated field 2'))
+}
+
+// ── A calculated column can carry a grand total ───────────────────────────
+// It could not: the Total control lived only on selected fields, so a Margin
+// column was the one column in a report with no bottom line.
+{
+  const col = calcColumnDescriptor({ label: 'Margin', expression: 'a - b', data_type: 'currency', summarize: 'sum' })
+  check('the total mode reaches the viewer', col.summarize, 'sum')
+  check('a currency formula totals AS currency', col.format, 'currency')
+  ok('and it is marked as calculated', col._calc === true)
+  check('the label survives', col.label, 'Margin')
+  check('so does the expression, which is what the total is computed from', col.expression, 'a - b')
+}
+{
+  const col = calcColumnDescriptor({ label: 'Rate', data_type: 'percent' })
+  check('a percent formula totals as a percent', col.format, 'percent')
+  ok('no total mode means no total', col.summarize === undefined)
+}
+{
+  const col = calcColumnDescriptor({ label: 'Units', data_type: 'number' })
+  ok('a plain number takes the default format, not a currency sign', col.format === undefined)
+}
+{
+  const col = calcColumnDescriptor({ label: 'X', data_type: 'currency', format: 'compact' })
+  check('an explicit format is never overridden by the data type', col.format, 'compact')
+}
+check('an unnamed calculated column still renders a header',
+  calcColumnDescriptor({ expression: 'a' }).label, '(calc)')
+ok('nothing in, no crash', calcColumnDescriptor(null)._calc === true)
+{
+  // The total mode must survive the save path, or it is set once and lost.
+  const { keep } = classifyCalcFields([{ label: 'Margin', expression: 'a - b', summarize: 'sum' }])
+  check('classify keeps the total mode', keep[0].summarize, 'sum')
 }
 
 console.log(`report-calc-fields fixture: ${pass} passed, ${fail} failed`)

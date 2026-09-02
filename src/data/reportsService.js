@@ -919,6 +919,9 @@ export function buildReportDefinition({ report, filters = [], groupings = [], ca
       rcf_format_options: c.format_options || {},
       rcf_display_order:  idx,
       rcf_grouping_level: c.grouping_level || null,
+      // Grand-total mode. A calculated column could never carry one, so a
+      // Margin column was the one column with no bottom line.
+      rcf_summarize:      c.summarize || null,
     })),
   }
 }
@@ -1966,6 +1969,7 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       expression:      c.rcf_expression,
       data_type:       c.rcf_data_type,
       grouping_level:  c.rcf_grouping_level,
+      summarize:       c.rcf_summarize || undefined,
     })),
     format:        r.rpt_format,
     primaryObject: r.rpt_primary_object,

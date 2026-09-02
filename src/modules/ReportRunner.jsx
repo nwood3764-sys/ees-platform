@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { C } from '../data/constants'
 import { formatCurrency } from '../lib/currencyFormat'
+import { calcColumnDescriptor } from '../lib/reportCalcFields'
 import {
   PINNED_TABLE, ROW_RULE, TOTAL_RULE, pinnedHeaderCell, pinnedFirstColumn,
 } from '../lib/pinnedTableHeader'
@@ -297,7 +298,7 @@ export function TabularLayout({ result, fill = false }) {
   const rowCalcFields = (calculatedFields || []).filter(c => c.scope === 'row')
   const allColumns = [
     ...columns,
-    ...rowCalcFields.map(c => ({ ...c, _calc: true, label: c.label || '(calc)' })),
+    ...rowCalcFields.map(calcColumnDescriptor),
   ]
 
   // Inline editing: picklist columns on the primary object are editable

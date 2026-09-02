@@ -188,13 +188,21 @@ Walk the report builder, the viewer and the dashboard builder against
 Salesforce/Power BI parity and write down what is missing, before building. Known
 gaps already visible:
 
-- [ ] A calculated field cannot be summarized (the total control is on selected
-      fields only), so a formula column can never carry a grand total. NEXT.
+- [x] **A calculated field can carry a grand total.** The Total control lived
+      only on selected fields, so a Margin or Cost per Unit column — exactly the
+      kind someone wants a bottom line for — was the one column in a report that
+      could never have one. `rcf_summarize` stores it; the viewer needed no new
+      arithmetic (resolveDisplay already evaluates the expression per row), only
+      the mode and a `data_type` → `format` translation so a currency formula
+      totals as currency.
 - [x] A grouping on a RELATED field was skipped by the select builder, so
       grouping by a parent's column produced "(blank)" headers and collapsed the
       whole report into one group. Fixed — it rides the embed tree, label embed
       included. **PR #674.**
-- [ ] Matrix reports have no column widths and no drill-through.
+- [ ] Matrix reports have no drill-through — clicking a cell should open the
+      records behind it. Column widths there are deliberately NOT queued: a
+      matrix has few, generated columns and auto-width reads correctly, so a
+      drag handle would be motion without value.
 - [ ] Report row limit is a single Top-N; no "show first N per group".
 - [ ] Dashboards: no scheduled delivery of a dashboard (reports have it), no
       per-widget "view as" role, no drill-through from a widget into the
