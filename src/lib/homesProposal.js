@@ -627,7 +627,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     (F.pjSecondaryContractor?('Support Contractor: '+F.pjSecondaryContractor):'')].filter(v=>v&&String(v).trim());
   const lLines=[F.pjInstallAddr,F.pjCsz,'Multi-Family',
     (m.units?('Total Units: '+m.units):''),
-    (F.pjIQ?('Income Qualification Number: '+F.pjIQ):'')].filter(v=>v&&String(v).trim());
+    (F.pjIQ?('IQ Number: '+F.pjIQ):'')].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail]
     .filter(v=>v&&String(v).trim());
   // Three evenly spaced columns across the full width: contractor left, project
@@ -874,8 +874,8 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   // Date lines print ONLY when a value exists — a bare "Est. Start Date:" with
   // nothing after it reads as an unfinished document, not a project detail.
   const projInfo=isInv
-    ?[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),(F.pjStart?('Start Date: '+F.pjStart):''),(F.pjEnd?('Completion Date: '+F.pjEnd):'')]
-    :[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('Income Qualification Number: '+F.pjIQ):''),(F.pjEstStart?('Est. Start Date: '+F.pjEstStart):''),(F.pjEstEnd?('Est. Completion Date: '+F.pjEstEnd):'')];
+    ?[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('IQ Number: '+F.pjIQ):''),(F.pjStart?('Start Date: '+F.pjStart):''),(F.pjEnd?('Completion Date: '+F.pjEnd):'')]
+    :[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),(F.pjIQ?('IQ Number: '+F.pjIQ):''),(F.pjEstStart?('Est. Start Date: '+F.pjEstStart):''),(F.pjEstEnd?('Est. Completion Date: '+F.pjEstEnd):'')];
   const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail];
   bh('Primary IRA Contractor:',M,st.y);
   bh('Project Information:',CX2,st.y);
