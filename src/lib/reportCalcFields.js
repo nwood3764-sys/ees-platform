@@ -68,3 +68,26 @@ export function describeIncompleteCalcFields(incomplete) {
     ? `${one(rows[0])}. Fill it in, or remove the row with ×, then save.`
     : `${rows.map(one).join('; ')}. Fill them in, or remove the rows with ×, then save.`
 }
+
+/**
+ * A calculated field, as the VIEWER's column descriptor.
+ *
+ * Two things the merge has to do that a plain spread does not:
+ *
+ *  - carry `summarize`, so the grand-total footer computes for a calculated
+ *    column at all. It could not before: the Total control lived only on
+ *    selected fields, so a Margin or Cost per Unit column — exactly the kind
+ *    someone wants a bottom line for — was the one column that never had one.
+ *  - translate `data_type` into `format`. The viewer formats by `col.format`;
+ *    a calculated field stores `data_type`. Without this a currency formula
+ *    totals to a bare number while the currency column beside it reads $.
+ */
+export function calcColumnDescriptor(c) {
+  const dt = c?.data_type
+  return {
+    ...c,
+    _calc: true,
+    label: c?.label || '(calc)',
+    format: c?.format || (dt === 'currency' || dt === 'percent' ? dt : undefined),
+  }
+}

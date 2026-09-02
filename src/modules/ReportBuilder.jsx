@@ -221,6 +221,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             data_type:      c.rcf_data_type,
             format_options: c.rcf_format_options,
             grouping_level: c.rcf_grouping_level,
+            summarize:      c.rcf_summarize || undefined,
           })))
         }
         setLoading(false)
@@ -2359,7 +2360,7 @@ function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
             <div key={idx} style={{
               padding:12, background:C.cardSecondary, borderRadius:6, marginBottom:10,
             }}>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 120px 120px 30px', gap:8, marginBottom:8 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 118px 118px 118px 30px', gap:8, marginBottom:8 }}>
                 <input
                   type="text"
                   value={c.label}
@@ -2380,6 +2381,24 @@ function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
                   <option value="text">Text</option>
                   <option value="boolean">Boolean</option>
                 </select>
+                {/* A calculated column could not carry a grand total — the Total
+                    control lived only on selected fields — so a Margin or Cost
+                    per Unit column was the one column with no bottom line. It
+                    is a row-level choice: a summary formula already runs per
+                    group and totals itself. */}
+                {c.scope === 'summary' ? <div /> : (
+                  <select value={c.summarize || ''}
+                    onChange={e => update(idx, { summarize: e.target.value || undefined })}
+                    title="Grand total for this column"
+                    style={inputStyle()}>
+                    <option value="">No total</option>
+                    <option value="sum">Sum</option>
+                    <option value="avg">Average</option>
+                    <option value="min">Min</option>
+                    <option value="max">Max</option>
+                    <option value="count">Count</option>
+                  </select>
+                )}
                 <button onClick={() => remove(idx)} style={miniBtn(true)}>×</button>
               </div>
               <Suspense fallback={<div style={{ fontSize:12, color:C.textMuted, padding:'8px 0' }}>Loading editor…</div>}>
