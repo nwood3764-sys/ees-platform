@@ -45,6 +45,13 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null
 }
 
+// A stored date ('YYYY-MM-DD' or ISO) -> 'MM/DD/YYYY' for the document; '' when absent.
+function fmtDate(v) {
+  if (!v) return ''
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v))
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : String(v)
+}
+
 /**
  * Load everything one enrollment needs for its HOMES proposal, WITHOUT reading
  * the PDF bytes yet. Returns { enr, recordTypeValue, fields, units, contractor,
@@ -112,6 +119,7 @@ export async function loadHomesProposalContext(enrollmentId) {
     pjProjInvNo:   enr.enrollment_record_number || '',
     pjInvNo:       enr.enrollment_record_number || '',
     pjInvDate:     new Date().toISOString().slice(0, 10),
+    pjEstEnd:      fmtDate(enr.enrollment_estimated_completion_date),
     pjSecondaryContractor: secondaryContractor || '',
   }
 
@@ -285,6 +293,7 @@ export async function loadPaymentRequestContext(incentiveAppId) {
     pjProjInvNo:   ia.ia_record_number || '',
     pjInvNo:       ia.ia_record_number || '',
     pjInvDate:     new Date().toISOString().slice(0, 10),
+    pjEnd:         fmtDate(ia.ia_project_completion_date || ia.ia_estimated_completion_date),
     pjSecondaryContractor: secondaryContractor || '',
   }
 
