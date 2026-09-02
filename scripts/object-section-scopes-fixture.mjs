@@ -13,6 +13,7 @@
 // Run with: node scripts/object-section-scopes-fixture.mjs
 
 import { OBJECT_SECTION_SCOPES, scopeForSection } from '../src/lib/objectSectionScopes.js'
+import { viewVisibleOnModule, filterViewsForModule } from '../src/lib/savedViewScope.js'
 
 let failures = 0
 let checks = 0
@@ -88,6 +89,53 @@ function check(label, actual, expected) {
 {
   const preFix = scopeForSection('field', 'technicians', 'contacts')
   check('CONTROL: the contacts-backed tab was unscoped, hence every contact', preFix, null)
+}
+
+
+// ── Saved views are scoped to their module ──────────────────────────────────
+// The Technicians tab's own views ("Crew Leads") must not appear in
+// Setup > Users, which lists every user and where the name means nothing.
+// saved_list_views.list_view_module has existed since the baseline and nothing
+// read it until now — so the rule must be one-directional, or existing views
+// would move.
+{
+  const techView   = { list_view_name: 'Crew Leads',  list_view_module: 'field' }
+  const objectWide = { list_view_name: 'All Accounts', list_view_module: null }
+
+  check('a field-scoped view shows on the field module',
+    viewVisibleOnModule(techView, 'field'), true)
+  check('and NOT on setup', viewVisibleOnModule(techView, 'setup'), false)
+  check('and NOT on any other module', viewVisibleOnModule(techView, 'dispatch'), false)
+
+  check('a view naming no module is object-wide: shows on field',
+    viewVisibleOnModule(objectWide, 'field'), true)
+  check('...and on setup', viewVisibleOnModule(objectWide, 'setup'), true)
+  check('...and when the caller names no module',
+    viewVisibleOnModule(objectWide, null), true)
+
+  // The safety direction: an unscoped CALLER still sees everything, so no
+  // existing screen loses a view it has today.
+  check('a caller that does not scope still sees a module-scoped view',
+    viewVisibleOnModule(techView, null), true)
+
+  check('a view row missing the field entirely is treated as object-wide',
+    viewVisibleOnModule({ list_view_name: 'Legacy' }, 'field'), true)
+
+  check('filterViewsForModule keeps object-wide and this module only',
+    filterViewsForModule(
+      [techView, objectWide, { list_view_name: 'Setup Only', list_view_module: 'setup' }],
+      'field',
+    ).map(v => v.list_view_name),
+    ['Crew Leads', 'All Accounts'])
+
+  check('a non-array view list is empty, never a throw',
+    filterViewsForModule(null, 'field'), [])
+
+  // POSITIVE CONTROL: the pre-fix rule ignored list_view_module entirely, so
+  // the technician views WOULD have shown up in Setup > Users.
+  check('CONTROL: ignoring the module shows a field view on setup',
+    [techView, objectWide].filter(() => true).map(v => v.list_view_name),
+    ['Crew Leads', 'All Accounts'])
 }
 
 console.log(`object-section-scopes-fixture: ${checks - failures}/${checks} checks passed`)
