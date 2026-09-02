@@ -363,6 +363,7 @@
   <div class="expHdr">HEAR Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="hearProp" disabled>HEAR Proposal (PDF)</button>
+    <button class="btn ghost" data-act="hearPropSealed" disabled>HEAR Proposal — Sealed (PDF)</button>
   </div>
   <div style="font-size:11.5px;color:var(--mut);margin-left:2px;margin-top:4px">Enabled once a building is loaded and at least one item is added in the HEAR section above.</div>
   </div>
@@ -1083,7 +1084,7 @@ function refresh(){
     else if(a==='reportImp') e.disabled=!(files.asImp||atDocs.impPdf);
     else if(a==='dlvXmlBase') e.disabled=!atDocs.baseXml;
     else if(a==='dlvXmlImp') e.disabled=!atDocs.impXml;
-    else if(a==='hearProp') e.disabled=!(typeof hearHasRows==='function'&&hearHasRows()&&(data.asBase||data.asImp));
+    else if(a==='hearProp'||a==='hearPropSealed') e.disabled=!(typeof hearHasRows==='function'&&hearHasRows()&&(data.asBase||data.asImp));
     else e.disabled=!canExport;
   }
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
@@ -3363,8 +3364,8 @@ function hearLoad(){
     hearState=Array.isArray(s)?s:[];}
 }
 function hearLoadAndRender(){hearLoad();renderHear();hearUpdateGate();}
-function hearUpdateGate(){const b=document.querySelector('button[data-act="hearProp"]');
-  if(b)b.disabled=!(hearHasRows()&&(data.asBase||data.asImp));}
+function hearUpdateGate(){const dis=!(hearHasRows()&&(data.asBase||data.asImp));
+  document.querySelectorAll('button[data-act="hearProp"],button[data-act="hearPropSealed"]').forEach(b=>{b.disabled=dis;});}
 function renderHear(){
   const body=document.getElementById('hearBody');if(!body)return;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -4104,56 +4105,65 @@ function hearModel(){
   return {units,state,rows,totalCost,totalRebate,totalDue,
     fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
 }
+// HEAR scope rows -> the shared table shape used by both the EES and Sealed
+// HEAR proposals: Quantity/Units · Labor · Material · Total (every line split
+// 50/50, computed in hearModel).
+function _hearScopeCols(_money,W,M){
+  const cols=[['QUANTITY/UNITS',r=>String(r.qty),96],['LABOR',r=>_money(r.labor),74],
+    ['MATERIAL',r=>_money(r.material),74],['TOTAL',r=>_money(r.cost),74]];
+  let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
+  return cols;
+}
 function buildHearPdfBlob(){
   const m=hearModel(), F=m.fields;
   const P=_pdfNew(34); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
   const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const _state=stateFullName(m.state);
-  const NAVY=[30,36,46], EM=[120,130,144], EMd=[30,36,46], EMlt=[120,130,144],
-        PANEL=[246,249,252], HAIR=[223,230,238], INKM=[96,110,128], WHITE=[255,255,255];
-  /* letterhead — matches the HOMES proposal: company (left) + document title/meta
-     (right) over a thin rule with a short emerald tab. No band, no logo, no panel. */
-  tc(NAVY); font(15,'bold');    t(M,st.y+13,'Energy Efficiency Services');
-  tc(INKM); font(9.5,'normal'); t(M,st.y+27,'of '+_state);
-  tc(NAVY); font(16,'bold');    t(W-M,st.y+13,'PROPOSAL',{align:'right'});
-  tc(INKM); font(8,'normal');   t(W-M,st.y+25,'Inflation Reduction Act  ·  HEAR Program',{align:'right'});
-  tc(INKM); font(8,'normal');   t(W-M,st.y+35,'Date: '+pv(F.pjInvDate),{align:'right'});
-  st.y+=43;
-  stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-  st.y+=16;
-  /* party blocks */
-  const _addr=String(F.pjInstallAddr||'').trim().toLowerCase();
-  const _pn=String(F.pjPropName||'').trim();
-  const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
-  const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Multifamily'+(m.units?('  ·  '+m.units+' Units'):''),
-    F.pjIQ?('Income Qualification Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
-  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail].filter(v=>v&&String(v).trim());
-  {const colW=CW/2-12, rX=M+CW/2+12, pT=st.y;
-   tc(EMd); font(8,'bold'); t(M,pT+8,'PROJECT ADDRESS'); t(rX,pT+8,'BUILDING OWNER');
-   stroke(EM); d.setLineWidth(1.6); d.line(M,pT+12,M+28,pT+12); d.line(rX,pT+12,rX+28,pT+12);
-   let ly=pT+25,ry=pT+25; tc(C.ink); font(9);
-   for(const v of lLines) for(const ln of wrap(v,colW)){t(M,ly,ln); ly+=11.5;}
-   for(const v of rLines) for(const ln of wrap(v,colW)){t(rX,ry,ln); ry+=11.5;}
-   st.y=Math.max(ly,ry)+6;}
-  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(NAVY); font(10.5,'bold');
-    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke([120,130,144]); d.setLineWidth(.9);
+  /* EES brand palette + header identical to the HOMES EES proposal: the three
+     balanced party columns (contractor / project / customer). */
+  const BLUE=[33,102,172];
+  const NAVY=BLUE, PANEL=[246,249,252], HAIR=[223,230,238];
+  const cLines=['Energy Efficiency Services of '+_state,'112 Owen Rd. PO Box 6141','Monona, WI 53716',
+    _phone(m.state==='NC'?'7049905614':'6084607419')].filter(v=>v&&String(v).trim());
+  const lLines=[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),
+    (F.pjIQ?('Income Qualification Number: '+F.pjIQ):'')].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail]
+    .filter(v=>v&&String(v).trim());
+  const drawParties=()=>{
+    const pT=st.y, colW=CW/3, x2=M+colW, wCol=colW-12;
+    tc(BLUE); font(8.5,'bold');
+    t(M,pT+8,'PRIMARY IRA CONTRACTOR'); t(x2,pT+8,'PROJECT INFORMATION'); t(W-M,pT+8,'CUSTOMER INFORMATION',{align:'right'});
+    let cy=pT+21,ly=pT+21,ry=pT+21; tc(C.ink); font(9);
+    for(const v of cLines) for(const ln of wrap(v,wCol)){t(M,cy,ln); cy+=11.5;}
+    for(const v of lLines) for(const ln of wrap(v,wCol)){t(x2,ly,ln); ly+=11.5;}
+    for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
+    st.y=Math.max(cy,ly,ry)+6; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
+  const drawHead=(withParties)=>{
+    st.y=18;
+    tc(BLUE);       font(12,'bold');   t(W/2,st.y+11,'Energy Efficiency Services of '+_state,{align:'center'});
+    tc(C.ink);      font(15,'bold');   t(W/2,st.y+31,'Project Proposal',{align:'center'});
+    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+47,_state+' IRA Multifamily HEAR Program',{align:'center'});
+    st.y+=54; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    if(withParties){ st.y+=10; drawParties(); } else { st.y+=14; } };
+  const contPage=()=>{ d.addPage(); st.y=M; drawHead(false); };
+  const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
+  drawHead(true);
+  const head=(txt,gap)=>{need(30); st.y+=(gap!=null?gap:14); tc(BLUE); font(10.5,'bold');
+    t(W/2,st.y+9,txt.toUpperCase(),{align:'center'}); st.y+=13; stroke(BLUE); d.setLineWidth(.9);
     d.line(M,st.y,W-M,st.y); st.y+=5;};
-  /* scope table: measure/system/model/eff/description (left) + numbers (right).
-     NC splits each line 50/50 into Labor / Material / Total, like the HOMES doc. */
+  const rlineE=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
+    const vw=d.getTextWidth(String(val)); t(W-M,st.y+11,val,{align:'right'}); t(W-M-vw-14,st.y+11,lbl,{align:'right'});};
+  /* scope table — always Quantity/Units · Labor · Material · Total */
   head('Proposed Scope of Work — HEAR Program',12);
-  const isNC=m.state==='NC';
-  const cols=isNC
-    ?[['QUANTITY/UNITS',r=>String(r.qty),96],['LABOR',r=>_money(r.labor),74],['MATERIAL',r=>_money(r.material),74],['TOTAL',r=>_money(r.cost),74]]
-    :[['QUANTITY/UNITS',r=>String(r.qty),120],['TOTAL',r=>_money(r.cost),84]];
-  let _rx=W-M; for(let c=cols.length-1;c>=0;c--){cols[c][3]=_rx; _rx-=cols[c][2];}
+  const cols=_hearScopeCols(_money,W,M);
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
   const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
   const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
   const headH=20;
   const tableHeader=()=>{need(headH+8);
     fill(PANEL); d.rect(M,st.y,CW,headH,'F');
-    stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
     tc(NAVY); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
     cols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
     colRules(st.y,st.y+headH);
@@ -4168,14 +4178,14 @@ function buildHearPdfBlob(){
     font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];        // free-text description
     const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0;
     const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+9;
-    if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
+    if(st.y+h>H-M-24){contPage(); tableHeader();}
     const y0=st.y;
     if(i%2===1){fill([244,247,251]); d.rect(M,y0,CW,h,'F');}
     tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+5,y0+8+k*12.5+9,ln));
     let dy=y0+8+nameH;
     if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=subH;}
     if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=descH;}
-    const numY=y0+8+9;                        // top-aligned on the measure's first line
+    const numY=y0+8+9;
     cols.forEach(([lbl,fn,w,rx],c)=>{
       const isTot=(lbl==='TOTAL');
       font(9.5,isTot?'bold':'normal'); tc(isTot?NAVY:[64,78,96]);
@@ -4183,42 +4193,135 @@ function buildHearPdfBlob(){
     st.y=y0+h; colRules(y0,st.y);
     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
   });
-  /* Applicable Rebates & Incentives — the IRA HEAR instant discount (mirrors HOMES) */
+  /* scope total */
+  {needH(30); st.y+=6; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
+   rlineE('Total Project Cost',_money(m.totalCost),true); st.y+=14; stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
+  /* Available Rebates & Incentives — the IRA HEAR instant discount */
   const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
-  need(90);
-  head('Available Rebates & Incentives',12);
-  {stroke([120,130,144]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  needH(120);
+  head('Available Rebates & Incentives',14);
+  {stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+13,'PROGRAM'); t(W-M,st.y+13,'AMOUNT',{align:'right'});
    st.y+=17; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
    const nm='IRA HEAR — Instant Discount';
    const perUnit=m.units?Math.round(incentive/m.units*100)/100:incentive;
-   const desc=stateFullName(m.state)+' HEAR — income-qualified instant discount  ·  '+m.units+' units × '+_money(perUnit)+' per unit = '+_money(incentive);
+   const desc=stateFullName(m.state)+' HEAR  ·  '+m.units+' units × '+_money(perUnit)+' per unit = '+_money(incentive);
    font(9.5,'bold'); const nl=wrap(nm,CW-160);
    font(8.5);        const dl=wrap(desc,CW-160);
-   const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8;
-   const y0=st.y;
+   const h=8+nl.length*12+(dl.length?dl.length*10.5+2:0)+8; const y0=st.y;
    tc(C.ink); font(9.5,'bold'); nl.forEach((ln,k)=>t(M+2,y0+8+k*12+9,ln));
    if(dl.length){font(8.5); tc([70,82,98]); const dy=y0+8+nl.length*12+2; dl.forEach((ln,k)=>t(M+2,dy+k*10.5+8,ln));}
    tc(NAVY); font(10,'bold'); t(W-M,y0+h/2+3,'('+_money(incentive)+')',{align:'right'});
    st.y=y0+h; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;}
-  /* totals — same layout as the HOMES proposal */
-  need(100); st.y+=16;
-  {const SUMW=248, x0=W-M-SUMW;
-   tc(INKM); font(8.5,'italic');
-   const note=wrap('HEAR is an income-qualified program. For low-income households (at or below 80% of area median income) the rebate covers 100% of the project cost, up to the program caps and $14,000 per dwelling unit, applied as an instant discount.',x0-M-16);
-   note.forEach((ln,k)=>t(M,st.y+9+k*11.5,ln));
-   let sy=st.y;
-   const trow=(lb,v)=>{tc([70,82,98]); font(9.5,'normal'); t(x0,sy+11,lb);
-     tc(C.ink); font(9.5,'normal'); t(W-M,sy+11,v,{align:'right'});
-     stroke(HAIR); d.setLineWidth(.6); d.line(x0,sy+16,W-M,sy+16); sy+=18;};
-   trow('Total Cost',_money(m.totalCost));
-   trow('Rebates & Incentives Applied','('+_money(incentive)+')');
-   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+2,W-M,sy+2); sy+=6;
-   tc(NAVY); font(11,'bold'); t(x0,sy+11,'Total Due'); t(W-M,sy+11,_money(dueVal),{align:'right'});
-   stroke([120,130,144]); d.setLineWidth(1); d.line(x0,sy+16,W-M,sy+16); sy+=18;
-   st.y=Math.max(st.y+note.length*11.5+4, sy)+6;}
-  /* no acknowledgment/signature block on the proposal (Nicholas) */
+  {st.y+=4; stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=2;
+   rlineE('Total Rebate Amount',_money(incentive),true); st.y+=14; stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
+  /* Project Summary — right-aligned totals, matching the HOMES proposal */
+  head('Project Summary',18);
+  {const trows=[['Total Project Cost',_money(m.totalCost),false],
+     ['Total Rebate Amount Applied as Instant Discount','('+_money(incentive)+')',false],
+     ['Total Remaining Amount',_money(dueVal),true]];
+   for(const [lb,v,strong] of trows){
+     if(strong){ rlineE(lb,v,true); } else { tc(C.ink); font(9,'normal'); t(M,st.y+11,lb); t(W-M,st.y+11,v,{align:'right'}); }
+     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+15,W-M,st.y+15); st.y+=16;}}
+  /* no acknowledgment/signature block on the proposal (Nicholas); no program-terms note */
   _stampEesFooters(P,m.state,pv(F.pjInvDate));
+  return d.output('blob');
+}
+// Sealed (green) HEAR proposal — same format as the Sealed HOMES proposal:
+// Sealed, Inc. as primary contractor in the header, EES as the line contractor,
+// the Labor / Material / Total scope split, the HEAR instant discount, summary.
+function buildHearSealedPdfBlob(){
+  const m=hearModel(), F=m.fields;
+  const P=_pdfNew(20); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const GREEN=[33,131,82], HAIR=[223,230,238], PANEL=[246,249,252];
+  const bh=(txt,x,yy,al)=>{tc(GREEN); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
+  const sh=(txt)=>{st.y+=26; need(48); tc(GREEN); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
+    stroke(GREEN); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=20;};
+  const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
+  const rline=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
+    const vw=d.getTextWidth(String(val)); t(W-M,st.y+10,val,{align:'right'}); t(W-M-vw-14,st.y+10,lbl,{align:'right'});};
+  const drawTitle=()=>{
+    tc(C.ink); font(14,'bold'); t(W/2,st.y+11,'Project Proposal',{align:'center'});
+    tc(C.ink); font(11,'bold'); t(W/2,st.y+25,stateFullName(m.state)+' IRA Multifamily HEAR Program - Project Reservation',{align:'center'});
+    st.y+=32; stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=13; };
+  const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };
+  const needH=h=>{ if(st.y+h>H-M-16) contPage(); };
+  st.y=M-6; drawTitle();
+  const CX2=M+200;
+  const projInfo=[F.pjInstallAddr,F.pjCsz,'Multi-Family',(m.units?('Total Units: '+m.units):''),
+    (F.pjIQ?('Income Qualification Number: '+F.pjIQ):'')].filter(v=>v&&String(v).trim());
+  const ci=[F.pjOwner,contactWithTitle(F),F.pjOwnerAddr,F.pjOwnerCsz,_phone(F.pjPhone),F.pjEmail];
+  bh('Primary IRA Contractor:',M,st.y); bh('Project Information:',CX2,st.y); bh('Customer Information:',W-M,st.y,'right');
+  const cW1=CX2-M-8;
+  const contractorLines=['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593',_phone('(949) 832-6798'),
+    ('Support Contractor: Energy Efficiency Services of '+stateFullName(m.state))].filter(v=>v&&String(v).trim()).flatMap(v=>wrap(String(v),cW1));
+  let y1=lines9(contractorLines,M,st.y+13);
+  let y2=lines9(projInfo,CX2,st.y+13);
+  let y3=lines9(ci,W-M,st.y+13,'right');
+  st.y=Math.max(y1,y2,y3);
+  st.y+=8; stroke(GREEN); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2;
+  /* scope table — Measure + Labor / Material / Total */
+  sh('Project Scope of Work');
+  const cols=_hearScopeCols(_money,W,M);
+  const descW=CW-cols.reduce((a,c)=>a+c[2],0);
+  const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
+  const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
+  const headH=20;
+  const tableHeader=()=>{need(headH+8);
+    fill(PANEL); d.rect(M,st.y,CW,headH,'F');
+    stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    tc(GREEN); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
+    cols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+    colRules(st.y,st.y+headH);
+    stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
+    st.y+=headH;};
+  tableHeader();
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No equipment entered yet.'); st.y+=26;}
+  m.rows.forEach((r,i)=>{
+    const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
+    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-10);
+    font(8.5); const dl=sub?wrap(sub,descW-10):[];
+    font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];
+    const nameH=nameLines.length*12.5, subH=dl.length?dl.length*10.5:0, descH=desl.length?desl.length*10.5:0;
+    const h=8+nameH+(subH?5+subH:0)+(descH?5+descH:0)+9;
+    if(st.y+h>H-M-16){contPage(); tableHeader();}
+    const y0=st.y;
+    if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}
+    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+5,y0+8+k*12.5+9,ln));
+    let dy=y0+8+nameH;
+    if(dl.length){dy+=5; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=subH;}
+    if(desl.length){dy+=5; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10.5+8,ln)); dy+=descH;}
+    const numY=y0+8+9;
+    cols.forEach(([lbl,fn,w,rx],c)=>{const isTot=(lbl==='TOTAL');
+      font(9.5,isTot?'bold':'normal'); tc(isTot?C.ink:[64,78,96]); t(rx-4,numY,fn(r),{align:'right'});});
+    st.y=y0+h; colRules(y0,st.y);
+    stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
+  });
+  const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
+  {need(28); st.y+=6; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=3;
+   rline('Total Project Cost',_money(m.totalCost),true); st.y+=13; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=4;}
+  needH(150);
+  sh('Available Rebates & Incentives');
+  {st.y+=4; bh('Inflation Reduction Act HEAR Rebate',M,st.y);
+   const perUnit=m.units?Math.round(incentive/m.units*100)/100:incentive;
+   st.y+=4; stroke(C.line); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+   const desc=stateFullName(m.state)+' HEAR  ·  '+m.units+' units × '+_money(perUnit)+' per unit';
+   const dl=wrap(desc,270), h=Math.max(dl.length*9,18)+8; need(h);
+   tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+11+k*9,ln));
+   wrap('IRA HEAR - Instant Discount',150).forEach((ln,k)=>t(M+300,st.y+11+k*9,ln));
+   tc(C.ink); font(9,'bold'); t(W-M,st.y+11,_money(incentive),{align:'right'});
+   st.y+=h; stroke(C.line); d.line(M,st.y,W-M,st.y);}
+  {need(26); st.y+=8; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=3;
+   rline('Total Rebate Amount',_money(incentive),true); st.y+=13; stroke(C.line); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y); st.y+=4;}
+  sh('Project Summary');
+  const trows=[['Total Project Cost',_money(m.totalCost),false],
+    ['Total Rebate Amount Applied as Instant Discount','('+_money(incentive)+')',false],
+    ['Total Remaining Amount',_money(dueVal),true]];
+  for(const [lbl,val,strong] of trows){
+    if(strong){ rline(lbl,val,true); } else { tc(C.ink); font(9,'normal'); t(M,st.y+10,lbl); t(W-M,st.y+10,val,{align:'right'}); }
+    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+14,W-M,st.y+14); st.y+=14;}
+  _stampSealedFooters(P,'Project Proposal',F.pjProjInvNo||F.pjIQ||'',F.pjInvDate);
   return d.output('blob');
 }
 
@@ -4346,6 +4449,7 @@ async function makeDocPdfBlob(which){
   if(which==='sealedProposal')return buildSealedPdfBlob('proposal');
   if(which==='sealedInvoice')return buildSealedPdfBlob('invoice');
   if(which==='hearProposal')return buildHearPdfBlob();
+  if(which==='hearSealedProposal')return buildHearSealedPdfBlob();
   return buildEesPdfBlob(which);
 }
 async function downloadDoc(which,pdfName){
@@ -4413,6 +4517,7 @@ document.addEventListener('click',e=>{
     sealedProp:()=>downloadDoc('sealedProposal',_docBase()+'_Sealed_Proposal.pdf'),
     sealedInv:()=>downloadDoc('sealedInvoice',_docBase()+'_Sealed_Invoice.pdf'),
     hearProp:()=>downloadDoc('hearProposal',_docBase()+'_HEAR_Proposal.pdf'),
+    hearPropSealed:()=>downloadDoc('hearSealedProposal',_docBase()+'_HEAR_Proposal_Sealed.pdf'),
     reportBase:()=>downloadSourceReport('asBase'), reportImp:()=>downloadSourceReport('asImp')};
   if(A[b.dataset.act])A[b.dataset.act]();
 });
