@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { applyRecordInsertDefaults } from '../lib/recordInsertDefaults'
+import { parentsFromColumns } from '../lib/parentRelationships'
 import { normalizeStateCode, programStateFromSeed, statesInRecordTypes, stateHasNoPrograms }
   from '../lib/programStateScope'
 import { loadPicklists } from './outreachService'
@@ -1968,6 +1969,45 @@ export async function applyInsertDefaults(tableName, fields, userId) {
  * Every create surface awaits the prefetch when it opens, which is what makes
  * it warm by the time anything is saved.
  */
+/**
+ * A table's PARENT relationships, worked out from its real foreign keys.
+ *
+ * Used to inherit what the platform already knows when creating a child record
+ * — "a user must never be asked for something the platform can derive"
+ * (Nicholas, 2026-08-16). The client has a curated TABLE_META map for this, but
+ * it covers 74 of the platform's 100+ record objects, so an object missing from
+ * it inherited NOTHING: creating a Service Appointment from a work order left
+ * Work Type, Project and Opportunity blank even though the work order carried
+ * all three (Nicholas, 2026-09-02).
+ *
+ * Three kinds of foreign key are deliberately NOT parents:
+ *   • users        — an owner, a created-by or an assigned technician is not a
+ *                    parent record, and copying one down would be wrong.
+ *   • picklist_values — a status or a type is a value, not a relationship.
+ *   • the table itself — a self-reference (parent_work_order_id) expresses
+ *                    hierarchy WITHIN the object, and inheriting it would make
+ *                    a record its own sibling's child.
+ * Audit columns are excluded by the same suffix rule the create form uses.
+ */
+const _fkParentCache = new Map()
+
+export async function deriveParentsFromForeignKeys(tableName) {
+  if (!tableName) return { parents: [], parentTables: [] }
+  const cached = _fkParentCache.get(tableName)
+  if (cached) return cached
+  try {
+    const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
+    if (error) throw error
+    const result = parentsFromColumns(data || [], tableName)
+    _fkParentCache.set(tableName, result)
+    return result
+  } catch {
+    // Not cached, so a later create retries. Inheriting nothing is exactly
+    // today's behaviour for an unlisted object — never worse than it was.
+    return { parents: [], parentTables: [] }
+  }
+}
+
 const _triggerWrittenCache = new Map()
 
 export async function prefetchTriggerWrittenColumns(tableName) {
