@@ -4168,7 +4168,7 @@ function buildHearPdfBlob(){
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
     st.y=Math.max(cy,ly,ry)+6; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
   const drawHead=(withParties)=>{
-    st.y=28;   // a little room above the title so it isn't squished against the top
+    st.y=22;   // a little room above the title so it isn't squished against the top
     tc(BLUE);       font(15,'bold');   t(W/2,st.y,'Project Proposal',{align:'center'});           // brand blue, sized in scale with the rest of the page
     tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+15,_state+' IRA Multifamily HEAR Program',{align:'center'});
     st.y+=23; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
@@ -4182,7 +4182,7 @@ function buildHearPdfBlob(){
   const rlineE=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
     const vw=d.getTextWidth(String(val)); t(W-M,st.y+11,val,{align:'right'}); t(W-M-vw-14,st.y+11,lbl,{align:'right'});};
   /* scope table — always Quantity/Units · Labor · Material · Total */
-  head('Proposed Scope of Work — HEAR Program',8);
+  head('Proposed Scope of Work — HEAR Program',16);
   const cols=_hearScopeCols(_money,W,M);
   const descW=CW-cols.reduce((a,c)=>a+c[2],0);
   const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
@@ -4226,7 +4226,7 @@ function buildHearPdfBlob(){
   /* Available Rebates & Incentives — the IRA HEAR instant discount */
   const incentive=m.totalRebate, dueVal=Math.abs(m.totalDue)<0.005?0:m.totalDue;
   needH(96);
-  head('Available Rebates & Incentives',8);
+  head('Available Rebates & Incentives',16);
   {stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
    tc(NAVY); font(8,'bold'); t(M+2,st.y+12,'PROGRAM'); t(W-M,st.y+12,'AMOUNT',{align:'right'});
    st.y+=15; stroke(HAIR); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
@@ -4244,7 +4244,7 @@ function buildHearPdfBlob(){
    rlineE('Total Rebate Amount',_money(incentive),true); st.y+=13; stroke(BLUE); d.setLineWidth(.9); d.line(M,st.y,W-M,st.y);}
   /* Project Summary — right-aligned totals, matching the HOMES proposal */
   needH(92);                                     // keep the header + all three rows off the footer
-  head('Project Summary',8);
+  head('Project Summary',16);
   {const trows=[['Total Project Cost',_money(m.totalCost),false],
      ['Total Rebate Amount Applied as Instant Discount','('+_money(incentive)+')',false],
      ['Total Remaining Amount',_money(dueVal),true]];
@@ -4253,10 +4253,10 @@ function buildHearPdfBlob(){
      stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y+13,W-M,st.y+13); st.y+=14;}}
   /* Acceptance & Authorization — signature block (Nicholas, 2026-09-02: put it back) */
   needH(86);
-  head('Acceptance & Authorization',6);
+  head('Acceptance & Authorization',16);
   {const ack='By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of '+_state+' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.';
-   const al=wrap(ack,CW-40); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(W/2,st.y+8+k*10.5,ln,{align:'center'})); st.y+=al.length*10.5+4;
-   st.y+=14; stroke([70,82,98]); d.setLineWidth(1);
+   const al=wrap(ack,CW-40); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(W/2,st.y+8+k*10,ln,{align:'center'})); st.y+=al.length*10+2;
+   st.y+=10; stroke([70,82,98]); d.setLineWidth(1);
    d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
    tc([70,82,98]); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative'); t(W-M-150,st.y+11,'Date');}
   _stampEesFooters(P,m.state,pv(F.pjInvDate));
@@ -4271,7 +4271,7 @@ function buildHearSealedPdfBlob(){
   const _money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const GREEN=[33,131,82], HAIR=[223,230,238], PANEL=[246,249,252];
   const bh=(txt,x,yy,al)=>{tc(GREEN); font(9,'bold'); t(x,yy,txt.toUpperCase(),al?{align:al}:{});};
-  const sh=(txt)=>{st.y+=14; need(44); tc(GREEN); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
+  const sh=(txt)=>{st.y+=18; need(48); tc(GREEN); font(10.5,'bold'); t(W/2,st.y+9,txt.toUpperCase(),{align:'center'});
     stroke(GREEN); d.setLineWidth(1); d.line(M,st.y+13,W-M,st.y+13); st.y+=18;};
   const lines9=(arr,x,yy,al)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*8.6,String(ln),al?{align:al}:{})); return yy+arr.filter(v=>v).length*8.6;};
   const rline=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
