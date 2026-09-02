@@ -157,8 +157,17 @@ check('the report can see a step’s documents',
   /export async function listWorkOrderAndStepDocuments/.test(storage))
 
 const pad = read('src/fieldMobile/WorkOrderDetail.jsx')
-check('LEAP Pad offers video on a step that is not a Video step',
-  /\{!isVideoStep && \(\s*\n\s*<CaptureBtn label="Video" icon="video"/.test(pad))
+// REVERSED 2026-09-02. From 2026-08-27 a Video button sat beside Photo on every
+// step; Nicholas asked for it back on the Video steps only, so a photo step's
+// controls stop reading as a choice between two equal things when they are not.
+// The 08-27 rule that a video may be filed ANYWHERE still holds — it is served
+// by the Photos/Files card on the record, checked further down — and the LEAP
+// Pad guided flow keeps its own video prompts. What changed is one screen's
+// buttons, not where a video may live.
+check('LEAP Pad does NOT put a Video button on a photo step',
+  !/\{!isVideoStep && \(\s*\n\s*<CaptureBtn label="Video" icon="video"/.test(pad))
+check('a photo step renders no video input at all, so nothing can reach one',
+  !/\{!isVideoStep && \(\s*\n\s*<input\s*\n?\s*ref=\{videoRef\}/.test(pad))
 check('a Video step still leads with Record Video',
   /\{isVideoStep && \(\s*\n\s*<CaptureBtn label="Record Video"/.test(pad))
 check('a large video reports its own progress',
@@ -175,17 +184,28 @@ check('the report names the step a document came from',
 // Nicholas, 2026-08-27: "the user can upload videos anywhere. You can't
 // restrict this." Each of these was a real refusal, and each is the kind that
 // creeps back the next time someone tightens a gate meant for photos.
+//
+// This is about WHERE a video may be stored, and it is unchanged. The
+// 2026-09-02 ruling above narrows which LEAP Pad step shows a Video BUTTON; it
+// does not reintroduce a refusal. The Photos/Files card on the work order
+// accepts a video from any step, which is the route a video off a photo step
+// takes now.
 
-// LEAP Pad: the video inputs and the Add video control sit OUTSIDE the
-// isActionable gate, so a finished step and a step further down an ordered
-// plan can both take one.
+// LEAP Pad: on a VIDEO step the inputs and the Add video control sit OUTSIDE
+// the isActionable gate, so a finished video step and one further down an
+// ordered plan can both still receive their footage. That gate is about the
+// ORDER work is done in; a 360 pan of a building is not evidence a step is
+// judged on, and refusing it produces no tidier work order — only footage that
+// never gets filed.
 const padVideoBlock = pad.slice(
   pad.indexOf('Attached videos — playable inline'),
   pad.indexOf('Capture + complete actions'))
 check('LEAP Pad: the video file inputs are outside the actionable gate',
   /ref=\{videoRef\}/.test(padVideoBlock) && /ref=\{folderVideoRef\}/.test(padVideoBlock))
-check('LEAP Pad: a NON-actionable step can still add a video',
-  /\{!isActionable && \(/.test(padVideoBlock) && /Add video/.test(padVideoBlock))
+check('LEAP Pad: the video inputs exist only on a Video step',
+  /\{isVideoStep && \(/.test(padVideoBlock))
+check('LEAP Pad: a NON-actionable Video step can still add a video',
+  /\{isVideoStep && !isActionable && \(/.test(padVideoBlock) && /Add video/.test(padVideoBlock))
 check('LEAP Pad: the photo controls stay behind the ordering gate',
   /\{isActionable && \(/.test(pad) &&
   pad.indexOf('triggerCapture(\'before\')') > pad.indexOf('Capture + complete actions'))

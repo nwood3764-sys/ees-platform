@@ -21,7 +21,8 @@
     "verify:status-path": "node tools/status-path-check/run.mjs",
     "verify:dashboard-filters": "node tools/dashboard-filter-check/run.mjs",
     "verify:charts": "node tools/chart-audit/run.mjs",
-    "verify:topbar-menus": "node tools/topbar-menu-check/run.mjs"
+    "verify:topbar-menus": "node tools/topbar-menu-check/run.mjs",
+    "verify:photo-upload": "node tools/photo-upload-check/run.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

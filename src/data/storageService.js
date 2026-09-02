@@ -14,6 +14,7 @@ import { CATCH_ALL_DOCUMENT_TYPE } from '../lib/documentSlots'
 import { documentTypeLabel } from '../lib/documentTypes'
 import { storageSafeFileName, isStorageSafeKey } from '../lib/storageKey'
 import { isVideoFile } from '../lib/fileKinds'
+import { softDeadline, hardDeadline, timedOutMessage, UPLOAD_DEADLINES } from '../lib/uploadDeadline'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -277,7 +278,14 @@ export async function uploadPhoto({
   // compressed file verbatim, and on any doubt the original is uploaded
   // unchanged, so process-photo's EXIF extraction sees the same data
   // either way.
-  file = await compressPhotoForUpload(file)
+  //
+  // Bounded: compression is an optimisation, so a shrink that STALLS (a
+  // memory-pressed phone can leave createImageBitmap or canvas.toBlob without
+  // ever settling) abandons the shrink and uploads the original, rather than
+  // leaving the technician on a spinner that never resolves. See
+  // src/lib/uploadDeadline.js.
+  file = await softDeadline(
+    compressPhotoForUpload(file), UPLOAD_DEADLINES.compress, file, 'Photo compression')
 
   const bucket = defaultPhotoBucket(relatedObject) // throws if not allowed
   const photoId = newId()
@@ -292,27 +300,43 @@ export async function uploadPhoto({
   // Returns null for every non-HEIF file and for any decode that fails, and a
   // missing rendition never blocks the upload — the row still lands and the
   // server still tries.
-  const renditionBlob = await heifRenditionForFile(file)
+  // Bounded for the same reason, and this one is the likelier hang: libheif's
+  // frame.display() takes a callback that on a failed decode is simply never
+  // invoked, which no try/catch can catch.
+  const renditionBlob = await softDeadline(
+    heifRenditionForFile(file), UPLOAD_DEADLINES.heifDecode, null, 'HEIC decode')
   const renditionPath = renditionBlob ? renditionPathFor(path) : null
 
   // 1. Upload the original to Storage. upsert=false because we generated a
   //    fresh uuid for the path; a collision would be a logic bug we want to
   //    surface, not silently overwrite.
-  const { error: upErr } = await supabase.storage
-    .from(bucket)
-    .upload(path, file, {
-      contentType: file.type || 'application/octet-stream',
-      upsert: false,
-    })
+  //    Bounded: a PUT whose connection goes away mid-body never rejects, so
+  //    without this the upload simply never returns and the step's spinner
+  //    stays up for the rest of the shift.
+  const { error: upErr } = await hardDeadline(
+    supabase.storage
+      .from(bucket)
+      .upload(path, file, {
+        contentType: file.type || 'application/octet-stream',
+        upsert: false,
+      }),
+    UPLOAD_DEADLINES.storageUpload,
+    timedOutMessage('The photo upload', UPLOAD_DEADLINES.storageUpload),
+  )
   if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`)
 
   // 1b. Upload the rendition beside it. Best-effort: a failure here costs the
   //     photo its preview, not its existence, so it must not throw.
   let renditionStored = null
   if (renditionBlob && renditionPath) {
-    const { error: renErr } = await supabase.storage
-      .from(bucket)
-      .upload(renditionPath, renditionBlob, { contentType: 'image/jpeg', upsert: true })
+    const { error: renErr } = await softDeadline(
+      supabase.storage
+        .from(bucket)
+        .upload(renditionPath, renditionBlob, { contentType: 'image/jpeg', upsert: true }),
+      UPLOAD_DEADLINES.storageUpload,
+      { error: { message: 'timed out' } },
+      'Rendition upload',
+    )
     if (renErr) {
       // eslint-disable-next-line no-console
       console.warn('rendition upload failed (non-fatal):', renErr.message)
@@ -354,17 +378,28 @@ export async function uploadPhoto({
     taken_at: file?.lastModified ? new Date(file.lastModified).toISOString() : null,
   }
 
-  const { data: photoRow, error: insErr } = await supabase
-    .from('photos')
-    .insert(insertRow)
-    .select()
-    .single()
-  if (insErr) {
+  //    A timeout here is handled exactly like a returned error: the object is
+  //    already in the bucket, so an unfiled photo would be a file nothing points
+  //    at. Both paths clean it up and both say so.
+  let photoRow = null
+  try {
+    const { data, error: insErr } = await hardDeadline(
+      supabase
+        .from('photos')
+        .insert(insertRow)
+        .select()
+        .single(),
+      UPLOAD_DEADLINES.rowInsert,
+      timedOutMessage('Filing the photo against the step', UPLOAD_DEADLINES.rowInsert),
+    )
+    if (insErr) throw new Error(`photos insert failed: ${insErr.message}`)
+    photoRow = data
+  } catch (err) {
     // Try to clean up the orphaned storage object so we don't leak space.
     // Failure to clean up is non-fatal — the storage object will be
     // sweepable by an admin.
     try { await supabase.storage.from(bucket).remove([path]) } catch { /* noop */ }
-    throw new Error(`photos insert failed: ${insErr.message}`)
+    throw err
   }
 
   // 3. Trigger the edge function to extract EXIF and (optionally) watermark.

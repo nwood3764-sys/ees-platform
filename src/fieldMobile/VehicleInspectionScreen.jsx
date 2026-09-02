@@ -23,6 +23,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import AppChrome, { PullIndicator } from './AppChrome'
 import { usePullToRefresh } from './usePullToRefresh'
+import { fileFromInputEvent } from '../lib/photoDrop'
 import {
   fetchFleetVehicles, startVehicleInspection, fetchVehicleInspection,
   saveVehicleInspectionLeg, saveVehicleInspectionItem, completeVehicleInspection,
@@ -129,8 +130,7 @@ export default function VehicleInspection({ activityId, navigate }) {
   }
 
   const onFile = async (e) => {
-    const file = e.target.files && e.target.files[0]
-    e.target.value = ''
+    const file = fileFromInputEvent(e)
     const item = captureItemRef.current
     if (!file || !item) return
     setBusyItem(item.item_id)
@@ -149,8 +149,7 @@ export default function VehicleInspection({ activityId, navigate }) {
   }
 
   const onVideoFile = async (e) => {
-    const file = e.target.files && e.target.files[0]
-    e.target.value = ''
+    const file = fileFromInputEvent(e)
     const item = captureItemRef.current
     if (!file || !item) return
     setBusyItem(item.item_id)

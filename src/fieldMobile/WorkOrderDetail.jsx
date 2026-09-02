@@ -31,7 +31,8 @@ import {
 } from './fieldMobileService'
 import { uploadPhoto, setPhotoReportInclusion } from '../data/storageService'
 import {
-  imageFilesFrom,
+  imageFilesFromInputEvent,
+  fileFromInputEvent,
   imageFilesFromDrop,
   dragCarriesFiles,
   uploadProgressLabel,
@@ -236,14 +237,21 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
     setTimeout(() => setToast(null), 3200)
   }
 
-  // One wrapper for both surfaces: the field PWA keeps its navy topbar + back
-  // chevron; embedded gets a plain block that inherits the record page's card.
-  const Shell = ({ title, children: shellChildren }) => embedded
-    ? <div style={{ fontFamily: FONT }}>{shellChildren}</div>
-    : <MobileShell title={title} onBack={() => navigate('/field')}>{shellChildren}</MobileShell>
+  // Shell is declared at MODULE level, not here. A component defined inside a
+  // render is a NEW type on every render, so React unmounts and rebuilds its
+  // whole subtree each time any state changes — and this screen changes state
+  // constantly (a toast, a busy flag, a completed step). That took the hidden
+  // <input type="file"> out of the document while a picker was open, so the
+  // technician's chosen photo fired `change` at an element React was no longer
+  // listening to: another way for a capture to vanish with no error, on the
+  // same screen. It also reset each StepCard's in-flight upload progress
+  // mid-batch, which is the spinner that "gets stuck and nothing happens".
+  const shell = (title, body) => (
+    <WorkOrderShell embedded={embedded} title={title} navigate={navigate}>{body}</WorkOrderShell>
+  )
 
-  if (loading) return <Shell title="Work Order"><Empty>Loading…</Empty></Shell>
-  if (error)   return <Shell title="Work Order"><Empty tone="error">{error}</Empty></Shell>
+  if (loading) return shell('Work Order', <Empty>Loading…</Empty>)
+  if (error)   return shell('Work Order', <Empty tone="error">{error}</Empty>)
   if (!detail) return null
 
   const { header, steps } = detail
@@ -326,8 +334,8 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
 
   const chip = statusChip(header.work_order_status)
 
-  return (
-    <Shell title={header.work_order_record_number || 'Work Order'}>
+  return shell(header.work_order_record_number || 'Work Order', (
+    <>
       {toast && (
         <div style={{
           position: 'fixed', left: 12, right: 12, bottom: 'calc(env(safe-area-inset-bottom) + 12px)',
@@ -424,7 +432,12 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
               busy={busy === step.work_step_id}
               onComplete={() => handleComplete(step)}
               onMarkNotApplicable={() => setNaStep(step)}
-              onPhotoUploaded={async (msg, tone) => { flash(msg, tone); await load() }}
+              // Silent: a non-silent load flips `loading` and the whole screen
+              // becomes "Loading…", so every single photo tore down and rebuilt
+              // the step list — losing an in-flight batch's progress, a
+              // half-typed key-source name, and the scroll position, on a phone,
+              // mid-job. The row still refreshes; the screen just stops blinking.
+              onPhotoUploaded={async (msg, tone) => { flash(msg, tone); await load({ silent: true }) }}
               onPhotoError={(msg) => flash(msg, 'error')}
             />
           )
@@ -519,8 +532,22 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
           if (embedded) { onChanged?.(); load() } else { navigate('/field') }
         }} />
       )}
-    </Shell>
-  )
+    </>
+  ))
+}
+
+// ─── WorkOrderShell ──────────────────────────────────────────────────────────
+// One wrapper for both surfaces: the field PWA keeps its navy topbar + back
+// chevron; embedded on the work order record page gets a plain block that
+// inherits the card around it.
+//
+// Module level, deliberately. See the note at its call site: declaring this
+// inside WorkOrderDetail made it a new component type on every render, which
+// remounted every step card — and every hidden file input — whenever anything
+// on the screen changed.
+function WorkOrderShell({ embedded, title, navigate, children }) {
+  if (embedded) return <div style={{ fontFamily: FONT }}>{children}</div>
+  return <MobileShell title={title} onBack={() => navigate('/field')}>{children}</MobileShell>
 }
 
 // ─── SuccessOverlay ──────────────────────────────────────────────────────────
@@ -628,7 +655,7 @@ function UnableModal({ busy, onCancel, onSubmit }) {
         {/* No capture attribute → the tech can take a new photo OR attach one
             already saved on the device (e.g. shot earlier, offline). */}
         <input ref={fileRef} type="file" accept="image/*"
-          onChange={(e) => { const f = e.target.files?.[0]; e.target.value=''; if (f) setPhotoFile(f) }}
+          onChange={(e) => { const f = fileFromInputEvent(e); if (f) setPhotoFile(f) }}
           style={{ display: 'none' }} />
         <button onClick={() => fileRef.current?.click()}
           style={{
@@ -807,9 +834,16 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
 
   // Several photos at a time: the folder picker is multi-select, because at a
   // desk the photos for a step are already in a folder together.
-  const uploadPhotos = async (files) => {
-    const list = imageFilesFrom(files)
-    if (list.length === 0) return
+  const uploadPhotos = async (list, { rejected = 0 } = {}) => {
+    // Nothing to upload is an OUTCOME, and it gets said out loud. Returning
+    // quietly here is how a photo that was rejected — or a picker handled in
+    // the wrong order — looked identical to a photo that uploaded fine.
+    if (list.length === 0) {
+      onPhotoError(rejected > 0
+        ? uploadResultLabel({ rejected })
+        : 'No photo was selected — nothing was uploaded.')
+      return
+    }
     const leg = legRef.current
     setBatch({ done: 0, total: list.length })
     let uploaded = 0
@@ -831,11 +865,12 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
     // check rides the server's EXIF processing (a few seconds) and warns
     // AFTER the fact, so capture never feels slow.
     if (uploaded > 0) {
-      onPhotoUploaded(list.length === 1
+      onPhotoUploaded(list.length === 1 && rejected === 0
         ? `Photo captured (${leg}) · ${step.name}`
-        : `${uploadResultLabel({ uploaded, failed })} · ${step.name}`)
+        : `${uploadResultLabel({ uploaded, failed, rejected })} · ${step.name}`)
     }
     if (failed > 0) onPhotoError(lastError?.message || 'Photo upload failed.')
+    else if (uploaded === 0) onPhotoError(uploadResultLabel({ rejected }) || 'Photo upload failed.')
     if (lastRow) {
       photoGpsMissing(lastRow).then((missing) => {
         if (missing) {
@@ -845,15 +880,16 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
     }
   }
 
+  // imageFilesFromInputEvent owns the snapshot-then-clear order. Never read
+  // e.target.files into a variable and clear the input afterwards — the list is
+  // live and clearing empties it. See src/lib/photoDrop.js.
   const onFile = async (e) => {
-    const files = e.target.files
-    e.target.value = '' // allow re-selecting the same file
-    await uploadPhotos(files)
+    const { files, rejected } = imageFilesFromInputEvent(e)
+    await uploadPhotos(files, { rejected })
   }
 
   const onVideoFile = async (e) => {
-    const file = e.target.files && e.target.files[0]
-    e.target.value = '' // allow re-selecting the same file
+    const file = fileFromInputEvent(e)
     if (!file) return
     setVideoUploading(true)
     try {
@@ -916,29 +952,36 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
         <VideoStrip videos={step.videos} />
       )}
 
-      {/* A video can be added to ANY step, at any time — including a step that
-          is finished, and one further down an ordered plan that has not come
-          up yet (Nicholas, 2026-08-27: "the user can upload videos anywhere.
-          You can't restrict this").
+      {/* Video capture belongs to the steps whose evidence IS video, and only
+          those (Nicholas, 2026-09-02: video buttons should appear only on a
+          step whose evidence type is Video, not beside Photo on every step).
 
-          The photo controls stay behind the work-plan's ordering gate, because
-          a photo is the evidence a step is JUDGED on and the plan says when it
-          is taken. A video is a record of the building — somebody walks past an
-          open riser and films it — and refusing that has no upside: the
-          alternative is not a tidier work order, it is footage that never gets
-          filed. The inputs live outside the gate for the same reason.
+          This REVERSES the 2026-08-27 rule ("the user can upload videos
+          anywhere. You can't restrict this"), which put a Video button on all
+          of them and made a photo step's controls read as a choice between two
+          equal things when it is not one. Same person, later call — recorded
+          here so nobody re-derives the old shape from the old comment. A video
+          that genuinely belongs to a non-video step still has a home: the
+          Photos/Files card on the work order files it against the record, and
+          the guided flow keeps its own video prompts.
 
-          On the actionable step the prominent Record Video button below is the
-          one to use, so this compact control is only for the rest. */}
-      <input
-        ref={videoRef} type="file" accept="video/*" capture="environment"
-        onChange={onVideoFile} style={{ display: 'none' }}
-      />
-      <input
-        ref={folderVideoRef} type="file" accept="video/*"
-        onChange={onVideoFile} style={{ display: 'none' }}
-      />
-      {!isActionable && (
+          A Video step keeps its controls OUTSIDE the plan's ordering gate — a
+          finished step, or one further down the list, can still receive its
+          footage — because a photo is what a step is judged on and the plan
+          says when it is taken, while a 360 pan is a record of the building. */}
+      {isVideoStep && (
+        <>
+          <input
+            ref={videoRef} type="file" accept="video/*" capture="environment"
+            onChange={onVideoFile} style={{ display: 'none' }}
+          />
+          <input
+            ref={folderVideoRef} type="file" accept="video/*"
+            onChange={onVideoFile} style={{ display: 'none' }}
+          />
+        </>
+      )}
+      {isVideoStep && !isActionable && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
           <button
             onClick={() => videoRef.current?.click()}
@@ -1113,16 +1156,9 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
               </span>
             </button>
           )}
-          {/* EVERY step can take a video, not only a step whose evidence type
-              IS Video.
-              A Video step still leads with Record Video, because that is the
-              evidence it is waiting on. But a Photo step used to offer nothing
-              but `accept="image/*"`, so an assessor with a 360 pan of a roof
-              had no route at all — which is exactly how two videos came to be
-              filed by hand onto "Roof / Ceiling" while the work order's own
-              "Building 360 Video" step sat empty (2026-08-27). What a step
-              REQUIRES is still what the gate reads; being able to record more
-              than that is not the same question. */}
+          {/* A Video step leads with Record Video, because that is the evidence
+              it is waiting on. A Photo step offers photo controls only — see
+              the note above the video inputs. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: gap ? 8 : 0, flexWrap: 'wrap' }}>
             {isVideoStep && (
               <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
@@ -1137,9 +1173,6 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
                 or to add beyond before/after toward the required count. */}
             {!isVideoStep && (reqCount > 0 || (!needsBefore && !needsAfter)) && (
               <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} onFolder={() => triggerFolder('general')} disabled={uploading || busy} />
-            )}
-            {!isVideoStep && (
-              <CaptureBtn label="Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
             )}
           </div>
 
@@ -1192,6 +1225,19 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
 // order's account (property manager etc.), with a free-text fallback for
 // someone not yet in CRM. Stored as readable text: "Lockbox" or
 // "Person: <name>".
+//
+// Lockbox appears TWICE on purpose (Nicholas, 2026-09-02: "you need to have an
+// option lockbox for every…"). It is a chip, and it is also an entry in the
+// "Who provided the keys?" list — because a technician who has already tapped
+// Person is reading that list as the answer to the question on screen, and the
+// true answer "nobody, it was in a lockbox" was only reachable by backing out
+// to a control they had just moved past. Both routes record the SAME single
+// value, "Lockbox"; picking it from the list snaps the chips back to Lockbox so
+// the card never shows Person selected over a lockbox answer.
+// Sentinel for the Lockbox entry inside the person list. Not a person's name,
+// so it can never collide with a contact.
+const LOCKBOX_OPTION = '__lockbox__'
+
 function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedded = false, onValue }) {
   const saved = field.text_value || ''
   const savedIsPerson = saved.startsWith('Person: ')
@@ -1267,7 +1313,17 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedd
           <div style={{ marginBottom: 8 }}>
             <select
               value={person}
-              onChange={(e) => setPerson(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value === LOCKBOX_OPTION) {
+                  // One value, one meaning: this is the Lockbox chip's answer,
+                  // reached from the list instead of from the chip.
+                  setPerson('')
+                  setOtherName('')
+                  setMode('lockbox')
+                  return
+                }
+                setPerson(e.target.value)
+              }}
               disabled={disabled || saving}
               style={{
                 width: '100%', boxSizing: 'border-box', minHeight: 44,
@@ -1276,6 +1332,7 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedd
                 background: C.card, marginBottom: person === '__other__' ? 8 : 0,
               }}>
               <option value="">Who provided the keys?</option>
+              <option value={LOCKBOX_OPTION}>Lockbox — nobody handed them over</option>
               {contacts.map((c) => (
                 <option key={c.id} value={c.contact_name}>{c.contact_name}</option>
               ))}
@@ -2472,9 +2529,8 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   }
 
   const onFile = async (e) => {
-    const files = imageFilesFrom(e.target.files)
-    e.target.value = ''
-    await uploadPhotos(files)
+    const { files, rejected } = imageFilesFromInputEvent(e)
+    await uploadPhotos(files, { rejected })
   }
 
   // Desktop: drag photos straight onto the prompt. The screen body is the drop
