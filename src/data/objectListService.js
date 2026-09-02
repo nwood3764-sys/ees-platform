@@ -623,7 +623,7 @@ export function deriveColumnOptions(columns, rows) {
 //     resolved with the same nested PostgREST inner-join embeds that
 //     fetchRelatedRecords uses, filtered on the parent id (RLS-respecting).
 // ---------------------------------------------------------------------------
-export async function fetchObjectRecords(table, { activeFields = null, relatedScope = null } = {}) {
+export async function fetchObjectRecords(table, { activeFields = null, relatedScope = null, objectScope = null } = {}) {
   const [cols, picklists] = await Promise.all([
     describeObject(table),
     loadPicklists().catch(() => ({ byId: new Map() })),
@@ -730,6 +730,17 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
     } else {
       scopeApply = (q) => q.eq(relatedScope.fk, relatedScope.parentId)
     }
+  }
+
+  // A SECTION scope (src/lib/objectSectionScopes.js) narrows the object itself
+  // — Field > Technicians is users where user_is_field_technician. It is
+  // applied to the fetch, not offered as a filter, because a filter is a thing
+  // a person can clear and this one may not be: "if it's on the field module,
+  // it can only show the technicians" (Nicholas, 2026-09-02). Composed onto
+  // whatever the related-list scope already set, so the two can coexist.
+  if (objectScope && objectScope.column && colNames.has(objectScope.column)) {
+    const inner = scopeApply
+    scopeApply = (q) => inner(q).eq(objectScope.column, objectScope.value)
   }
 
   // Load every row (list search/filter runs client-side over the full set), but

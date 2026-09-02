@@ -789,7 +789,14 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
   const SEC_TABLE = {
     projects:    'projects',
     workorders:  'work_orders',
-    technicians: 'contacts',
+    // Technicians are USERS, not contacts. work_orders.assigned_technician_id
+    // is an FK to users, LEAP Pad signs in as a user, and the Technician Setup
+    // Wizard provisions a user — this tab used to be the contacts list wearing
+    // the word "Technicians", so it showed every contact in LEAP and none of
+    // the technicians (Nicholas, 2026-09-02). The list is SCOPED to the field
+    // technicians in src/lib/objectSectionScopes.js, at the fetch, so no filter
+    // or saved view can widen it.
+    technicians: 'users',
     credentials: 'contact_skills',
     timesheets:  'time_sheets',
     absences:    'resource_absences',
@@ -938,6 +945,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
           <ObjectListSection
             key={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
             objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            sectionId={sec}
             moduleId="field" />
         )}
         {sec==='home'                 && <FieldHome setSec={setSec} onOpenRecord={setSelectedRecord} onNavigateToModule={onNavigateToModule} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}

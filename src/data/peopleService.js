@@ -55,98 +55,72 @@ export async function fetchUsers() {
 }
 
 // ---------------------------------------------------------------------------
-// Technicians — now a filtered view of contacts with a field-staff record
-// type. The function name and return shape are kept so PeopleModule.jsx
-// continues to work unchanged.
+// Technicians — USERS who do field work.
+//
+// This used to read contacts filtered to four field-staff record TYPES. It was
+// wrong in two ways at once: every one of those record types has since been
+// retired (so the filter could only ever return the handful of scheduling
+// placeholder contacts named "Wisconsin Single Family Auditor" and the like),
+// and a technician was never a contact in the first place. The rest of the
+// platform has always agreed on that — work_orders.assigned_technician_id is
+// an FK to users, LEAP Pad signs in as a user, and the Technician Setup Wizard
+// provisions a user. Only this function and the Field module's tab disagreed
+// (Nicholas, 2026-09-02: "Where's Logan? Where's Roman? Where's Lucas?").
+//
+// Who counts is users.user_is_field_technician — a stored fact, maintained on
+// the user record, deliberately NOT derived from the role: a role is an access
+// grant and being on a crew is a job fact, and Nicholas is an Admin who also
+// carries a work order.
+//
+// The return shape is unchanged so both call sites (the Field module's tab
+// count and Project Planning's workforce list) keep working. The BPI columns
+// are reported honestly as unknown rather than guessed: the credential ledger
+// (contact_skills) is keyed to CONTACTS, so it cannot answer for a user. That
+// is a real gap, not something to paper over with a wrong "No".
 // ---------------------------------------------------------------------------
 export async function fetchTechnicians() {
-  // Resolve the picklist row ids for the four field-staff record types so
-  // we can filter contacts to just those people.
-  const { data: rts, error: rtErr } = await supabase
-    .from('picklist_values')
-    .select('id, picklist_value')
-    .eq('picklist_object', 'contacts')
-    .eq('picklist_field', 'record_type')
-    .in('picklist_value', ['TEAM-LEAD', 'LEAD-TECHNICIAN', 'TECHNICIAN-IN-TRAINING', 'TECHNICIAN'])
-  if (rtErr) throw rtErr
-  const rtIds = (rts || []).map(r => r.id)
-  if (rtIds.length === 0) return []
-
   const { data, error } = await supabase
-    .from('contacts')
+    .from('users')
     .select(`
       id,
-      contact_record_number,
-      contact_name,
-      contact_first_name,
-      contact_last_name,
-      contact_title,
-      contact_status,
-      contact_employee_id,
-      contact_hire_date,
-      contact_phone,
-      contact_email,
-      contact_drivers_license,
-      contact_drivers_license_state,
-      contact_drivers_license_expiry
+      user_record_number,
+      user_name,
+      user_first_name,
+      user_last_name,
+      user_title,
+      user_email,
+      user_phone,
+      user_is_active,
+      role_id,
+      roles:role_id ( role_name )
     `)
-    .in('contact_record_type', rtIds)
-    .eq('contact_is_deleted', false)
-    .order('contact_hire_date', { ascending: false, nullsFirst: false })
+    .eq('user_is_field_technician', true)
+    .eq('user_is_deleted', false)
+    .order('user_name', { ascending: true })
 
   if (error) throw error
 
-  if ((data || []).length === 0) return []
-
-  const picklists = await loadPicklists()
-
-  // Pull the BPI-related contact_skills in one query so we can surface a
-  // BPI column on each row without an N+1 fetch. Any skill whose name
-  // starts with "BPI" counts. The matching engine doesn't care about this —
-  // it's purely for the legacy People > Technicians display column.
-  const contactIds = data.map(r => r.id)
-  const { data: bpiRows, error: bpiErr } = await supabase
-    .from('contact_skills')
-    .select(`
-      contact_id,
-      cs_effective_end_date,
-      skills:skill_id ( skill_name )
-    `)
-    .in('contact_id', contactIds)
-    .eq('cs_is_deleted', false)
-  if (bpiErr) throw bpiErr
-
-  const bpiByContact = new Map()
-  for (const row of bpiRows || []) {
-    if (!row.skills?.skill_name?.startsWith('BPI')) continue
-    const existing = bpiByContact.get(row.contact_id)
-    // Keep the latest expiry per contact (multiple BPI certs are possible)
-    if (!existing || (row.cs_effective_end_date || '') > (existing.expiry || '')) {
-      bpiByContact.set(row.contact_id, { expiry: row.cs_effective_end_date || '' })
-    }
-  }
-
-  return data.map(r => {
-    const bpi = bpiByContact.get(r.id)
-    return {
-      id: r.contact_record_number || r.id.slice(0, 8).toUpperCase(),
-      _id: r.id,
-      name: r.contact_name,
-      firstName: r.contact_first_name,
-      lastName: r.contact_last_name,
-      title: r.contact_title || '—',
-      status: picklists.byId.get(r.contact_status) || '—',
-      employeeId: r.contact_employee_id || '—',
-      hireDate: r.contact_hire_date || '—',
-      phone: r.contact_phone || '—',
-      email: r.contact_email || '—',
-      bpiCertified: bpi ? 'Yes' : 'No',
-      bpiExpiry: bpi?.expiry || '—',
-      driversLicense: r.contact_drivers_license || '—',
-      licenseState: r.contact_drivers_license_state || '—',
-      licenseExpiry: r.contact_drivers_license_expiry || '—',
-    }
-  })
+  return (data || []).map(r => ({
+    id: r.user_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    name: r.user_name || [r.user_first_name, r.user_last_name].filter(Boolean).join(' '),
+    firstName: r.user_first_name || '—',
+    lastName: r.user_last_name || '—',
+    title: r.user_title || r.roles?.role_name || '—',
+    role: r.roles?.role_name || '—',
+    status: r.user_is_active ? 'Active' : 'Inactive',
+    employeeId: '—',
+    hireDate: '—',
+    phone: r.user_phone || '—',
+    email: r.user_email || '—',
+    // The credential ledger is keyed to contacts, so it cannot speak for a
+    // user. Unknown, not "No".
+    bpiCertified: '—',
+    bpiExpiry: '—',
+    driversLicense: '—',
+    licenseState: '—',
+    licenseExpiry: '—',
+  }))
 }
 
 // ---------------------------------------------------------------------------
