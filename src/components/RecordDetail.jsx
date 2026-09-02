@@ -121,6 +121,7 @@ import RecordTypePicker from './RecordTypePicker'
 import { resolveParentChoice } from '../lib/constrainingParentChoice'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
 import { mergeParentMeta } from '../lib/parentRelationships'
+import { toDatetimeLocal, fromDatetimeLocal } from '../lib/datetimeField'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
@@ -781,8 +782,10 @@ async function buildUnlaidOutRequiredFieldDefs(columns, tableName, recordTypeId)
       })
       continue
     }
-    // datetime has no editor on the record form either — fall back to text.
-    defs.push({ name: col, label, required: true, type: m.editorType === 'datetime' ? 'text' : m.editorType })
+    // datetime is a real editor now (lib/datetimeField.js), so a required
+    // datetime column the layout does not carry gets a proper picker rather
+    // than a free-text box that accepted anything.
+    defs.push({ name: col, label, required: true, type: m.editorType })
   }
   return { defs, picklistOpts }
 }
@@ -2068,6 +2071,12 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
               ) : f.type === 'date' ? (
                 <input type="date" style={{ ...monoInput }} value={draft[f.name] || ''}
                   onChange={e => setVal(f.name, e.target.value || null)} />
+              ) : f.type === 'datetime' ? (
+                // Same picker and the same conversion as the record form, so a
+                // time entered here means what it means everywhere else.
+                <input type="datetime-local" style={{ ...monoInput }}
+                  value={toDatetimeLocal(draft[f.name])}
+                  onChange={e => setVal(f.name, fromDatetimeLocal(e.target.value))} />
               ) : f.type === 'boolean' ? (
                 <div style={{ display: 'flex', gap: 0, maxWidth: 180 }}>
                   {[['Yes', true], ['No', false]].map(([lbl, val], i) => {
@@ -2800,7 +2809,13 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
     }
 
     case 'datetime':
-      return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>Read-only</span>
+      // datetime-local carries wall-clock time with no zone, and the column is
+      // a timestamptz. The conversion both ways lives in lib/datetimeField.js
+      // with its own fixture, because getting it backwards moves every
+      // appointment in the platform by the UTC offset.
+      return <input type="datetime-local" style={monoInput}
+        value={toDatetimeLocal(v)}
+        onChange={e => onChange(field.name, fromDatetimeLocal(e.target.value))} />
 
     case 'merge_textarea':
       return <MergeFieldTextarea value={v} onChange={(next) => onChange(field.name, next)} />
@@ -4113,9 +4128,15 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // they rendered as editable dropdowns — offering a change that
         // trg_record_audit_fields reverts on save. The layout declares which
         // fields those are (`system_audit`), so no column-name guessing.
+        // `datetime` used to be excluded here outright, so no datetime field on
+        // any record page was ever editable — Scheduled Start on a service
+        // appointment, clock-in on a timesheet, a work order's start and end
+        // could all be shown and never entered (Nicholas, 2026-09-02: "why
+        // can't I edit the schedule start time?"). It is a normal editable type
+        // now; the ones that must stay read-only say so on the layout
+        // (system_audit) or in DERIVED_READONLY, exactly like every other type.
         const isEditable = editing
           && !isSystemAuditField(f)
-          && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
           && (f.type !== 'lookup' || lookupIsEditable)
           && (f._editable !== false)
