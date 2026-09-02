@@ -4167,12 +4167,11 @@ function buildHearPdfBlob(){
     for(const v of rLines) for(const ln of wrap(v,wCol)){t(W-M,ry,ln,{align:'right'}); ry+=11.5;}
     st.y=Math.max(cy,ly,ry)+6; stroke(BLUE); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2; };
   const drawHead=(withParties)=>{
-    st.y=20;
-    tc(BLUE);       font(9.5,'bold');  t(W/2,st.y+8,('Energy Efficiency Services of '+_state).toUpperCase(),{align:'center'});
-    tc(BLUE);       font(21,'bold');   t(W/2,st.y+31,'Project Proposal',{align:'center'});   // EES title in brand blue
-    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+49,_state+' IRA Multifamily HEAR Program',{align:'center'});
-    st.y+=60; stroke(BLUE); d.setLineWidth(1.4); d.line(M,st.y,W-M,st.y);
-    if(withParties){ st.y+=13; drawParties(); } else { st.y+=16; } };
+    st.y=28;   // a little room above the title so it isn't squished against the top
+    tc(BLUE);       font(15,'bold');   t(W/2,st.y,'Project Proposal',{align:'center'});           // brand blue, sized in scale with the rest of the page
+    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+15,_state+' IRA Multifamily HEAR Program',{align:'center'});
+    st.y+=23; stroke(BLUE); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    if(withParties){ st.y+=10; drawParties(); } else { st.y+=12; } };
   const contPage=()=>{ d.addPage(); st.y=M; drawHead(false); };
   const needH=h=>{ if(st.y+h>H-M-24) contPage(); };
   drawHead(true);
@@ -4254,7 +4253,7 @@ function buildHearPdfBlob(){
   /* Acceptance & Authorization — signature block (Nicholas, 2026-09-02: put it back) */
   needH(86);
   head('Acceptance & Authorization',6);
-  {const ack='By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of '+_state+' to submit the project information above to the Inflation Reduction Act program team as a Project Reservation and, upon the program’s approval, to complete the work as specified in this proposal.';
+  {const ack='By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of '+_state+' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.';
    const al=wrap(ack,CW-40); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(W/2,st.y+8+k*10.5,ln,{align:'center'})); st.y+=al.length*10.5+4;
    st.y+=14; stroke([70,82,98]); d.setLineWidth(1);
    d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
@@ -4277,10 +4276,9 @@ function buildHearSealedPdfBlob(){
   const rline=(lbl,val,bold)=>{tc(C.ink); font(9,bold?'bold':'normal');
     const vw=d.getTextWidth(String(val)); t(W-M,st.y+10,val,{align:'right'}); t(W-M-vw-14,st.y+10,lbl,{align:'right'});};
   const drawTitle=()=>{
-    tc(GREEN);      font(9.5,'bold');  t(W/2,st.y+8,'SEALED, INC.',{align:'center'});
-    tc(GREEN);      font(21,'bold');   t(W/2,st.y+31,'Project Proposal',{align:'center'});   // Sealed title in brand green
-    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+49,stateFullName(m.state)+' IRA Multifamily HEAR Program - Project Reservation',{align:'center'});
-    st.y+=60; stroke(GREEN); d.setLineWidth(1.4); d.line(M,st.y,W-M,st.y); st.y+=13; };
+    tc(GREEN);      font(15,'bold');   t(W/2,st.y+11,'Project Proposal',{align:'center'});   // no SEALED, INC. line — the name is in the Primary IRA Contractor column
+    tc([70,82,98]); font(10.5,'bold'); t(W/2,st.y+26,stateFullName(m.state)+' IRA Multifamily HEAR Program - Project Reservation',{align:'center'});
+    st.y+=34; stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=10; };
   const contPage=()=>{ d.addPage(); st.y=M-6; drawTitle(); };
   const needH=h=>{ if(st.y+h>H-M-16) contPage(); };
   st.y=M-6; drawTitle();
@@ -4297,39 +4295,47 @@ function buildHearSealedPdfBlob(){
   let y3=lines9(ci,W-M,st.y+13,'right');
   st.y=Math.max(y1,y2,y3);
   st.y+=8; stroke(GREEN); d.setLineWidth(.8); d.line(M,st.y,W-M,st.y); st.y+=2;
-  /* scope table — Measure + Labor / Material / Total */
+  /* scope table — Contractor | Measure | Qty | Labor | Material | Total.
+     The Contractor column mirrors the Sealed HOMES layout: EES is the
+     support contractor performing the work under Sealed, Inc. */
   sh('Project Scope of Work');
-  const cols=_hearScopeCols(_money,W,M);
-  const descW=CW-cols.reduce((a,c)=>a+c[2],0);
-  const colXs=[M].concat(cols.map(c=>c[3]-c[2])).concat([W-M]);
+  const contractor='Energy Efficiency Services of '+stateFullName(m.state);
+  const cW=76;                                         // contractor column (left)
+  const numDefs=[['QTY',r=>String(r.qty),38],['LABOR',r=>_money(r.labor),54],
+    ['MATERIAL',r=>_money(r.material),54],['TOTAL',r=>_money(r.cost),56]];
+  let _rx=W-M; for(let c=numDefs.length-1;c>=0;c--){numDefs[c][3]=_rx; _rx-=numDefs[c][2];}
+  const measX=M+cW, measRx=_rx, measW=measRx-measX;     // measure spans between contractor and the numeric block
+  const colXs=[M,measX].concat(numDefs.map(c=>c[3]-c[2])).concat([W-M]);
   const colRules=(yTop,yBot)=>{stroke(HAIR); d.setLineWidth(.6); colXs.forEach(x=>d.line(x,yTop,x,yBot));};
   const headH=20;
   const tableHeader=()=>{need(headH+8);
     fill(PANEL); d.rect(M,st.y,CW,headH,'F');
     stroke(GREEN); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-    tc(GREEN); font(8,'bold'); t(M+5,st.y+13,'MEASURE');
-    cols.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
+    tc(GREEN); font(8,'bold'); t(M+5,st.y+13,'CONTRACTOR'); t(measX+4,st.y+13,'MEASURE');
+    numDefs.forEach(([lbl,,w,rx])=>t(rx-4,st.y+13,lbl,{align:'right'}));
     colRules(st.y,st.y+headH);
     stroke(HAIR); d.setLineWidth(.8); d.line(M,st.y+headH,W-M,st.y+headH);
     st.y+=headH;};
   tableHeader();
-  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(M+5,st.y+16,'No equipment entered yet.'); st.y+=26;}
+  if(!m.rows.length){tc(C.mut); font(9.5,'italic'); t(measX+4,st.y+16,'No equipment entered yet.'); st.y+=26;}
   m.rows.forEach((r,i)=>{
     const sub=[r.systemType,r.modelStr,r.effStr].filter(Boolean).join('  ·  ');
-    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,descW-10);
-    font(8.5); const dl=sub?wrap(sub,descW-10):[];
-    font(8.5); const desl=r.desc?wrap(r.desc,descW-10):[];
+    font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.label,measW-8);
+    font(8.5); const dl=sub?wrap(sub,measW-8):[];
+    font(8.5); const desl=r.desc?wrap(r.desc,measW-8):[];
+    font(8);   const cl=wrap(contractor,cW-8);
     const nameH=nameLines.length*12, subH=dl.length?dl.length*10:0, descH=desl.length?desl.length*10:0;
-    const h=6+nameH+(subH?3+subH:0)+(descH?3+descH:0)+6;
+    const h=Math.max(6+nameH+(subH?3+subH:0)+(descH?3+descH:0)+6, 6+cl.length*10+6);
     if(st.y+h>H-M-16){contPage(); tableHeader();}
     const y0=st.y;
     if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}
-    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(M+5,y0+6+k*12+9,ln));
+    tc([64,78,96]); font(8); cl.forEach((ln,k)=>t(M+5,y0+6+k*10+8,ln));          // contractor (left)
+    tc(C.ink); font(10,'bold'); nameLines.forEach((ln,k)=>t(measX+4,y0+6+k*12+9,ln));
     let dy=y0+6+nameH;
-    if(dl.length){dy+=3; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(M+5,dy+k*10+8,ln)); dy+=subH;}
-    if(desl.length){dy+=3; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(M+5,dy+k*10+8,ln)); dy+=descH;}
-    const numY=y0+h/2+3;   // Qty/Labor/Material/Total centered vertically in the row (Measure stays top-aligned)
-    cols.forEach(([lbl,fn,w,rx],c)=>{const isTot=(lbl==='TOTAL');
+    if(dl.length){dy+=3; font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(measX+4,dy+k*10+8,ln)); dy+=subH;}
+    if(desl.length){dy+=3; font(8.5); tc([52,64,80]); desl.forEach((ln,k)=>t(measX+4,dy+k*10+8,ln)); dy+=descH;}
+    const numY=y0+h/2+3;   // Qty/Labor/Material/Total centered vertically in the row
+    numDefs.forEach(([lbl,fn,w,rx])=>{const isTot=(lbl==='TOTAL');
       font(9.5,isTot?'bold':'normal'); tc(isTot?C.ink:[64,78,96]); t(rx-4,numY,fn(r),{align:'right'});});
     st.y=y0+h; colRules(y0,st.y);
     stroke(HAIR); d.setLineWidth(.6); d.line(M,st.y,W-M,st.y);
@@ -4361,7 +4367,7 @@ function buildHearSealedPdfBlob(){
   /* Acceptance & Authorization — signature block (Nicholas, 2026-09-02: put it back) */
   needH(84);
   sh('Acceptance & Authorization');
-  {const ack='By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of '+stateFullName(m.state)+' to submit the project information above to the Inflation Reduction Act program team as a Project Reservation and, upon the program’s approval, to complete the work as specified in this proposal.';
+  {const ack='By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of '+stateFullName(m.state)+' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.';
    const al=wrap(ack,CW-40); tc(C.ink); font(8.5); al.forEach((ln,k)=>t(W/2,st.y+8+k*10.5,ln,{align:'center'})); st.y+=al.length*10.5+4;
    st.y+=14; stroke([68,88,110]); d.setLineWidth(1);
    d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
