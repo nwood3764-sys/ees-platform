@@ -39,6 +39,32 @@ export const NON_PARENT_FK_TABLES = new Set(['users', 'picklist_values'])
 export const AUDIT_FK_COLUMN = /(_created_by|_updated_by|_deleted_by|_owner)$/
 
 /**
+ * Relationships that must never be filled in by inheritance, because the column
+ * does something in the platform beyond pointing at a parent. Keyed
+ * `<table>.<column>`, and each entry states what it does — this is not a list of
+ * objects somebody forgot, and nothing may be added to it without a reason of
+ * this kind.
+ *
+ *   service_appointments.contact_id
+ *     This is the CUSTOMER TO NOTIFY, not a parent record. It is the only gate
+ *     on LEAP's outbound appointment email: trg_sa_fire_booking_confirmation
+ *     and trg_sa_fire_status_or_reschedule both return early when it is null,
+ *     which is precisely why install and removal appointments have always been
+ *     safe (CLAUDE.md, 2026-07-13: "customers should not be emailed about
+ *     install/removal work orders — in practice those SAs carry no contact_id,
+ *     which is the pipeline's existing gate").
+ *
+ *     Inheriting it from the work order removed that gate. On 2026-09-02 an
+ *     appointment created by hand on an Insulation Removal work order emailed a
+ *     real property contact "Your home energy assessment is scheduled", with a
+ *     blank date because the appointment had no time (NL-00043). Filling a
+ *     field must never be what causes a message to be sent to a customer.
+ */
+export const NON_INHERITABLE_RELATIONSHIPS = new Set([
+  'service_appointments.contact_id',
+])
+
+/**
  * True when this foreign key expresses a parent relationship worth inheriting.
  *
  * @param {{column_name: string, is_foreign_key?: boolean, references_table?: string}} column
@@ -46,6 +72,7 @@ export const AUDIT_FK_COLUMN = /(_created_by|_updated_by|_deleted_by|_owner)$/
  */
 export function isParentForeignKey(column, tableName) {
   if (!column || !column.is_foreign_key || !column.references_table) return false
+  if (NON_INHERITABLE_RELATIONSHIPS.has(`${tableName}.${column.column_name}`)) return false
   if (NON_PARENT_FK_TABLES.has(column.references_table)) return false
   // A self-reference expresses hierarchy WITHIN the object
   // (work_orders.parent_work_order_id). Inheriting it would file a new record

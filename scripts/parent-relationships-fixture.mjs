@@ -31,6 +31,7 @@ import {
   parentsFromColumns,
   mergeParentMeta,
   relationshipKey,
+  NON_INHERITABLE_RELATIONSHIPS,
 } from '../src/lib/parentRelationships.js'
 
 let failures = 0
@@ -104,13 +105,14 @@ check('a malformed column does not throw',
 // ── The derived relationship set ───────────────────────────────────────────
 {
   const { parents, parentTables } = parentsFromColumns(SERVICE_APPOINTMENT_COLUMNS, 'service_appointments')
+  // contact_id is deliberately absent — see the customer-email block below.
   check('service_appointments: every real relationship, and only those',
     parents,
-    ['contact_id', 'opportunity_id', 'project_id', 'service_territory_id',
+    ['opportunity_id', 'project_id', 'service_territory_id',
      'work_order_id', 'work_type_id'])
   check('...each paired with the table it points at',
     parentTables,
-    ['contacts', 'opportunities', 'projects', 'service_territories',
+    ['opportunities', 'projects', 'service_territories',
      'work_orders', 'work_types'])
   check('no owner, created-by, deleted-by or picklist column survives',
     parents.filter(c => /_owner$|_created_by$|_deleted_by$|_status$|_duration_type$/.test(c)), [])
@@ -141,10 +143,10 @@ check('work_orders: both self-references are excluded',
     merged.parents.length, new Set(merged.parents).size)
   check('an object with no curated entry falls back to the derived set entirely',
     mergeParentMeta(undefined, parentsFromColumns(SERVICE_APPOINTMENT_COLUMNS, 'service_appointments')).parents.length,
-    6)
+    5)
   check('an empty curated entry is treated as absent, not as "no parents"',
     mergeParentMeta({ parents: [], parentTables: [] },
-      parentsFromColumns(SERVICE_APPOINTMENT_COLUMNS, 'service_appointments')).parents.length, 6)
+      parentsFromColumns(SERVICE_APPOINTMENT_COLUMNS, 'service_appointments')).parents.length, 5)
 }
 
 // ── The relationship key that matches across prefixes ──────────────────────
@@ -199,6 +201,59 @@ check('project_id is its own relationship', relationshipKey('project_id'), 'proj
     Object.keys(resolved).every(c => target.parents.includes(c)), true)
   check('and the property/building the SA has no column for are NOT written to it',
     [resolved.property_id, resolved.building_id], [undefined, undefined])
+}
+
+// ── The customer email this rule exists to prevent ─────────────────────────
+// 2026-09-02: an appointment created by hand on WO-00244 (Insulation Removal -
+// Attic) inherited contact_id from the work order. That column is the ONLY gate
+// on LEAP's outbound appointment email, so the property contact was sent "Your
+// home energy assessment is scheduled" — for removal work, with a blank date
+// because the appointment had no time (NL-00043, sent 20:58:48 via Graph).
+//
+// Filling a field must never be what causes a message to be sent to a customer.
+{
+  check('a contact is NOT inherited onto a service appointment',
+    isParentForeignKey(fk('contact_id', 'contacts'), 'service_appointments'), false)
+
+  // ...and the exclusion is specific to that one meaning, not to contacts.
+  check('a contact IS still a parent everywhere else',
+    isParentForeignKey(fk('contact_id', 'contacts'), 'work_orders'), true)
+  check('...including on an activity',
+    isParentForeignKey(fk('contact_id', 'contacts'), 'activities'), true)
+  check('the work order keeps its own contact — only the SA stops taking one',
+    parentsFromColumns(WORK_ORDER_COLUMNS, 'work_orders').parents.includes('contact_id'), true)
+
+  const { parents } = parentsFromColumns(SERVICE_APPOINTMENT_COLUMNS, 'service_appointments')
+  check('the appointment resolves its other five relationships as before',
+    parents,
+    ['opportunity_id', 'project_id', 'service_territory_id', 'work_order_id', 'work_type_id'])
+
+  // CONTROL: the pre-fix behaviour, which must produce the column that sent it.
+  const preFix = SERVICE_APPOINTMENT_COLUMNS
+    .filter(c => c.is_foreign_key && !['users', 'picklist_values'].includes(c.references_table))
+    .map(c => c.column_name)
+  check('CONTROL: without the rule, contact_id is inherited and the email goes out',
+    preFix.includes('contact_id'), true)
+
+  // The list is a set of stated exceptions, not a place to park objects.
+  check('exactly one relationship is excluded this way',
+    NON_INHERITABLE_RELATIONSHIPS.size, 1)
+  check('...and it is the one that sends mail',
+    NON_INHERITABLE_RELATIONSHIPS.has('service_appointments.contact_id'), true)
+
+  // Replaying the reported create must now leave the customer off it.
+  const WO = { contact_id: 'contact-josiah', work_type_id: 'wt-1', project_id: 'p-1', opportunity_id: 'o-1' }
+  const target = parentsFromColumns(SERVICE_APPOINTMENT_COLUMNS, 'service_appointments')
+  const resolved = {}
+  for (const col of target.parents) {
+    const v = WO[relationshipKey(col) === relationshipKey('contact_id') ? 'contact_id' : col]
+    if (v != null) resolved[col] = v
+  }
+  check('replaying the create: no contact reaches the appointment',
+    resolved.contact_id, undefined)
+  check('...while the real parents still do',
+    [resolved.work_type_id, resolved.project_id, resolved.opportunity_id],
+    ['wt-1', 'p-1', 'o-1'])
 }
 
 console.log(failures === 0
