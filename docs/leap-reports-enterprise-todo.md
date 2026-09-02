@@ -92,8 +92,14 @@ are struck through as they ship, with the PR that did it.
       that throws, any that fails to render, and any that paints nothing — and
       feeds the single-value widgets exactly what their query shape returns,
       which is the only way the gauge crash is visible.
-- [ ] Axis titles are still absent everywhere (the dataviz mark spec calls for
-      them where the unit is not obvious).
+- [x] **Axis titles, where the unit is not obvious.** A bar reaching 87,150
+      could be dollars, square feet or units and only the axis can say which,
+      so a SUM or AVERAGE axis is now titled ("Sum of Requested Incentive").
+      A COUNT axis is deliberately left bare — the chart's own title already
+      says what is being counted, and "Count" on every y-axis is noise that
+      costs plot width. An author's explicit x/y title still wins.
+- [x] Line and area category labels stopped truncating to "Enrollment Wi" —
+      same rule as every other axis, so dates stay flat and long names angle.
 - [ ] ~~`CHART_COLORS[i % length]` cycles.~~ An 8th series wraps to slot 1 and
       gets an identical colour to the first — the palette is meant to be
       assigned in fixed order and never cycled. Six modules do this inline. The

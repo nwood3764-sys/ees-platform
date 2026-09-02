@@ -520,6 +520,31 @@ function measureName(cfg, fallback) {
   return word ? `${word} ${label}` : label
 }
 
+// An axis title, but only where the axis needs one.
+//
+// The dataviz mark spec asks for a title where the unit is not obvious. On a
+// COUNT axis it is obvious — the chart's own title already says what is being
+// counted — and "Count" on every y-axis is noise that costs plot width. On a
+// SUM or AVERAGE of a field it is genuinely not obvious: a bar reaching 87,150
+// could be dollars, square feet or units, and only the axis can say which.
+function measureAxisName(cfg) {
+  const t = cfg?.measure_type
+  if (!t || t === 'count' || !cfg?.measure_field) return undefined
+  return measureName(cfg)
+}
+const hasMeasureAxisName = (cfg) => measureAxisName(cfg) !== undefined
+const valueAxis = (cfg, formatter) => {
+  const name = measureAxisName(cfg)
+  return {
+    type: 'value',
+    axisLabel: { formatter },
+    ...(name ? {
+      name, nameLocation: 'middle', nameGap: 46,
+      nameTextStyle: { color: C.textMuted, fontSize: 10.5, fontFamily: "'Inter', system-ui, sans-serif" },
+    } : {}),
+  }
+}
+
 // A category axis whose labels a person can actually read.
 //
 // The audit found "Enrollmen…" on every vertical chart: six status names in a
@@ -566,15 +591,26 @@ function BarWidget({ result, widget, canDrill, drillTo }) {
     name: horizontal ? (cfg.y_axis_title || undefined) : (cfg.x_axis_title || undefined),
     axisLabel: categoryAxisLabel(data.map(d => d.name), horizontal),
   }
+  // An axis title the author wrote wins; the derived measure name is the
+  // fallback. Spreading valueAxis() and then reassigning `name` unconditionally
+  // clobbered the derived one with `undefined`, which is why the title showed
+  // on the line chart's left axis and never on the bar's bottom one.
+  const explicitValTitle = horizontal ? cfg.x_axis_title : cfg.y_axis_title
   const valAxis = {
-    type: 'value', axisLabel: { formatter: axisTick },
-    name: horizontal ? (cfg.x_axis_title || undefined) : (cfg.y_axis_title || undefined),
+    ...valueAxis(cfg, axisTick),
+    ...(explicitValTitle ? { name: explicitValTitle } : {}),
+    // A bottom axis sits much closer to its title than a rotated left one.
+    ...(horizontal ? { nameGap: 26 } : {}),
     nameTextStyle: { color: C.textMuted, fontSize: 10 },
   }
 
   const option = {
     animationDuration: 250,
-    grid: { left: 8, right: horizontal && showLabels ? 56 : 16, top: 8, bottom: 4, containLabel: true },
+    // containLabel reserves room for the tick labels but NOT for the axis
+    // name, so a title on the bottom axis (the horizontal bar's value axis) is
+    // drawn outside the grid and clipped away entirely.
+    grid: { left: 8, right: horizontal && showLabels ? 56 : 16, top: 8,
+            bottom: (horizontal && (hasMeasureAxisName(cfg) || cfg.x_axis_title)) ? 34 : 4, containLabel: true },
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b>` },
     xAxis: horizontal ? valAxis : catAxis,
     yAxis: horizontal ? catAxis : valAxis,
@@ -610,8 +646,8 @@ function LineWidget({ result, widget, canDrill, drillTo }) {
       const p = Array.isArray(ps) ? ps[0] : ps
       return `${p.name}<br/><b>${fmt(p.value)}</b>`
     } },
-    xAxis: { type: 'category', data: data.map(d => d.name), boundaryGap: false, axisLabel: { hideOverlap: true } },
-    yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    xAxis: { type: 'category', data: data.map(d => d.name), boundaryGap: false, axisLabel: categoryAxisLabel(data.map(d => d.name), false) },
+    yAxis: valueAxis(cfg, (v) => formatAxisTick(v, cfg.number_format)),
     series: [{
       type: 'line', data: data.map(d => d.value),
       lineStyle: { width: 2, color: CHART_INK },
@@ -1213,7 +1249,7 @@ function AreaWidget({ result, widget, canDrill, drillWhole }) {
       return `${list[0]?.name}<br/>` + list.map(p => `${hasSeries ? p.seriesName + ': ' : ''}<b>${fmt(p.value)}</b>`).join('<br/>')
     } },
     xAxis: { type: 'category', data: buckets, boundaryGap: false, axisLabel: { hideOverlap: true } },
-    yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    yAxis: valueAxis(cfg, (v) => formatAxisTick(v, cfg.number_format)),
     series: seriesNames.map((s, i) => ({
       name: hasSeries ? s : (widget.dw_title || 'Value'),
       type: 'line',
@@ -1273,7 +1309,7 @@ function WaterfallWidget({ result, widget, canDrill, drillTo }) {
     grid: { left: 8, right: 14, top: 14, bottom: 4, containLabel: true },
     tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(delta[p.dataIndex])}</b>` },
     xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: categoryAxisLabel(data.map(d => d.name), false) },
-    yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    yAxis: valueAxis(cfg, (v) => formatAxisTick(v, cfg.number_format)),
     series: [
       { type: 'bar', stack: 'w', silent: true,
         itemStyle: { color: 'transparent' }, emphasis: { itemStyle: { color: 'transparent' } },
@@ -2163,7 +2199,7 @@ function BoxPlotWidget({ result, widget, canDrill, drillWhole }) {
       return `${cats[p.dataIndex]}<br/>max <b>${fmt(b[4])}</b><br/>Q3 <b>${fmt(b[3])}</b><br/>median <b>${fmt(b[2])}</b><br/>Q1 <b>${fmt(b[1])}</b><br/>min <b>${fmt(b[0])}</b>`
     } },
     xAxis: { type: 'category', data: cats, axisLabel: categoryAxisLabel(cats, false) },
-    yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    yAxis: valueAxis(cfg, (v) => formatAxisTick(v, cfg.number_format)),
     series: [{
       type: 'boxplot', data: boxes,
       itemStyle: { color: '#d9f6e9', borderColor: '#2aab72', borderWidth: 1.5 },
