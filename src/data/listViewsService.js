@@ -30,6 +30,7 @@
 
 import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
+import { viewVisibleOnModule } from '../lib/savedViewScope'
 
 // Resolve the current user's role_id (nullable). Cached for the session.
 let _cachedRoleId = null
@@ -50,7 +51,7 @@ export function clearListViewCache() { _cachedRoleId = null }
 // shared, owned by me, or scoped to my role, so the selector only shows what's
 // relevant. Returns rows shaped for the ListView selector.
 // ---------------------------------------------------------------------------
-export async function fetchSavedViewsForObject(objectName) {
+export async function fetchSavedViewsForObject(objectName, moduleId = null) {
   if (!objectName) return []
   const [userId, roleId] = await Promise.all([
     getCurrentUserId().catch(() => null),
@@ -76,9 +77,12 @@ export async function fetchSavedViewsForObject(objectName) {
   if (error) throw error
 
   const rows = (data || []).filter(r =>
-    r.list_view_is_shared === true ||
-    (userId && r.list_view_user_id === userId) ||
-    (roleId && r.list_view_role_id === roleId)
+    (r.list_view_is_shared === true ||
+     (userId && r.list_view_user_id === userId) ||
+     (roleId && r.list_view_role_id === roleId))
+    // See src/lib/savedViewScope.js: a view naming a module belongs to that
+    // module; a view naming none is object-wide and shows everywhere.
+    && viewVisibleOnModule(r, moduleId)
   )
 
   return rows.map(r => toSelectorView(r, defaultViewId))

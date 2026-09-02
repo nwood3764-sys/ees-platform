@@ -94,7 +94,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     try {
       const [cat, savedViews] = await Promise.all([
         buildObjectColumnCatalog(objectTable),
-        fetchSavedViewsForObject(objectTable).catch(() => []),
+        fetchSavedViewsForObject(objectTable, moduleId).catch(() => []),
       ])
       const seeded = seedRelatedFromViews(savedViews)
       const rows = await fetchRows(seeded)
@@ -116,7 +116,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       try {
         const [cat, savedViews] = await Promise.all([
           buildObjectColumnCatalog(objectTable),
-          fetchSavedViewsForObject(objectTable).catch(() => []),
+          fetchSavedViewsForObject(objectTable, moduleId).catch(() => []),
         ])
         const seeded = seedRelatedFromViews(savedViews)
         const rows = await fetchObjectRecords(objectTable, { activeFields: seeded, relatedScope: listScope, objectScope })
