@@ -1946,6 +1946,52 @@ export async function applyInsertDefaults(tableName, fields, userId) {
  * describe_object_columns, the same source the layout renderer and the create
  * modal already use, so there is one description of a table in the client.
  */
+/**
+ * The columns a BEFORE INSERT/UPDATE trigger on this table fills in, memoised
+ * for the session.
+ *
+ * A create form must not DEMAND one of these: the database composes the value
+ * and overwrites whatever was typed. `service_appointments.sa_name` is the case
+ * that exposed it — the pop-up asked for a Name that `trg_sa_name` replaced with
+ * the property's address one statement later.
+ *
+ * Read from the database rather than listed here, because only the database
+ * knows: PostgreSQL records which trigger fires, never which columns it writes,
+ * so `trigger_written_columns` matches the trigger function's own source. The
+ * previous hand-written map covered 10 tables; the real figure is 769 columns
+ * across 191.
+ *
+ * `columnsFilledByTrigger` is the SYNCHRONOUS accessor the save-time required
+ * check uses. It answers from the cache and returns an empty set when the table
+ * has not been described yet, so it can only ever under-claim — the effect of a
+ * cold cache is a field being asked for, never a field being wrongly skipped.
+ * Every create surface awaits the prefetch when it opens, which is what makes
+ * it warm by the time anything is saved.
+ */
+const _triggerWrittenCache = new Map()
+
+export async function prefetchTriggerWrittenColumns(tableName) {
+  if (!tableName) return new Set()
+  const cached = _triggerWrittenCache.get(tableName)
+  if (cached instanceof Set) return cached
+  try {
+    const { data, error } = await supabase.rpc('trigger_written_columns', { p_object: tableName })
+    if (error) throw error
+    const set = new Set((data || []).map(r => r.column_name).filter(Boolean))
+    _triggerWrittenCache.set(tableName, set)
+    return set
+  } catch {
+    // Not cached, so a later attempt retries. An empty set means "ask for it",
+    // which is the safe direction to fail in.
+    return new Set()
+  }
+}
+
+export function columnsFilledByTrigger(tableName) {
+  const hit = _triggerWrittenCache.get(tableName)
+  return hit instanceof Set ? hit : new Set()
+}
+
 const _tableColumnNamesCache = new Map()
 export async function fetchTableColumnNames(tableName) {
   if (!tableName) return []

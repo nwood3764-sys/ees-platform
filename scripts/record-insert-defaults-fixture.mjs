@@ -228,6 +228,36 @@ check('...and still supplies the record number, which the trigger needs',
   }
 }
 
+// ── Derived names are asked of the DATABASE, not of a list ─────────────────
+// A create form must not demand a column a BEFORE trigger fills. That was a
+// hand-written map of 10 tables; service_appointments was not one of them, so
+// the New Service Appointment pop-up asked for a Name that trg_sa_name replaced
+// one statement later (Nicholas, 2026-09-02: "auto create name of SA record").
+{
+  const { readFileSync } = await import('node:fs')
+  const detail = readFileSync(new URL('../src/components/RecordDetail.jsx', import.meta.url), 'utf8')
+  const layout = readFileSync(new URL('../src/data/layoutService.js', import.meta.url), 'utf8')
+
+  check('the hand-written trigger-derived map is gone',
+    /const TRIGGER_DERIVED_REQUIRED = \{/.test(detail), false)
+  check('the required-field check asks the database instead',
+    /const derived = triggerDerivedRequired\(tableName\)/.test(detail), true)
+  check('the create form warms that answer before anything reads it',
+    /prefetchTriggerWrittenColumns\(tableName\)/.test(detail), true)
+  check('the accessor is synchronous and cannot block the save path',
+    /export function columnsFilledByTrigger/.test(layout), true)
+  check('a cold cache under-claims rather than over-claims — it asks for the field',
+    /return hit instanceof Set \? hit : new Set\(\)/.test(layout), true)
+  check('it calls the RPC by its real parameter name',
+    /trigger_written_columns', \{ p_object: tableName \}/.test(layout), true)
+
+  // Editability is a DIFFERENT question and must stay hand-curated: some
+  // trigger-filled columns are deliberately overridable (ia_property_owner_name,
+  // HA-00192). Folding the two together would remove a feature.
+  check('read-only-ness is still curated per column, not inferred from triggers',
+    /const DERIVED_READONLY = \{/.test(detail), true)
+}
+
 console.log(failures === 0
   ? `record-insert-defaults fixture: ${checks} checks passed`
   : `record-insert-defaults fixture: ${failures} of ${checks} checks FAILED`)
