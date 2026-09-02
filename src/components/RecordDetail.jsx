@@ -111,6 +111,7 @@ import {
   getRecordTypeColumn,
   fetchAvailableRecordTypes,
   fetchConstrainingParentForCreate,
+  fetchDerivationParentForCreate,
   fetchConstrainingParentCandidates,
   fetchOpportunityInheritedFields,
   fetchProgramStateForCreate,
@@ -5686,6 +5687,21 @@ function RelatedListWidget({
       }
     }
 
+    // A separate question from the one above: which parent DECIDES this
+    // child's record type by default. A contact created on a Property Owner
+    // account is a Property Owner Contact (Nicholas, 2026-09-02) — nothing is
+    // forbidden there, so accounts -> contacts has a derivation rule and no
+    // eligibility edge, and reading it from the eligibility table would never
+    // fire. Transient __ keys, stripped before the insert; the database
+    // stamps the same value independently if the field arrives blank.
+    {
+      const derivationParent = await fetchDerivationParentForCreate(childTable, prefillObj)
+      if (derivationParent) {
+        prefillObj.__derivationParentObject       = derivationParent.parentObject
+        prefillObj.__derivationParentRecordTypeId = derivationParent.parentRecordTypeId
+      }
+    }
+
     // A work order always lives on a project, but the record it was created from
     // often doesn't have one — an assessment, for instance, links the property,
     // building, and opportunity but no project. Resolve the opportunity's most
@@ -7306,6 +7322,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // unconstrained, which is the case for most objects.
   const prefillParentObject       = prefill?.__parentObject || null
   const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
+  // The parent that DECIDES the record type (record_type_derivation), which is
+  // not always the one that CONSTRAINS it (record_type_eligibility). Falls back
+  // to the constraining parent so an object governed by both behaves as before.
+  const prefillDerivationParentObject =
+    prefill?.__derivationParentObject || prefill?.__parentObject || null
+  const prefillDerivationParentRecordTypeId =
+    prefill?.__derivationParentRecordTypeId || prefill?.__parentRecordTypeId || null
   // The create came from a building/property running more than one program, so
   // WHICH parent this belongs to is a question the picker asks before offering
   // any record type (see seedConstrainingParent). Answering it also carries the
@@ -9147,6 +9170,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         state={prefillState}
         parentObject={prefillParentObject}
         parentRecordTypeId={prefillParentRecordTypeId}
+        derivationParentObject={prefillDerivationParentObject}
+        derivationParentRecordTypeId={prefillDerivationParentRecordTypeId}
         parentChoices={prefillParentChoices}
         takenOnBuildingId={prefillTakenOnBuildingId}
         onPick={async (rt, parentPick) => {
