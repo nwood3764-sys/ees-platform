@@ -46,12 +46,12 @@ const CFG = { measure_type: 'count', group_by: 'status', series_by: 'state', dat
 // that path returns — no rows.
 const SINGLE = new Set(['metric','gauge','kpi','rating','speedometer','bullet','progress_ring'])
 
-function Tile({ type, w = 460, h = 300, config = {} }) {
+function Tile({ type, w = 460, h = 300, config = {}, caseId }) {
   return (
-    <div data-case={type} style={{ width: w, height: h, background: '#fff', border: '1px solid #e4e9f2',
+    <div data-case={caseId || type} style={{ width: w, height: h, background: '#fff', border: '1px solid #e4e9f2',
       borderRadius: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #e4e9f2', background: '#f7f9fc',
-        fontSize: 12, fontWeight: 600, color: '#0d1a2e' }}>{type}</div>
+        fontSize: 12, fontWeight: 600, color: '#0d1a2e' }}>{caseId || type}</div>
       <div style={{ flex: 1, padding: 12, overflow: 'hidden' }}>
         <WidgetBody widget={{ dw_widget_type: type, dw_widget_config: { ...CFG, ...config } }}
           result={SINGLE.has(type) ? AGG_ONLY : result} />
@@ -72,5 +72,8 @@ const TYPES = [
 createRoot(document.getElementById('root')).render(
   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: 16, width: 1000 }}>
     {TYPES.map(t => <Tile key={t} type={t} />)}
+    {/* An axis title earns its place only where the unit is not obvious. */}
+    <Tile key="bar-sum" type="bar" caseId="bar_sum" config={{ measure_type: 'sum', measure_field: 'amount', number_format: 'currency' }} />
+    <Tile key="line-avg" type="line" caseId="line_avg" config={{ measure_type: 'avg', measure_field: 'amount' }} />
   </div>
 )

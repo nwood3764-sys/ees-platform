@@ -31,7 +31,7 @@ const executablePath = findChromium()
 if (!executablePath) { console.log('SKIPPED — no Chromium'); process.exit(0) }
 
 // Kept in step with the TYPES list in harness.jsx.
-const TYPES_EXPECTED = 30
+const TYPES_EXPECTED = 32
 
 const server = await createServer({
   root, plugins: [react()], configFile: false,
