@@ -23,6 +23,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
+import { scanAnchors } from '../lib/signingAnchors'
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
@@ -32,28 +33,11 @@ const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 // will pick up. Only meaningful for html-authored templates — docx-mode
 // templates would require downloading and parsing the .docx asset, which
 // is the renderer's job, not the modal's.
-const ANCHOR_RE = /\\(sig|initial|date|text)(\d+)\\/g
-
-function scanAnchors(bodyHtml) {
-  if (typeof bodyHtml !== 'string' || !bodyHtml) {
-    return { total: 0, maxOrdinal: 0, byOrdinal: new Map() }
-  }
-  const byOrdinal = new Map()  // ordinal -> Set of tab types
-  let maxOrdinal = 0
-  let total = 0
-  ANCHOR_RE.lastIndex = 0
-  let m
-  while ((m = ANCHOR_RE.exec(bodyHtml)) !== null) {
-    total++
-    const ord = parseInt(m[2], 10)
-    if (!Number.isFinite(ord)) continue
-    if (ord > maxOrdinal) maxOrdinal = ord
-    const tabType = m[1] === 'sig' ? 'signature' : m[1]
-    if (!byOrdinal.has(ord)) byOrdinal.set(ord, new Set())
-    byOrdinal.get(ord).add(tabType)
-  }
-  return { total, maxOrdinal, byOrdinal }
-}
+// The anchor rule lives in src/lib/signingAnchors.js — ONE definition shared
+// by this modal, the template editor's warning and the database rule that
+// refuses to activate a signature template without an anchor. Only meaningful
+// for html-authored templates; a docx template's anchors live inside the file
+// and are the renderer's job to find.
 
 export default function SendForSignatureModal({ open, parentObject, parentRecordId, parentRecordLabel, onClose }) {
   const toast = useToast()
@@ -249,6 +233,19 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
     return null
   })()
 
+  // A signature document with no anchor is a document nobody can sign: the
+  // recipient gets the PDF and has nowhere to put a signature. This used to be
+  // a WARNING that let the send proceed anyway (Nicholas, 2026-09-02: "Every
+  // template, you need at least one signature anchor. That has to be mandatory
+  // for a signature document"). The database refuses to ACTIVATE such a
+  // template; this refuses to SEND one, so a template that slipped through
+  // some other route still cannot mail a blank document.
+  //
+  // Scoped to html mode only: a docx template's anchors live inside the file,
+  // which the client cannot read, so blocking those would break a legitimate
+  // authoring route on evidence we do not have.
+  const blockedNoAnchors = mismatch?.kind === 'no_anchors'
+
   if (!open) return null
   return (
     <div onClick={onClose} style={modalBackdropStyle}>
@@ -320,7 +317,7 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
           {step === 'review' && (
             <>
               <button onClick={() => setStep('recipients')} style={secondaryBtn}>Back</button>
-              <button onClick={handleSend} disabled={submitting} style={primaryBtn(!submitting)}>
+              <button onClick={handleSend} disabled={submitting || blockedNoAnchors} style={primaryBtn(!submitting && !blockedNoAnchors)}>
                 {submitting ? 'Sending…' : 'Send for Signature'}
               </button>
             </>
@@ -562,9 +559,9 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           {icon}
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>No signing anchors found in this template.</div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>This template has no signing anchors, so it cannot be sent.</div>
             <div>
-              The recipient{recipientCount === 1 ? '' : 's'} will receive the PDF but will have no signature, initial, date, or text fields to fill in. Add anchors like <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\sig1\\`}</code> to the template body, or use the <b>Insert Signature Tab</b> picker on the document template record.
+              The recipient{recipientCount === 1 ? '' : 's'} would receive the PDF with no signature, initial, date, or text field to fill in. Add at least one anchor to the template body — use the <b>Insert Signature Tab</b> picker on the document template record, or type <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\sig1\\`}</code> (also <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\initial1\\`}</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\date1\\`}</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\text1\\`}</code>; the number is the recipient's position in the signing order).
             </div>
           </div>
         </div>

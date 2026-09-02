@@ -1430,7 +1430,7 @@ function DocumentTemplatePreviewModal({
             </span>
           </label>
           <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 4, marginLeft: 22, lineHeight: 1.5 }}>
-            Draws labeled rectangles over each <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\sig1\</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\date1\</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\init1\</code>, and <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\text1\</code> token at its resolved bounding box.
+            Draws labeled rectangles over each <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\sig1\</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\date1\</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\initial1\</code>, and <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\text1\</code> token at its resolved bounding box.
           </div>
           {overlay && (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, marginLeft: 22 }}>
