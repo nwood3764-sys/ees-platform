@@ -4,6 +4,7 @@ import { LoadingState, ErrorState } from '../components/UI'
 import { fetchAllHelpArticles, fetchHelpArticleById, searchHelpArticles } from '../data/helpService'
 import { renderMarkdown } from '../components/help/markdown'
 import { useHelp } from '../components/help/HelpProvider'
+import { groupHelpArticlesByCategory } from '../lib/helpCategories'
 
 // ---------------------------------------------------------------------------
 // HelpCenterPage — the /help full library page.
@@ -102,19 +103,10 @@ export default function HelpCenterPage({ initialSlug }) {
     return () => { cancelled = true; clearTimeout(t) }
   }, [query, audience])
 
-  // Group articles by category for the sidebar TOC.
-  const grouped = useMemo(() => {
-    const map = new Map()
-    for (const a of articles) {
-      const cat = a.ha_category || 'Other'
-      if (!map.has(cat)) map.set(cat, [])
-      map.get(cat).push(a)
-    }
-    // Sort categories alphabetically, articles by title within each.
-    const arr = [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
-    for (const [, list] of arr) list.sort((a, b) => a.ha_title.localeCompare(b.ha_title))
-    return arr
-  }, [articles])
+  // Group articles by category for the sidebar TOC. The heading is resolved by
+  // the shared rule, so a category typed with a different capital does not
+  // split into a second heading here while LEAP Pad shows it as one.
+  const grouped = useMemo(() => groupHelpArticlesByCategory(articles), [articles])
 
   if (loading) return <LoadingState />
   if (error) return <ErrorState error={error} />
