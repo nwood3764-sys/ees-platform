@@ -22,6 +22,18 @@
 
 /* eslint-disable */
 
+// The page furniture every EES / Sealed proposal shares — one definition, in
+// src/lib/proposalPdfKit.js. Aliased to the names the ported render code below
+// already uses, so that code stays byte-for-byte the approved original.
+import {
+  stateFullName, contactWithTitle, newProposalPdf,
+  money as _money, qty as _qty, phone as _phone,
+  stampEesFooters as _stampEesFooters, stampSealedFooters as _stampSealedFooters,
+} from './proposalPdfKit.js'
+
+// _pdfNew: the kit takes the lazily-loaded jsPDF constructor explicitly.
+function _pdfNew(margin){ return newProposalPdf(_jspdf, margin); }
+
 // ---- module state standing in for the standalone app's globals -------------
 let _jspdf = null;                 // jsPDF constructor, loaded lazily
 let _fields = {};                  // the PJ_* form fields, supplied by the caller
@@ -426,12 +438,7 @@ const BANK={
 // back to the entered install/owner city·state·zip. Drives the state-specific
 // incentive rules (NC vs WI) in invoiceModel(). Empty string when unknown.
 
-// --- ported: stateFullName (index.html 3568) ---
-function stateFullName(st){return {WI:'Wisconsin',NC:'North Carolina',CO:'Colorado',MI:'Michigan',IN:'Indiana'}[st]||'Wisconsin';}
 
-// --- ported: contactWithTitle (index.html 3265,3266) ---
-function contactWithTitle(F){const n=(F.pjContact||'').trim(),tt=(F.pjContactTitle||'').trim();
-  return n?(tt?n+' - '+tt:n):'';}
 
 // --- ported: buildingState (index.html 3559,3567) ---
 function buildingState(){
@@ -444,41 +451,8 @@ function buildingState(){
 // Full state name for the EES legal entity + program labels ("Energy Efficiency
 // Services of <State>", "<State> Inflation Reduction Act HOMES Program").
 
-// --- ported: _pdfNew (index.html 3773,3789) ---
-function _pdfNew(margin){
-  const jsPDF=_jspdf;
-  const d=new jsPDF({unit:'pt',format:'letter'});
-  const W=612,H=792,M=margin||40,CW=W-2*M;
-  const C={navy:[28,61,94],teal:[29,120,116],tealD:[21,94,91],soft:[251,246,234],obrd:[224,196,140],
-    line:[217,224,232],green:[241,247,242],ink:[34,43,53],mut:[122,135,152],
-    blueBg:[234,242,250],blueBr:[185,211,234],blueTx:[31,78,121],accent:[91,127,166],red:[192,57,43],
-    sealBlue:[47,128,214],zebra:[242,247,253]};
-  const st={y:M};
-  const font=(sz,style)=>{d.setFont('helvetica',style||'normal');d.setFontSize(sz);};
-  const t=(x,yy,txt,o)=>d.text(String(txt),x,yy,o||{});
-  const wrap=(txt,w)=>d.splitTextToSize(String(txt),w);
-  const need=h=>{if(st.y+h>H-M-16){d.addPage();st.y=M;}};
-  return {d,W,H,M,CW,C,st,font,t,wrap,need,
-    fill:c=>d.setFillColor(c[0],c[1],c[2]), stroke:c=>d.setDrawColor(c[0],c[1],c[2]),
-    tc:c=>d.setTextColor(c[0],c[1],c[2])};
-}
 
-// --- ported: _money/_qty (index.html 3790,3791) ---
-function _money(v){return '$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function _qty(q){return q!=null?Number(q).toLocaleString('en-US'):'';}
 
-// --- ported: _phone (index.html 3794,3805) ---
-function _phone(s){
-  if(!s) return '';
-  const raw=String(s).trim();
-  const em=raw.match(/(?:ext\.?|x|extension)\s*(\d+)\s*$/i);
-  const ext=em?em[1]:'';
-  let digits=(em?raw.slice(0,em.index):raw).replace(/\D/g,'');
-  if(digits.length===11 && digits[0]==='1') digits=digits.slice(1);
-  if(digits.length!==10) return raw;
-  const out='('+digits.slice(0,3)+') '+digits.slice(3,6)+'-'+digits.slice(6);
-  return ext?out+' ext. '+ext:out;
-}
 
 
 // --- ported: invoiceModel (index.html 3571,3645) ---
@@ -560,38 +534,10 @@ function invoiceModel(){
     fields:{..._fields}};
 }
 
-// --- ported: _stampEesFooters (index.html 4044,4060) ---
-function _stampEesFooters(P,state,docDate){
-  const {d,W,H,M,font,t,stroke,tc}=P;
-  const fy=H-40, N=d.getNumberOfPages();
-  const line1='Energy Efficiency Services of '+stateFullName(state)+'    |    112 Owen Rd. PO Box 6141, Monona, WI 53716';
-  const line2=state==='NC'?'ncira@ees-nc.org    |    (704) 990-5614':'ira@ees-wi.org    |    (608) 460-7419';
-  for(let p=1;p<=N;p++){
-    d.setPage(p);
-    stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
-    tc([122,135,152]); font(8,'normal');   t(W/2,fy+12,line1,{align:'center'});
-    tc([122,135,152]); font(7.5,'italic');  t(W/2,fy+22,line2,{align:'center'});
-    if(docDate){tc([122,135,152]); font(8,'normal'); t(M,fy+12,'Date: '+docDate);}
-    if(N>1){tc([122,135,152]); font(8,'normal'); t(W-M,fy+12,'Page '+p+' of '+N,{align:'right'});}
-  }
-}
 
 /* Footer for the Sealed proposal / invoice: the document number on every page
    (so shuffled pages can be traced) plus Page X of Y. Runs after all content. */
 
-// --- ported: _stampSealedFooters (index.html 4061,4076) ---
-function _stampSealedFooters(P,docLabel,docNo,docDate){
-  const {d,W,H,M,font,t,stroke,tc}=P;
-  const fy=H-24, N=d.getNumberOfPages();
-  const left=[docNo?(docLabel+' No.: '+docNo):'', docDate?('Date: '+docDate):''].filter(Boolean).join('    \u00b7    ');
-  for(let p=1;p<=N;p++){
-    d.setPage(p);
-    stroke([200,206,214]); d.setLineWidth(.75); d.line(M,fy,W-M,fy);
-    tc([122,135,152]); font(8,'normal');
-    if(left) t(M,fy+12,left);
-    t(W-M,fy+12,'Page '+p+' of '+N,{align:'right'});
-  }
-}
 
 /* ===== HEAR model + proposal ================================================
    Low-income (<=80% AMI): 100% of project cost, up to the federal per-measure

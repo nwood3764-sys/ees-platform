@@ -40,6 +40,12 @@ export const WI_IRA_PAYMENT_REQUEST_KEY = 'wi_ira_mf_homes_project_payment_reque
 // "Project Reservation" and sources every other field from the enrollment.
 export const WI_IRA_PROJECT_RESERVATION_KEY = 'wi_ira_mf_homes_project_reservation'
 
+// The same Focus On Energy submittal form, filed for the HEAR programme from a
+// HEAR Project Reservation ENROLLMENT. A separate target (and a separate
+// server-side resolver) because the record it reads is a different programme's
+// filing — the form itself is the same one.
+export const WI_IRA_HEAR_PROJECT_RESERVATION_KEY = 'wi_ira_mf_hear_project_reservation'
+
 // The pure rules live in src/lib/externalFormPrefill.js so they can be tested
 // without a browser or a database. Re-exported here so existing importers of
 // this module are unchanged.
@@ -106,4 +112,10 @@ export function openAssessmentApplicationForm(incentiveApplicationId, targetWind
 // Reservation enrollment.
 export function openProjectReservationForm(enrollmentId, targetWindow) {
   return openExternalPrefilledForm(enrollmentId, WI_IRA_PROJECT_RESERVATION_KEY, targetWindow)
+}
+
+// The Project Reservation submittal, opened from the HEAR Project Reservation
+// enrollment.
+export function openHearProjectReservationForm(enrollmentId, targetWindow) {
+  return openExternalPrefilledForm(enrollmentId, WI_IRA_HEAR_PROJECT_RESERVATION_KEY, targetWindow)
 }

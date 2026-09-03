@@ -23,6 +23,7 @@ import { listDocuments, signedUrl, uploadDocument } from './storageService'
 import { proxiedStorageUrl } from '../lib/reportFileLinks'
 import { extractPdfText } from './paperworkService'
 import { computeHomesModel, generateHomesProposalBlob } from '../lib/homesProposal'
+import { loadEnrollmentProposalContext, toInt, fmtDate } from './enrollmentProposalContext'
 
 // The enrollment record type this proposal is built for.
 export const HOMES_PROPOSAL_RECORD_TYPE = 'WI-IRA-MF-HOMES-Project-Reservation'
@@ -30,27 +31,8 @@ export const HOMES_PROPOSAL_RECORD_TYPE = 'WI-IRA-MF-HOMES-Project-Reservation'
 const ASSET_SCORE_DOCUMENT_TYPE = 'reservation_customer_report'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// "6737 W Washington Street, West Allis, WI 53214" -> street line + city/state/zip line
-function splitAddress(full) {
-  if (!full) return { addr: '', csz: '' }
-  const s = String(full).trim()
-  const i = s.indexOf(',')
-  if (i < 0) return { addr: s, csz: '' }
-  return { addr: s.slice(0, i).trim(), csz: s.slice(i + 1).trim() }
-}
 
-function toInt(v) {
-  if (v == null || v === '') return null
-  const n = parseInt(v, 10)
-  return Number.isFinite(n) ? n : null
-}
 
-// A stored date ('YYYY-MM-DD' or ISO) -> 'MM/DD/YYYY' for the document; '' when absent.
-function fmtDate(v) {
-  if (!v) return ''
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v))
-  return m ? `${m[2]}/${m[3]}/${m[1]}` : String(v)
-}
 
 /**
  * Load everything one enrollment needs for its HOMES proposal, WITHOUT reading
@@ -59,78 +41,10 @@ function fmtDate(v) {
  * Score PDFs (null when absent).
  */
 export async function loadHomesProposalContext(enrollmentId) {
-  if (!enrollmentId) throw new Error('loadHomesProposalContext: enrollmentId is required')
-
-  const { data: enr, error } = await supabase
-    .from('enrollments').select('*').eq('id', enrollmentId).maybeSingle()
-  if (error) throw new Error(error.message)
-  if (!enr) throw new Error('Enrollment not found')
-
-  const { data: rt } = enr.enrollment_record_type
-    ? await supabase.from('picklist_values')
-        .select('picklist_value, picklist_label').eq('id', enr.enrollment_record_type).maybeSingle()
-    : { data: null }
-
-  const [{ data: prop }, { data: bld }] = await Promise.all([
-    enr.property_id
-      ? supabase.from('properties').select('*').eq('id', enr.property_id).maybeSingle()
-      : Promise.resolve({ data: null }),
-    enr.building_id
-      ? supabase.from('buildings')
-          .select('building_total_units, building_number_of_units').eq('id', enr.building_id).maybeSingle()
-      : Promise.resolve({ data: null }),
-  ])
-
-  // Owner and contractor are account lookups; resolve their names. The enrollment
-  // carries a PRIMARY contractor and, when enrollment_has_support_contractor is
-  // set, a SECONDARY (support) contractor — both are listed on the documents.
-  const acctIds = [enr.enrollment_owner, enr.enrollment_contractor_account_id,
-    enr.enrollment_support_contractor_account_id]
-    .filter(v => v && UUID.test(String(v)))
-  const { data: accts } = acctIds.length
-    ? await supabase.from('accounts').select('id, account_name').in('id', acctIds)
-    : { data: [] }
-  const acctName = id => (accts || []).find(a => a.id === id)?.account_name || null
-  const ownerName = UUID.test(String(enr.enrollment_owner || ''))
-    ? (acctName(enr.enrollment_owner) || '') : (enr.enrollment_owner || '')
-  const contractor = acctName(enr.enrollment_contractor_account_id) || ''
-  const secondaryContractor = enr.enrollment_has_support_contractor
-    ? (acctName(enr.enrollment_support_contractor_account_id) || '') : ''
-
-  const owner = splitAddress(enr.enrollment_owner_address)
-  const units = toInt(enr.enrollment_occupied_units)
-    || toInt(bld?.building_total_units) || toInt(bld?.building_number_of_units)
-    || toInt(prop?.property_total_units) || toInt(prop?.property_total_number_of_units) || null
-  const csz = [prop?.property_city,
-    [prop?.property_state, prop?.property_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
-
-  const fields = {
-    pjOwner:       ownerName || '',
-    pjOwnerAddr:   owner.addr,
-    pjOwnerCsz:    owner.csz,
-    pjContact:     enr.enrollment_contact_name  || '',
-    pjContactTitle:enr.enrollment_contact_title || '',
-    pjEmail:       enr.enrollment_contact_email || '',
-    pjPhone:       enr.enrollment_contact_phone || '',
-    pjPropName:    prop?.property_name || '',
-    pjInstallAddr: prop?.property_street || '',
-    pjCsz:         csz,
-    pjIQ:          prop?.property_ira_income_qualification_number || '',
-    pjProjInvNo:   enr.enrollment_record_number || '',
-    pjInvNo:       enr.enrollment_record_number || '',
-    pjInvDate:     new Date().toISOString().slice(0, 10),
-    pjEstEnd:      fmtDate(enr.enrollment_estimated_completion_date),
-    pjSecondaryContractor: secondaryContractor || '',
-  }
-
+  const ctx = await loadEnrollmentProposalContext(enrollmentId)
   const docs = await listDocuments('enrollments', enrollmentId).catch(() => [])
-  const asr = (docs || []).filter(d =>
-    d.document_type === ASSET_SCORE_DOCUMENT_TYPE
-    && /\.pdf$/i.test(d.name || d.storage_path || ''))
-  const baseDoc = asr.find(d => /baseline/i.test(d.name || '')) || null
-  const impDoc  = asr.find(d => /improved/i.test(d.name || '')) || null
-
-  return { enr, recordTypeValue: rt?.picklist_value || null, fields, units, contractor, secondaryContractor, baseDoc, impDoc, property: prop }
+  const { baseDoc, impDoc } = pickAssetScoreDocs(docs)
+  return { ...ctx, baseDoc, impDoc }
 }
 
 // The three documents this feature produces off one Project Reservation

@@ -30,7 +30,7 @@ const LogActivityModal                     = lazy(() => import('./LogActivityMod
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
 const SubmittedEnrollmentModal      = lazy(() => import('./SubmittedEnrollmentModal'))
-const HomesProposalModal            = lazy(() => import('./HomesProposalModal'))
+const GeneratedDocumentModal        = lazy(() => import('./GeneratedDocumentModal'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -55,7 +55,7 @@ import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
 import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, openPaymentRequestForm,
-         openProjectReservationForm,
+         openProjectReservationForm, openHearProjectReservationForm,
          loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
@@ -7050,6 +7050,30 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }, [recordId, openingProjectReservation])
 
+  // The same submittal form, opened from the HEAR Project Reservation
+  // enrollment. Its own handler (and its own target key) so a HEAR filing is
+  // never built by the HOMES resolver.
+  const [openingHearReservation, setOpeningHearReservation] = useState(false)
+  const handleOpenHearProjectReservationForm = useCallback(async () => {
+    if (openingHearReservation) return
+    const win = window.open('', '_blank')
+    setOpeningHearReservation(true)
+    try {
+      const { url, error, missing } = await openHearProjectReservationForm(recordId, win)
+      if (missing && missing.length) {
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the project reservation application.')
+      }
+    } finally {
+      setOpeningHearReservation(false)
+    }
+  }, [recordId, openingHearReservation])
+
   // The assessment rebate claim, from the WI-IRA-MF-HOMES-AUDIT incentive
   // application. Same shape as the pre-approval handler above and it shares the
   // same missing-fields modal — the gate is the form's own required set either
@@ -7179,7 +7203,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
   const [showSubmittedEnrollmentModal, setShowSubmittedEnrollmentModal] = useState(false)
-  const [homesModalKind, setHomesModalKind] = useState(null)   // null | 'proposal' | 'invoice' | 'audit'
+  // Which built-from-the-record document is open, keyed by src/data/generatedDocuments.js.
+  const [documentModalKind, setDocumentModalKind] = useState(null)
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -9584,11 +9609,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
-    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setHomesModalKind('proposal'),
-    [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setHomesModalKind('invoice'),
-    [ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE]:   () => setHomesModalKind('audit'),
+    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setDocumentModalKind('proposal'),
+    [ACTION_KEYS.GENERATE_HEAR_PROPOSAL]:              () => setDocumentModalKind('hear_proposal'),
+    [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setDocumentModalKind('invoice'),
+    [ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE]:   () => setDocumentModalKind('audit'),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_APPLICATION]: handleOpenProjectReservationForm,
+    [ACTION_KEYS.GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION]: handleOpenHearProjectReservationForm,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
@@ -10513,15 +10540,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           />
         )}
 
-        {/* WI IRA Multifamily HOMES documents — proposal + assessment invoice on
-            enrollments, payment-request invoice on incentive applications. Each
-            action is gated to its own object + record type in recordActions. */}
-        {homesModalKind && (tableName === 'enrollments' || tableName === 'incentive_applications') && (
-          <HomesProposalModal
+        {/* Documents built from the record — the HOMES and HEAR proposals and
+            the assessment invoice on enrollments, the payment-request invoice on
+            incentive applications. Each action is gated to its own object +
+            record type in recordActions; the kinds live in generatedDocuments. */}
+        {documentModalKind && (tableName === 'enrollments' || tableName === 'incentive_applications') && (
+          <GeneratedDocumentModal
             recordObject={tableName}
             recordId={recordId}
-            kind={homesModalKind}
-            onClose={() => setHomesModalKind(null)}
+            kind={documentModalKind}
+            onClose={() => setDocumentModalKind(null)}
             onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}
