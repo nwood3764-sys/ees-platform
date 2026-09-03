@@ -71,11 +71,15 @@ export function groupsFromFormSubmission(map, payload) {
   const fields = map?.fields || []
   if (!fields.length) return []
 
-  // param → the value actually sent. mapPayloadToParams applies each field's
-  // transform and drops blanks, exactly as the URL builder does.
+  // param → every value actually sent. mapPayloadToParams applies each field's
+  // transform and drops blanks, exactly as the URL builder does. A checkbox
+  // question sends several values under one param, and all of them are the
+  // record of what was submitted -- printing only the first would understate
+  // the scope of work on the very document kept as evidence of it.
   const sent = new Map()
   for (const { param, value } of mapPayloadToParams(payload || {}, fields)) {
-    if (!sent.has(param)) sent.set(param, value)
+    if (!sent.has(param)) sent.set(param, [])
+    sent.get(param).push(value)
   }
 
   const rows = []
@@ -84,7 +88,7 @@ export function groupsFromFormSubmission(map, payload) {
     rows.push({
       column: f.leap_field,
       label: f.field_label || f.leap_field,
-      value: sent.get(f.param),
+      value: sent.get(f.param).join(', '),
     })
   }
   if (!rows.length) return []

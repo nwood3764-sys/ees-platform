@@ -19,7 +19,12 @@
 
 import { supabase } from '../lib/supabase'
 import { storageSafeFileName } from '../lib/storageKey'
+import { CONVERSATION_ANCHORS, resolveAnchorFromConversation } from '../lib/conversationAnchors'
 
+// The thread's own columns, plus every anchor column there is. The anchors are
+// taken from CONVERSATION_ANCHORS rather than listed again: a thread fetched
+// without its anchor column reads as unanchored, and a reply on it would be
+// refused for a parent it actually has.
 const CONV_COLUMNS = [
   'id',
   'conv_record_number',
@@ -32,17 +37,7 @@ const CONV_COLUMNS = [
   'conv_last_message_direction',
   'conv_last_message_preview',
   'conv_inbound_unread_count',
-  'contact_id',
-  'account_id',
-  'project_id',
-  'service_appointment_id',
-  'work_order_id',
-  'incentive_application_id',
-  'opportunity_id',
-  'assessment_id',
-  'building_id',
-  'property_id',
-  'unit_id',
+  ...CONVERSATION_ANCHORS.map(a => a.fk),
 ].join(', ')
 
 const MSG_COLUMNS = [
@@ -68,20 +63,10 @@ const MSG_COLUMNS = [
 ].join(', ')
 
 // FK columns we know how to filter by. Defensive guard so an admin pointing
-// the widget at an arbitrary FK doesn't silently fall through.
-const SUPPORTED_FK = new Set([
-  'contact_id',
-  'account_id',
-  'project_id',
-  'service_appointment_id',
-  'work_order_id',
-  'incentive_application_id',
-  'opportunity_id',
-  'assessment_id',
-  'building_id',
-  'property_id',
-  'unit_id',
-])
+// the widget at an arbitrary FK doesn't silently fall through — derived from
+// the one anchor definition, so an anchor is never supported in the palette
+// and unsupported here.
+const SUPPORTED_FK = new Set(CONVERSATION_ANCHORS.map(a => a.fk))
 
 /**
  * Threads for the parent record, newest activity first.
@@ -201,52 +186,23 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
     if (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
       throw new Error('Customer email on this thread is not a valid email address.')
     }
-    // Anchor — the caller must supply this for email; conversations carry the
-    // four canonical FKs plus six extended anchors and send-email-v1 enforces
-    // one anchor. Resolve from the conversation's own FKs in priority order
-    // (most-specific leaf → most-canonical root): service_appointment >
-    // work_order > assessment > incentive_application > project > opportunity
-    // > unit > building > property > account > contact.
+    // Anchor — the caller must supply this for email; send-email-v1 enforces
+    // one. Otherwise it is resolved from the conversation's own FKs by
+    // conversationAnchors.js, which holds the priority order (most specific
+    // leaf first, most canonical root last) in one place rather than as an
+    // if/else chain that has to be edited whenever an anchor is added.
     let anchorObject = null
     let anchorRecordId = null
     if (opts.anchorObject && opts.anchorRecordId) {
       anchorObject = opts.anchorObject
       anchorRecordId = opts.anchorRecordId
-    } else if (conversation.service_appointment_id) {
-      anchorObject = 'service_appointments'
-      anchorRecordId = conversation.service_appointment_id
-    } else if (conversation.work_order_id) {
-      anchorObject = 'work_orders'
-      anchorRecordId = conversation.work_order_id
-    } else if (conversation.assessment_id) {
-      anchorObject = 'assessments'
-      anchorRecordId = conversation.assessment_id
-    } else if (conversation.incentive_application_id) {
-      anchorObject = 'incentive_applications'
-      anchorRecordId = conversation.incentive_application_id
-    } else if (conversation.project_id) {
-      anchorObject = 'projects'
-      anchorRecordId = conversation.project_id
-    } else if (conversation.opportunity_id) {
-      anchorObject = 'opportunities'
-      anchorRecordId = conversation.opportunity_id
-    } else if (conversation.unit_id) {
-      anchorObject = 'units'
-      anchorRecordId = conversation.unit_id
-    } else if (conversation.building_id) {
-      anchorObject = 'buildings'
-      anchorRecordId = conversation.building_id
-    } else if (conversation.property_id) {
-      anchorObject = 'properties'
-      anchorRecordId = conversation.property_id
-    } else if (conversation.account_id) {
-      anchorObject = 'accounts'
-      anchorRecordId = conversation.account_id
-    } else if (conversation.contact_id) {
-      anchorObject = 'contacts'
-      anchorRecordId = conversation.contact_id
     } else {
-      throw new Error('Email reply requires an anchor record but the thread has no resolvable parent.')
+      const resolved = resolveAnchorFromConversation(conversation)
+      if (!resolved) {
+        throw new Error('Email reply requires an anchor record but the thread has no resolvable parent.')
+      }
+      anchorObject = resolved.anchorObject
+      anchorRecordId = resolved.anchorRecordId
     }
 
     // Reply subject default: "Re: <original subject>" if not already prefixed.

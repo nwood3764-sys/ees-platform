@@ -13,6 +13,7 @@
 
 import {
   applyTransform, mapPayloadToParams, buildPrefillUrl, findMissingRequiredFields,
+  fieldsToEnterByHand,
 } from '../src/lib/externalFormPrefill.js'
 
 let pass = 0, fail = 0
@@ -161,6 +162,102 @@ eq('an empty payload reports every required question once',
   findMissingRequiredFields({}, FIELDS).length, 24)
 eq('Assessment Date is listed once, not three times',
   findMissingRequiredFields({}, FIELDS).filter(l => l === 'Assessment Date').length, 1)
+
+// ── a checkbox question: several answers, one parameter ───────────────────
+//
+// "What work will be completed?" on the IRA HEAR submittal is `whatWork346[]`,
+// and a project almost always has more than one measure. Before this, the URL
+// was built with URLSearchParams.set, which keeps only the LAST value — so a
+// four-measure project opened the form claiming one measure, with nothing on
+// screen to say the other three had been dropped.
+const MEASURES_MAP = {
+  base_url: 'https://focusonenergy.jotform.com/251176242544858',
+  fields: [
+    { leap_field: 'work_measures', param: 'whatWork346[]', field_label: 'What work will be completed?', required: true },
+    { leap_field: 'income_level', param: 'whichIncome', field_label: 'Income level', required: true,
+      option_value_map: { 'Low-Income': 'Low- Income' } },
+  ],
+}
+const MEASURES = {
+  work_measures: ['Air Sealing & Insulation', 'ENERGY STAR Heat Pump Water Heater', 'Electrical Load Center'],
+  income_level: 'Low-Income',
+}
+const measureParams = mapPayloadToParams(MEASURES, MEASURES_MAP.fields)
+eq('every measure becomes its own entry', measureParams.filter(p => p.param === 'whatWork346[]').length, 3)
+eq('the last measure is not the only one',
+  measureParams.filter(p => p.param === 'whatWork346[]').map(p => p.value).join('|'),
+  'Air Sealing & Insulation|ENERGY STAR Heat Pump Water Heater|Electrical Load Center')
+
+const measured = buildPrefillUrl(MEASURES_MAP, MEASURES)
+const mqs = new URL(measured.url).searchParams
+eq('the query string repeats the parameter', mqs.getAll('whatWork346[]').length, 3)
+eq('the ampersand in a measure survives encoding',
+  mqs.getAll('whatWork346[]')[0], 'Air Sealing & Insulation')
+// A count of ANSWERS would say 4 here. The user is told how many QUESTIONS the
+// form received, and three ticked boxes in one list is one question.
+eq('filledCount counts questions, not ticks', measured.filledCount, 2)
+// The option-value map applies per element, and to a scalar as before.
+eq('the income radio matches the form\'s own spelling', mqs.get('whichIncome'), 'Low- Income')
+
+// An empty list is a question nobody answered, not an answered one.
+eq('an empty measure list sends nothing',
+  mapPayloadToParams({ work_measures: [] }, MEASURES_MAP.fields).length, 0)
+eq('an empty measure list is reported as missing',
+  findMissingRequiredFields({ work_measures: [], income_level: 'Low-Income' }, MEASURES_MAP.fields)
+    .includes('What work will be completed?'), true)
+eq('a filled measure list is not reported as missing',
+  findMissingRequiredFields(MEASURES, MEASURES_MAP.fields).length, 0)
+// A blank inside the list is skipped rather than sent as an empty tick.
+eq('a blank inside the list is skipped',
+  mapPayloadToParams({ work_measures: ['Air Sealing & Insulation', '', null] }, MEASURES_MAP.fields).length, 1)
+
+// ── a question the form will not take from a URL ──────────────────────────
+//
+// The HEAR submittal's "Estimated project completion date" is a Jotform
+// control_widget whose settings carry todayDate:Yes -- it stamps today over
+// whatever the query string supplied, AFTER prefill has run. Tested on the live
+// form: the parameter is accepted and then overwritten, which is worse than not
+// sending it, because the box comes up looking answered. So the value is kept
+// out of the URL and handed to the person instead -- resolved through the same
+// transform, so what they are handed reads the way the form wants it.
+const HANDOVER_MAP = {
+  base_url: 'https://focusonenergy.jotform.com/251176242544858',
+  fields: [
+    { leap_field: 'occupied_units', param: 'numberOf284', field_label: 'Number of Occupied Units', required: true },
+    { leap_field: 'estimated_completion_date', param: 'typeA148', transform: 'date_mmddyyyy',
+      field_label: 'Estimated project completion date', required: true, url_prefillable: false },
+  ],
+}
+const HANDOVER = { occupied_units: 8, estimated_completion_date: '2026-09-25' }
+
+const handoverUrl = buildPrefillUrl(HANDOVER_MAP, HANDOVER)
+eq('an un-prefillable answer stays out of the query string',
+  new URL(handoverUrl.url).searchParams.has('typeA148'), false)
+eq('the rest of the form is still filled',
+  new URL(handoverUrl.url).searchParams.get('numberOf284'), '8')
+eq('and it is not counted as filled', handoverUrl.filledCount, 1)
+
+const handed = fieldsToEnterByHand(HANDOVER, HANDOVER_MAP.fields)
+eq('the answer is handed over rather than dropped', handed.length, 1)
+eq('handed over under its own question label', handed[0].label, 'Estimated project completion date')
+// 2026-09-25 would be useless to retype into an m/d/y box.
+eq('handed over in the format the form wants', handed[0].value, '09/25/2026')
+// Only the un-prefillable ones; a normal field is not something to retype.
+eq('a URL-filled answer is never handed over',
+  handed.some(h => h.label === 'Number of Occupied Units'), false)
+// Nothing to hand over when there is no value -- a required blank is the
+// missing-fields gate's job, not this one's.
+eq('a blank is not handed over',
+  fieldsToEnterByHand({ occupied_units: 8 }, HANDOVER_MAP.fields).length, 0)
+// The flag is opt-in: every existing map row omits it and must keep sending.
+eq('a field with no flag still goes in the URL',
+  mapPayloadToParams({ occupied_units: 8 }, HANDOVER_MAP.fields).length, 1)
+eq('and is not handed over', fieldsToEnterByHand({ occupied_units: 8 }, [HANDOVER_MAP.fields[0]]).length, 0)
+// Control: with the flag off, the parameter goes back into the URL -- so the
+// day the widget setting changes, one boolean is the whole fix.
+const PREFILLABLE = { ...HANDOVER_MAP, fields: HANDOVER_MAP.fields.map(f => ({ ...f, url_prefillable: true })) }
+eq('flipping the flag back sends it again',
+  new URL(buildPrefillUrl(PREFILLABLE, HANDOVER).url).searchParams.get('typeA148'), '09/25/2026')
 
 console.log(`external-form-prefill: ${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

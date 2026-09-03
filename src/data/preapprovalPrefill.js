@@ -52,7 +52,7 @@ export const WI_IRA_HEAR_PROJECT_RESERVATION_KEY = 'wi_ira_mf_hear_project_reser
 export {
   applyTransform, mapPayloadToParams, buildPrefillUrl, findMissingRequiredFields,
 } from '../lib/externalFormPrefill'
-import { buildPrefillUrl, findMissingRequiredFields } from '../lib/externalFormPrefill'
+import { buildPrefillUrl, findMissingRequiredFields, fieldsToEnterByHand } from '../lib/externalFormPrefill'
 
 // Load the resolved record values + the field map for a target.
 //
@@ -85,9 +85,13 @@ export async function openExternalPrefilledForm(recordId, targetKey, targetWindo
     const missing = findMissingRequiredFields(payload, map.fields)
     if (missing.length) return { missing, formName: map.name }
     const { url, filledCount } = buildPrefillUrl(map, payload)
+    // Answers the form will not take from a URL (a Jotform widget in its own
+    // iframe). The form still opens -- these are handed to the person to enter,
+    // never a reason to block the filing.
+    const byHand = fieldsToEnterByHand(payload, map.fields)
     if (targetWindow) targetWindow.location = url
     else window.open(url, '_blank', 'noopener')
-    return { url, filledCount, formName: map.name }
+    return { url, filledCount, byHand, formName: map.name }
   } catch (e) {
     console.warn('open prefilled form failed', e)
     return { error: e?.message || 'Could not build the form.' }

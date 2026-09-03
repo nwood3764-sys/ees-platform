@@ -13,7 +13,7 @@ import { fetchOpportunities } from '../data/outreachService'
 const CODE_SECTIONS = [
   { id:'home',        label:'Home'                   },
   { id:'assessments', label:'Assessments'            },
-  { id:'applications',label:'Incentive Applications' },
+  { id:'applications',label:'Incentives'             },
   { id:'efr',         label:'EFR Reports'            },
   { id:'opportunities', label:'Opportunities'        },
 ]
@@ -36,7 +36,7 @@ const IA_COLS = [
   { field:'name',          label:'Application',type:'text',   sortable:true, filterable:true  },
   { field:'property',      label:'Property',   type:'text',   sortable:true, filterable:true  },
   { field:'program',       label:'Program',    type:'select', sortable:true, filterable:true, options:['WI-IRA-MF-HOMES','WI-IRA-MF-HEAR','WI-IRA-SF-HOMES','CO - Denver','WI - FOE','MI-IRA-MF-HOMES'] },
-  { field:'status',        label:'Status',     type:'select', sortable:true, filterable:true, options:['Incentive Application To Be Prepared','Incentive Application To Be Verified','Incentive Application To Be Submitted','Incentive Application Submitted — Awaiting Program Response','Incentive Application Pre-Approved','Incentive Application Approved','Incentive Application Corrections Needed','Incentive Application Denied'] },
+  { field:'status',        label:'Status',     type:'select', sortable:true, filterable:true, options:['Incentive To Be Prepared','Incentive To Be Verified','Incentive To Be Submitted','Incentive Submitted — Awaiting Program Response','Incentive Pre-Approved','Incentive Approved','Incentive Corrections Needed','Incentive Denied'] },
   { field:'owner',         label:'Owner',      type:'select', sortable:true, filterable:true, options:['Marcus Reid','Priya Nair','Lisa Tanaka'] },
   { field:'amount',        label:'Amount',     type:'text',   sortable:true, filterable:false },
   { field:'submittedDate', label:'Submitted',  type:'date',   sortable:true, filterable:true  },
@@ -65,9 +65,9 @@ const ASMT_VIEWS = [
 ]
 const IA_VIEWS = [
   { id:'IV-01', name:'All Applications',    filters:[], sortField:'submittedDate', sortDir:'desc' },
-  { id:'IV-02', name:'Approved',            filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive Application Approved' }], sortField:'property', sortDir:'asc' },
-  { id:'IV-03', name:'Corrections Needed',  filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive Application Corrections Needed' }], sortField:'property', sortDir:'asc' },
-  { id:'IV-04', name:'To Be Submitted',     filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive Application To Be Submitted' }], sortField:'property', sortDir:'asc' },
+  { id:'IV-02', name:'Approved',            filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive Approved' }], sortField:'property', sortDir:'asc' },
+  { id:'IV-03', name:'Corrections Needed',  filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive Corrections Needed' }], sortField:'property', sortDir:'asc' },
+  { id:'IV-04', name:'To Be Submitted',     filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive To Be Submitted' }], sortField:'property', sortDir:'asc' },
 ]
 const EFR_VIEWS = [{ id:'EV-01', name:'All EFR Reports', filters:[], sortField:'scheduledDate', sortDir:'asc' }]
 
@@ -164,7 +164,7 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
     return () => { cancelled = true }
   }, [])
 
-  const corrections = applications.filter(a => a.status === 'Incentive Application Corrections Needed').length
+  const corrections = applications.filter(a => a.status === 'Incentive Corrections Needed').length
   const counts = { assessments: assessments.length, applications: applications.length, efr: efrReports.length, opportunities: opportunities.length }
   const urgentSections = { home: corrections }
 

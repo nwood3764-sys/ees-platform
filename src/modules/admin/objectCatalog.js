@@ -43,7 +43,7 @@ const OBJECT_CATALOG_RAW = [
   { table: 'assessments',                   label: 'Assessment',                  pluralLabel: 'Assessments',         description: 'Energy audit / ASHRAE Level 2 assessment.' },
   { table: 'diagnostic_tests',              label: 'Diagnostic Test',             pluralLabel: 'Diagnostic Tests',         description: 'Blower door, duct leakage, combustion safety test.' },
   { table: 'income_qualifications',         label: 'Income Qualification',        pluralLabel: 'Income Qualifications',         description: 'Per-unit income qualification record.' },
-  { table: 'incentive_applications',        label: 'Incentive Application',       pluralLabel: 'Incentive Applications',         description: 'Program application submitted to an administering body.' },
+  { table: 'incentive_applications',        label: objectLabel('incentive_applications'), pluralLabel: objectLabelPlural('incentive_applications'), description: 'Program application submitted to an administering body.' },
   { table: 'property_programs',             label: 'Property Program',            pluralLabel: 'Property Programs',         description: 'Junction — which programs a property qualifies for.' },
   { table: 'efr_reports',                   label: 'EFR Report',                  pluralLabel: 'EFR Reports',         description: 'Electrification Feasibility Report (Denver).' },
   { table: 'mechanical_equipment',          label: 'Mechanical Equipment',        pluralLabel: 'Mechanical Equipment',         description: 'Existing equipment observed during audit.' },
@@ -175,7 +175,7 @@ const OBJECT_CATALOG_RAW = [
 // An object the registry does not name has no module home, and says so rather
 // than borrowing objectNav's navigation fallback, which would file every
 // configuration table under Field.
-import { objectNavFor } from '../../lib/objectNav.js'
+import { objectNavFor, objectLabel, objectLabelPlural } from '../../lib/objectNav.js'
 
 export const UNGROUPED_OBJECTS = 'Setup & configuration'
 

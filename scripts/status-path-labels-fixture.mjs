@@ -1,11 +1,12 @@
 // Fixture — what a status chevron is allowed to drop from a stage label.
 //
 // The rule shortens a chevron by removing the words every stage on the strip
-// shares, so nine incentive-application stages stop spending 40px each on the
-// words "Incentive Application". The danger is the other direction: a rule
-// that strips too eagerly makes two stages read the same, or cuts a word in
-// half, or removes grammar that carried the meaning. Every case below is a
-// real LEAP status set read off prod on 2026-09-01.
+// shares, so nine incentive stages stop spending width each on the object's
+// own name. The danger is the other direction: a rule that strips too eagerly
+// makes two stages read the same, or cuts a word in half, or removes grammar
+// that carried the meaning. Every case below is a real LEAP status set read
+// off prod, the incentive set as renamed on 2026-09-03 (it read "Incentive
+// Application ..." until the object was renamed to Incentive).
 
 import {
   sharedStatusLabelPrefix,
@@ -24,18 +25,18 @@ const eq = (label, actual, expected) => {
 
 // ── The set that prompted this: incentive_applications.ia_status ──────────
 const IA = [
-  'Incentive Application To Be Prepared',
-  'Incentive Application To Be Verified',
-  'Incentive Application To Be Submitted',
-  'Incentive Application Submitted — Awaiting Program Response',
-  'Incentive Application Pre-Approved',
-  'Incentive Application Approved',
-  'Incentive Application Corrections Needed',
-  'Incentive Application Denied',
-  'Incentive Application Withdrawn',
+  'Incentive To Be Prepared',
+  'Incentive To Be Verified',
+  'Incentive To Be Submitted',
+  'Incentive Submitted — Awaiting Program Response',
+  'Incentive Pre-Approved',
+  'Incentive Approved',
+  'Incentive Corrections Needed',
+  'Incentive Denied',
+  'Incentive Withdrawn',
 ]
-eq('incentive application prefix', sharedStatusLabelPrefix(IA), 'Incentive Application')
-eq('incentive application stages', stripSharedStatusPrefix(IA), [
+eq('incentive prefix', sharedStatusLabelPrefix(IA), 'Incentive')
+eq('incentive stages', stripSharedStatusPrefix(IA), [
   'To Be Prepared', 'To Be Verified', 'To Be Submitted',
   'Submitted — Awaiting Program Response', 'Pre-Approved', 'Approved',
   'Corrections Needed', 'Denied', 'Withdrawn',
@@ -106,10 +107,16 @@ eq('extra whitespace does not defeat the match',
 
 // ── The positive control: the labels as they render today ─────────────────
 // The strip's widest chevron before this rule, against after. If the rule ever
-// stops shortening, this is the check that says so.
+// stops shortening, this is the check that says so. The saving is the whole
+// shared prefix and nothing but it — stated as the prefix's own length rather
+// than a magic number, so renaming the object (2026-09-03, "Incentive
+// Application" → "Incentive") changes the size of the saving without
+// weakening the check.
+const prefix = sharedStatusLabelPrefix(IA)
 const before = Math.max(...IA.map(s => s.length))
 const after = Math.max(...stripSharedStatusPrefix(IA).map(s => s.length))
-eq('the widest chevron is materially shorter', after < before - 20, true)
+eq('every chevron loses the shared prefix and no more', after, before - (prefix.length + 1))
+eq('the widest chevron is shorter than it was', after < before, true)
 
 console.log(`status-path-labels-fixture  ${failures ? `${failures} FAILED` : 'all passed'}  (${checks} checks)`)
 process.exit(failures ? 1 : 0)

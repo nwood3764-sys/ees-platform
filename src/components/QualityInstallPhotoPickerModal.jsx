@@ -111,7 +111,7 @@ export default function QualityInstallPhotoPickerModal({ incentiveApplicationId,
       const lines = [
         data?.propertyName && `Property: ${data.propertyName}`,
         data?.opportunityName && `Opportunity: ${data.opportunityName}`,
-        rn && `Incentive Application: ${rn}`,
+        rn && `Incentive: ${rn}`,
       ].filter(Boolean)
       const { zipBlob, pdfBlob, baseName } = await buildPhotoPackage(
         { groups: assembledGroups, meta: { lines, baseSuffix: suffix } },
