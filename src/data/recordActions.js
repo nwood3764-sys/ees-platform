@@ -53,6 +53,7 @@ import { hasAssessmentReport } from '../lib/assessmentReport'
 // Which objects can produce a record of what they filed — declared in the pure
 // registry, never as a string comparison here.
 import { hasSubmittedEnrollment } from '../lib/submittedEnrollment'
+import { hasVentilationSupplementalDataSheet } from '../lib/ventilationSupplementalDataSheet'
 
 export const ACTION_KEYS = Object.freeze({
   EDIT:                    'edit',
@@ -71,6 +72,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_HOMES_PROPOSAL:                     'generate_homes_proposal',
   GENERATE_HEAR_PROPOSAL:                      'generate_hear_proposal',
   GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION: 'generate_hear_project_reservation_application',
+  REGENERATE_SUPPLEMENTAL_DATA_SHEET:          'regenerate_supplemental_data_sheet',
   GENERATE_HOMES_PAYMENT_INVOICE:              'generate_homes_payment_invoice',
   GENERATE_HOMES_ASSESSMENT_INVOICE:           'generate_homes_assessment_invoice',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
@@ -477,6 +479,29 @@ export const ACTION_REGISTRY = Object.freeze({
     // not been filed yet.
     isAvailable: ({ tableName, editing, record }) =>
       !editing && !!record?.id && hasSubmittedEnrollment(tableName),
+  },
+
+  // The Quality Installation Supplemental Data Sheet — one row per dwelling
+  // unit, naming the model installed in each, on the programme administrator's
+  // own workbook.
+  //
+  // It is generated automatically when the HEAR Project Reservation enrollment
+  // is created, so this action is REGENERATE, not Generate: the sheet already
+  // exists by the time anyone sees this menu. It is offered because the sheet
+  // is a snapshot of data that keeps moving — a unit added to the building, the
+  // fan model finally chosen on the line item — and a filing packet assembled
+  // from a stale snapshot is the failure this replaces.
+  regenerate_supplemental_data_sheet: {
+    key:                 ACTION_KEYS.REGENERATE_SUPPLEMENTAL_DATA_SHEET,
+    label:               'Regenerate Supplemental Data Sheet',
+    icon:                'M3 12a9 9 0 019-9 9 9 0 016.36 2.64L21 8 M21 3v5h-5 M21 12a9 9 0 01-9 9 9 9 0 01-6.36-2.64L3 16 M3 21v-5h5',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'menu',
+    defaultSortOrder:    47,
+    isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
+      !editing && !!record?.id
+      && hasVentilationSupplementalDataSheet(tableName, recordTypeValue),
   },
 
   // Project Reservation proposal for the WI IRA Multifamily HOMES program,
