@@ -28,8 +28,8 @@ import {
   submittedEnrollmentFor, buildSubmittedEnrollmentSummary, buildDocumentManifest,
   documentDownloadName, submittedEnrollmentFileName, submittedFieldValue,
 } from '../lib/submittedEnrollment'
-import { groupsFromLayout, printsFromLayout } from '../lib/submittedEnrollmentLayout'
-import { loadRecordDetailData } from './layoutService'
+import { groupsFromFormSubmission, formTargetForRecordType } from '../lib/submittedEnrollmentFields'
+import { loadAssessmentPrefill } from './preapprovalPrefill'
 
 // A Submitted Enrollment is filed with a program and read months later, so its
 // links have to outlive the session that made it. One year matches the life of
@@ -186,17 +186,14 @@ export async function loadSubmittedEnrollmentContext(enrollmentId) {
   // (related) field values under their dotted names, which is how the
   // contractor and payment blocks reach the page at all.
   let summary
-  if (printsFromLayout(rt?.picklist_value)) {
-    const detail = await loadRecordDetailData('enrollments', enrollmentId)
-    // Lookup labels the record page already resolved -- contractor account and
-    // contact names -- so those need no second round trip.
-    const seeded = new Map()
-    for (const [id, v] of detail.lookups || []) if (v?.label) seeded.set(id, v.label)
-    const build = (labels) => groupsFromLayout(detail.sections, (f) =>
-      submittedFieldValue(detail.record, f.name, labels))
-    summary = build(seeded)
-    const more = await resolveValueLabels(idsInSummary(summary))
-    if (more.size) summary = build(new Map([...seeded, ...more]))
+  const formTarget = formTargetForRecordType(rt?.picklist_value)
+  if (formTarget) {
+    // What was PUSHED TO THE FORM, not a view of the record (Nicholas: "we only
+    // want to capture what was pushed to the jot form"). Built from the same
+    // field map and payload the button uses, through the same transform, so the
+    // record of a submission cannot disagree with the submission.
+    const { payload, map } = await loadAssessmentPrefill(enrollmentId, formTarget)
+    summary = groupsFromFormSubmission(map, payload)
   } else {
     summary = buildSubmittedEnrollmentSummary(enr, null, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
     const labels = await resolveValueLabels(idsInSummary(summary))
