@@ -346,9 +346,6 @@ export async function sendPaymentRequestForSignature(incentiveApplicationId, { n
   const to = String(email || '').trim()
   if (!to) throw new Error('Enter the property owner\u2019s email address.')
 
-  // renderFromContext runs the same readiness and parse-level gates the
-  // Generate action does, so a record that cannot produce an invoice says so
-  // here rather than failing at the send.
   const ctx = await loadPaymentRequestSignatureContext(incentiveApplicationId)
   // renderFromContext runs the same readiness and parse-level gates the Generate
   // action does, so a record that cannot produce an invoice says so here rather
