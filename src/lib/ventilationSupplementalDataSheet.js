@@ -98,14 +98,52 @@ export const NOT_APPLICABLE = 'N/A'
  * ambiguous here — it is Heating, or Cooling, or both depending on what it
  * replaced, and that is a programme question nobody has answered.
  */
-export const MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE = Object.freeze({
-  'VENTILATION-EQUIPMENT': 'Ventilation',
-  'HEAT-PUMP-EQUIPMENT':   null, // declared, not built — Heating vs Cooling is unanswered
-  'FURNACE-EQUIPMENT':     null, // declared, not built
-})
+/**
+ * The Measure Type values the programme administrator's own dropdown accepts,
+ * from the workbook's "Data Validation" tab. A value not on this list is
+ * flagged by Excel the moment they open the file.
+ *
+ * Held here so the fixture can check it against the SHIPPED template rather
+ * than trusting this list — if the programme revises their form, the mismatch
+ * fails the build instead of reaching a filing.
+ */
+export const PROGRAMME_MEASURE_TYPES = Object.freeze([
+  'Heating', 'Cooling', 'Ventilation', 'Water Heating',
+  'ENERGY STAR Refrigerator', 'ENERGY STAR Dishwasher', 'ENERGY STAR Freezer',
+  'ENERGY STAR Electric Cooking Product', 'ENERGY STAR Clothes Washer',
+  'ENERGY STAR Clothes Dryer', 'ENERGY STAR Pool Pump',
+])
 
-/** The measure types this sheet can currently produce rows for. */
-export const BUILT_MEASURE_TYPES = Object.freeze(['Ventilation'])
+/**
+ * The Measure Type belongs to the MEASURE, not to the equipment's record type.
+ *
+ * The first cut of this keyed the column off the equipment product's record
+ * type, which is wrong in a way the data already demonstrates: PRD-00002 (Rheem
+ * ProTerra, a heat pump WATER HEATER) sits on the HEAT-PUMP-EQUIPMENT record
+ * type alongside space-conditioning heat pumps. Keyed by equipment type it
+ * would print as Heating and Cooling. The programme is paying for a measure —
+ * "ENERGY STAR Electric Heat Pump Water Heater" — and Water Heating is what
+ * belongs in the column.
+ *
+ * So the values ride on the measure product itself
+ * (products.product_supplemental_measure_types), and this module only knows how
+ * to READ them. A new measure is configured, never coded.
+ *
+ * A measure mapping to MORE THAN ONE value emits one row per value per unit.
+ * Nicholas, on a space-heating-and-cooling heat pump: "Two rows per unit —
+ * Heating and Cooling." The administrator's list has no combined value, and the
+ * same physical unit legitimately carries both measures.
+ */
+export function measureTypesFor(line) {
+  const raw = line?.measureTypes
+  if (!Array.isArray(raw)) return []
+  return raw.map(v => String(v ?? '').trim()).filter(Boolean)
+}
+
+/** A measure with no configured Measure Type cannot be printed on the sheet. */
+export function isPrintableLine(line) {
+  return measureTypesFor(line).length > 0
+}
 
 /**
  * Which units get a row.
@@ -248,8 +286,18 @@ export function equipmentForUnit(unitId, equipmentLines) {
  *   property       { propertyAkaName }
  *   building       { address, city, state, zip }
  *   units          [{ id, unitNumber, unitRecordType }]
- *   equipmentLines [{ unitId, measureType, equipment: { manufacturer, modelNumber,
- *                     name, isSerialized, ahriCertificateNumber } }]
+ *   equipmentLines [{ unitId, measureTypes: string[], equipment: { manufacturer,
+ *                     modelNumber, name, isSerialized, ahriCertificateNumber } }]
+ *
+ * A row is one UNIT x one MEASURE TYPE. A building of 8 units with a ventilation
+ * line yields 8 rows; add a space-conditioning heat pump line (Heating AND
+ * Cooling) and the same building yields 24 — 8 ventilation, 8 heating, 8
+ * cooling. That is the administrator's own shape: their Measure Type column
+ * describes a measure, and their dropdown has no combined value.
+ *
+ * Rows are UNIT-MAJOR, so a unit's measures sit together and a reader scanning
+ * for "what happened in apartment 3" finds it in one place rather than three
+ * blocks apart.
  *
  * Returns { rows, warnings }. Warnings are surfaced to the person generating the
  * sheet — a silently short sheet is how a building gets filed with three units
@@ -268,41 +316,64 @@ export function buildSupplementalRows({ property, building, units, equipmentLine
     warnings.push(`This building has ${allUnits.length} unit record(s) but none is typed as a Dwelling Unit, so the sheet has no rows.`)
   }
 
-  const lines = (Array.isArray(equipmentLines) ? equipmentLines : [])
-    .filter(l => BUILT_MEASURE_TYPES.includes(l.measureType))
-  const unbuilt = (Array.isArray(equipmentLines) ? equipmentLines : [])
-    .filter(l => !BUILT_MEASURE_TYPES.includes(l.measureType))
-  if (unbuilt.length > 0) {
-    warnings.push(`${unbuilt.length} equipment line(s) are for a measure this sheet does not cover yet (${BUILT_MEASURE_TYPES.join(', ')} only) and were left off.`)
+  const allLines = Array.isArray(equipmentLines) ? equipmentLines : []
+  const lines = allLines.filter(isPrintableLine)
+  const unconfigured = allLines.filter(l => !isPrintableLine(l))
+  if (unconfigured.length > 0) {
+    warnings.push(`${unconfigured.length} equipment line(s) are for a measure with no Measure Type configured, so they were left off. Set the Measure Type on the measure's product record.`)
   }
   if (lines.length === 0 && dwellings.length > 0) {
-    warnings.push('No ventilation equipment is recorded on the opportunity, so the Model Number column is empty. Select the equipment on the line item, then regenerate.')
+    warnings.push('No measures are recorded on the opportunity, so the sheet has no rows. Add the line items first, then regenerate.')
+  }
+  // A line that names its measure but not yet its model still lays out rows —
+  // the Model Number is simply blank, and that is the state the sheet is in
+  // when it auto-generates before anybody has chosen a fan.
+  const unchosen = lines.filter(l => !l.equipment)
+  if (unchosen.length > 0 && dwellings.length > 0) {
+    warnings.push(`${unchosen.length} line item(s) have no equipment selected, so their Model Number column is empty. Pick the model on the line item, then regenerate.`)
+  }
+
+  // Every Measure Type present, in the order the measures declare them, so the
+  // sheet's row order is stable between regenerations.
+  const measureTypes = []
+  for (const l of lines) {
+    for (const t of measureTypesFor(l)) if (!measureTypes.includes(t)) measureTypes.push(t)
   }
 
   const buildingName = buildingNameFor(property)
-  const rows = dwellings.map(u => {
-    const { equipment, ambiguous, reason } = equipmentForUnit(u.id, lines)
-    if (ambiguous || (!equipment && lines.length > 0)) {
-      warnings.push(`Unit ${u.unitNumber}: ${reason}.`)
+  const rows = []
+  for (const u of dwellings) {
+    for (const measureType of measureTypes) {
+      // Resolve the equipment WITHIN this measure. Scoping the search matters:
+      // a building with both a fan line and a heat pump line must not offer the
+      // fan as a candidate for the Heating row, and the ambiguity check must
+      // compare fans against fans.
+      const forMeasure = lines.filter(l => measureTypesFor(l).includes(measureType))
+      const { equipment, ambiguous, reason } = equipmentForUnit(u.id, forMeasure)
+      if (ambiguous) {
+        warnings.push(`Unit ${u.unitNumber} (${measureType}): ${reason}.`)
+      }
+      // A measure that does not cover this unit produces no row at all, rather
+      // than a row with an empty Model Number. An absent row says "this unit is
+      // not part of that measure"; a blank one says "we forgot".
+      if (!equipment && forMeasure.length > 0 && forMeasure.every(l => l.unitId)) continue
+      rows.push({
+        buildingName,
+        streetAddress: unitStreetAddress(building?.address, u.unitNumber),
+        unitNumber:    u.unitNumber ?? '',
+        measureType,
+        modelNumber:   modelNumberFor(equipment),
+        serialNumber:  equipment?.isSerialized ? '' : NOT_APPLICABLE,
+        ahriNumber:    String(equipment?.ahriCertificateNumber ?? '').trim() || NOT_APPLICABLE,
+        city:          String(building?.city ?? '').trim(),
+        state:         String(building?.state ?? '').trim(),
+        zipCode:       String(building?.zip ?? '').trim(),
+      })
     }
-    return {
-      buildingName,
-      streetAddress: unitStreetAddress(building?.address, u.unitNumber),
-      unitNumber:    u.unitNumber ?? '',
-      // Every built row is a Ventilation row today; when heat pumps are built
-      // this reads the line's own measure type.
-      measureType:   equipment ? (lines.find(l => l.equipment === equipment)?.measureType ?? 'Ventilation') : 'Ventilation',
-      modelNumber:   modelNumberFor(equipment),
-      serialNumber:  equipment?.isSerialized ? '' : NOT_APPLICABLE,
-      ahriNumber:    String(equipment?.ahriCertificateNumber ?? '').trim() || NOT_APPLICABLE,
-      city:          String(building?.city ?? '').trim(),
-      state:         String(building?.state ?? '').trim(),
-      zipCode:       String(building?.zip ?? '').trim(),
-    }
-  })
+  }
 
   if (rows.length > MAX_TEMPLATE_ROWS) {
-    warnings.push(`This building has ${rows.length} dwelling units but the programme's workbook only defines ${MAX_TEMPLATE_ROWS} data rows. The sheet was cut at ${MAX_TEMPLATE_ROWS}.`)
+    warnings.push(`This building needs ${rows.length} rows but the programme's workbook only defines ${MAX_TEMPLATE_ROWS}. The sheet was cut at ${MAX_TEMPLATE_ROWS}.`)
     return { rows: rows.slice(0, MAX_TEMPLATE_ROWS), warnings }
   }
   return { rows, warnings }
