@@ -228,6 +228,24 @@ column horizontally (Nicholas, PR #549) — the harness records that so nobody
 "fixes" it back.
 
 
+**A HOMES payment request invoice reads TOTAL DUE $0.00 BY DESIGN — never "fix" it (Nicholas, 2026-09-03).**
+*"There is no cost. Customers don't pay us anything. The program pays us. This
+invoice is just fake so the customer can see that there's no out-of-pocket cost.
+We get paid through a different mechanism."* The document exists to show a
+property owner they owe nothing, so `computeHomesModel` **defines** Total Project
+Cost as the rebate (`total = homesAmt + foeAmt`) and then applies that same
+rebate as an instant discount, cancelling to zero on every invoice; the measure
+rows are a breakout of that one total, which is why they are fractions and not
+prices. **The opportunity line items are the only real dollar figures in LEAP and
+are deliberately NOT read by this invoice** — pricing it from them would print a
+balance and tell a customer they owe money they do not owe. EES is paid by the
+programme, outside this document. The invoice reads no project either: a project
+manages work orders and has nothing to do with these dollars. The readiness gate
+is the two Asset Score reports, a unit count and a contractor — nothing else.
+Recorded at the money line in `src/lib/homesProposal.js` and here, because a
+zero total and a cost derived from its own credit both read as defects to
+anybody who has not been told otherwise.
+
 **Shipped 2026-09-03 — The Customer Information block names the customer, and nothing shouts (branch `claude/wisconsin-multifamily-ira-cleanup-roy6o0`, PR #799; 7 migrations live on prod, 3 with DDL, advisors 223 / same known categories, zero naming the new artifacts; HA-00212):**
 Nicholas, on the Wisconsin IRA Multifamily HOMES **Project Reservation** (Sealed): *"There's something really going on goofy in the customer information… I don't know why Waukesha is all capitalized. We already put a bunch of stuff in to normalize our data. We shouldn't have all caps anywhere like that."* The block read `Dennis Hanson - Vice President- Housing & Residential / PO BOX 304 / WAUKESHA, WI 53187, Alexandria, VA 22314`. **Four defects, only one of which was the capitals.**
 - **IT NAMED NO CUSTOMER, because it read the wrong object.** `enrollments.enrollment_owner` is the **RECORD's** owner — the LEAP user, which is what "every record has a named owner" means here. It holds a `users` id on **all 50 live enrollments** (Nicholas, Lucas and Brittin Wood) and carries **no foreign key** to say so, and `enrollmentProposalContext` looked it up in `accounts`. That found nothing and returned `''`, so **every HOMES and HEAR proposal has silently opened its customer column with a person's name where the customer company belongs.** Same misread of `ia_owner` in `homesProposalService`, masked only because `ia_property_owner_name` is tried first. Both now resolve the owner from the **property's account** (one account per real-world company; `properties.property_account_id` is the owner).

@@ -519,6 +519,20 @@ function invoiceModel(){
     if(foe)foe.amt=Math.round(roofSqFt*foe.rate*100)/100;
   }
   const foeAmt=foe?foe.amt:0;
+  // TOTAL DUE $0.00 IS THE POINT OF THIS DOCUMENT — DO NOT "FIX" IT.
+  // (Nicholas, 2026-09-03: "There is no cost. Customers don't pay us anything.
+  // The program pays us. This invoice is just fake so the customer can see that
+  // there's no out-of-pocket cost. We get paid through a different mechanism.")
+  // Total Project Cost is therefore DEFINED as the rebate, and the rebate is
+  // then applied as an instant discount against it, so the two cancel exactly
+  // and the customer's balance is zero on every one of these. That is the
+  // message the document exists to deliver, not an accident of the arithmetic.
+  // The measure rows below are a breakout of this same total, which is why they
+  // are fractions rather than prices.
+  // The opportunity line items are the only real dollar figures in LEAP, and
+  // they are deliberately NOT read here: pricing this invoice from them would
+  // produce a non-zero balance and tell a property owner they owe money they
+  // do not owe. EES is paid by the programme, outside this document.
   const total=Math.round((homesAmt+foeAmt)*100)/100;
   // Measure lines: breakout fractions × total, largest row absorbs the drift.
   const rows=[];
