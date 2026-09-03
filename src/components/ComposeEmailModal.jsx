@@ -28,6 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
+import { objectLabel } from '../lib/objectNav'
 import TiptapEmailComposer from './TiptapEmailComposer'
 import {
   resolveOutboundMailboxForAnchor,
@@ -310,7 +311,7 @@ export default function ComposeEmailModal({
   const handleSend = useCallback(async () => {
     if (submitting) return
     if (!anchorObject || !anchorRecordId) {
-      toast.error('No anchor record — cannot send.')
+      toast.error('This email has no record to relate it to — cannot send.')
       return
     }
     if (!toEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)) {
@@ -481,7 +482,7 @@ export default function ComposeEmailModal({
             <div>
               <div style={{ fontSize: 14, fontWeight: 600 }}>New Email</div>
               <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
-                Anchored to {anchorObject || '—'} · {anchorRecordId ? anchorRecordId.slice(0, 8) : '—'}
+                Related to {anchorObject ? objectLabel(anchorObject) : '—'} · {anchorRecordId ? anchorRecordId.slice(0, 8) : '—'}
               </div>
             </div>
           </div>
