@@ -129,8 +129,11 @@ const OBJECT_HOME = {
   // ── Field ───────────────────────────────────────────────────────────────
   projects:                     ['field', 'projects'],
   work_orders:                  ['field', 'workorders'],
-  work_plans:                   ['field', null],
-  work_steps:                   ['field', null],
+  // Both have a Field list as of 2026-09-03. Before that they were [field,
+  // null], so a related-list "View All" on the Work Steps card had no URL to
+  // build and rendered as a greyed-out label.
+  work_plans:                   ['field', 'work_plans'],
+  work_steps:                   ['field', 'work_steps'],
   service_appointments:         ['field', 'service_appointments'],
   service_appointment_assignments: ['field', null],
   resource_absences:            ['field', 'absences'],

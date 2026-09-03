@@ -6,6 +6,7 @@ import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorStat
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
+import WorkOrdersToSchedule from '../components/scheduler/WorkOrdersToSchedule'
 import NavLink from '../components/NavLink'
 import RecordLink from '../components/RecordLink'
 import HelpIcon from '../components/help/HelpIcon'
@@ -32,6 +33,8 @@ const CODE_SECTIONS = [
   { id:'projects',             label:'Projects'            },
   { id:'workorders',           label:'Work Orders'         },
   { id:'reviews',              label:'Verification Reviews'},
+  { id:'work_plans',           label:'Work Plans'          },
+  { id:'work_steps',           label:'Work Steps'          },
   { id:'schedule',             label:'Schedule'            },
   { id:'absences',             label:'Out of Office'       },
   { id:'technicians',          label:'Technicians'         },
@@ -832,6 +835,16 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
     // technicians in src/lib/objectSectionScopes.js, at the fetch, so no filter
     // or saved view can widen it.
     technicians: 'users',
+    // Work plans and work steps are the work order's own children, and until
+    // 2026-09-03 neither had a list anywhere in LEAP. That is what greyed out
+    // "View All" on the Work Steps card: buildScopedListUrl falls back to
+    // getTableListUrl, which returns null for an object with no list section,
+    // and the widget then renders a dead label instead of a link (Nicholas:
+    // "I'm trying to view all the work steps, and I can't see them. It's just
+    // a grayed-out thing"). A card that counts 22 steps has to be able to open
+    // them.
+    work_plans:  'work_plans',
+    work_steps:  'work_steps',
     credentials: 'contact_skills',
     timesheets:  'time_sheets',
     absences:    'resource_absences',
@@ -993,6 +1006,20 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
               onBack={() => setReviewWorkOrder(null)}
               onOpenRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: 'view', name: r.name })} />
           : <WorkOrderReviewQueue onOpenReview={(r) => setReviewWorkOrder(r)} />)}
+        {/* The dispatcher's worklist sits ABOVE the board, because the board can
+            only draw what is already scheduled — the unscheduled work is the
+            thing this screen exists to find (Nicholas, 2026-09-03: "they need
+            to see what work orders are to be scheduled so that they can
+            schedule"). Scheduling one refreshes the board beneath it. */}
+        {sec==='schedule' && (
+          /* Matches ScheduleView's own horizontal padding so the queue and the
+             board line up as one screen rather than two stacked panels. */
+          <div style={{ padding:'20px 24px 0' }}>
+            <WorkOrdersToSchedule
+              onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name, mode: 'view' })}
+              onScheduled={() => setScheduleDate(d => new Date(d))} />
+          </div>
+        )}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}

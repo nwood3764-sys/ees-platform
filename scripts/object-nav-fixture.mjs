@@ -22,7 +22,7 @@ import {
   objectNavFor, humanizeObjectLabel, isObjectTableSegment, objectModuleFor,
   objectListUrlFor, tableForSectionId, registeredObjectTables,
 } from '../src/lib/objectNav.js'
-import { parsePath, buildPath, getTableListUrl, getTableForSection, isUrlAddressableTable } from '../src/lib/urlGrammar.js'
+import { parsePath, buildPath, getTableListUrl, getTableForSection, isUrlAddressableTable, buildScopedListUrl } from '../src/lib/urlGrammar.js'
 
 let failures = 0
 let checks = 0
@@ -111,10 +111,28 @@ check('absences list', getTableListUrl('resource_absences'), '/m/field/absences'
 check('payment requests list', getTableListUrl('project_payment_requests'), '/m/incentives/requests')
 check('applications list', getTableListUrl('incentive_applications'), '/m/qualification/applications')
 
-// An object reached only through its parent has no list. Returning null is the
-// point: the breadcrumb renders plain text instead of a link to a module Home.
-check('work steps have no list view', getTableListUrl('work_steps'), null)
+// Work plans and work steps DO have a list as of 2026-09-03. They are a work
+// order's own children and the Work Steps card counts 22 of them, so "View All"
+// has to open something -- with no list URL the widget rendered a greyed-out
+// label instead of a link (Nicholas: "I'm trying to view all the work steps,
+// and I can't see them. It's just a grayed-out thing").
+check('work steps list', getTableListUrl('work_steps'), '/m/field/work_steps')
+check('work plans list', getTableListUrl('work_plans'), '/m/field/work_plans')
+check('...so a scoped View All from a work order builds a real URL',
+  typeof buildScopedListUrl({
+    table: 'work_steps', fk: 'work_order_id',
+    parentId: '11111111-2222-3333-4444-555555555555', label: 'WO-00244',
+  }), 'string')
+
+// An object reached only through its parent still has no list, and returning
+// null is the point: the breadcrumb renders plain text instead of a link to a
+// module Home, and the widget shows a label rather than a dead link.
 check('photos have no list view', getTableListUrl('photos'), null)
+check('CONTROL: with no list URL a scoped View All cannot be built',
+  buildScopedListUrl({
+    table: 'photos', fk: 'work_step_id',
+    parentId: '11111111-2222-3333-4444-555555555555', label: 'WS-1',
+  }), null)
 check('an unregistered object has no list view', getTableListUrl('mystery_objects'), null)
 check('no table, no list', getTableListUrl(null), null)
 
