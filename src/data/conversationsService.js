@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
+import { requireOutboundApproval } from '../lib/outboundSendGuard'
 import { storageSafeFileName } from '../lib/storageKey'
 import { CONVERSATION_ANCHORS, resolveAnchorFromConversation } from '../lib/conversationAnchors'
 
@@ -166,6 +167,10 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       project_id: conversation.project_id || undefined,
       service_appointment_id: conversation.service_appointment_id || undefined,
     }
+    requireOutboundApproval({
+      channel: 'sms', to: customerPhone,
+      context: `Reply on the text thread with ${opts.recipientName || customerPhone}`,
+    })
     const { data, error } = await supabase.functions.invoke('send-notification-sms', {
       body: payload,
     })
@@ -236,6 +241,10 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       // fresh conversation for every send (the new-email behavior).
       conversation_id: conversation.id,
     }
+    requireOutboundApproval({
+      channel: 'email', to: customerEmail, subject,
+      context: 'Reply on this email thread',
+    })
     const { data, error } = await supabase.functions.invoke('send-email-v1', {
       body: payload,
     })
@@ -285,6 +294,7 @@ export async function sendNewSms({
   const trimmed = (bodyText || '').trim()
   if (!trimmed) throw new Error('Message body is empty')
   if (trimmed.length > 1600) throw new Error('Message exceeds the 1600-character SMS limit. Shorten and try again.')
+  requireOutboundApproval({ channel: 'sms', to: phone, context: 'New text message' })
   const { data, error } = await supabase.functions.invoke('send-notification-sms', {
     body: {
       trigger_event: triggerEvent,
@@ -361,6 +371,9 @@ export async function sendNewEmail({
     outbound_mailbox_id: outboundMailboxId,
     contact_id: contactId || undefined,
   }
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: trimmedSubject, context: 'New email',
+  })
   const { data, error } = await supabase.functions.invoke('send-email-v1', {
     body: payload,
   })
@@ -1154,6 +1167,13 @@ export async function sendTemplateEmail({
     contact_id:          contactId || undefined,
     attachments:         toAttachmentPayload(attachments),
   }
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: subjectOverride || undefined,
+    context: 'Email from a template',
+  })
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: trimmedSubject, context: 'New email',
+  })
   const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
   if (error) throw new Error(error.message || 'Send failed at the network layer')
   if (data?.status === 'failed') {
@@ -1201,6 +1221,9 @@ export async function sendNewEmailHtml({
     contact_id:          contactId || undefined,
     attachments:         toAttachmentPayload(attachments),
   }
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: trimmedSubject, context: 'New email',
+  })
   const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
   if (error) throw new Error(error.message || 'Send failed at the network layer')
   if (data?.status === 'failed') {

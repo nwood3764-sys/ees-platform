@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { supabase } from '../lib/supabase'
+import { requireOutboundApproval } from '../lib/outboundSendGuard'
 import { sendNewEmail, sendNewEmailHtml, resolveOutboundMailboxForAnchor } from './conversationsService'
 
 // Applications with resolved stage / trade / account, newest first.
@@ -174,6 +175,10 @@ export async function smsApplicationInvitation({ accountId, contactId, toPhone, 
   }
   const link = providerSignupUrl()
   const body = `Hi${toName ? ' ' + toName : ''}, you're invited to join the Energy Efficiency Services provider network. Start your application here: ${link}\n\nReply STOP to opt out.`
+  requireOutboundApproval({
+    channel: 'sms', to: toPhone,
+    context: `Service provider application invitation to ${toName || toPhone}`,
+  })
   const { data, error } = await supabase.functions.invoke('send-notification-sms', {
     body: {
       trigger_event: 'service_provider_application_invite',
