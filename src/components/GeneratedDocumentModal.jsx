@@ -1,32 +1,28 @@
 // ---------------------------------------------------------------------------
-// HomesProposalModal — generates a WI IRA Multifamily HOMES document for one
-// record and shows it, ready to download or save to the record's Documents.
+// GeneratedDocumentModal — generates one of LEAP's built-from-the-record
+// documents and shows it, ready to download or save to the record's Documents.
 //
-//   · Proposal            — Project Reservation enrollment
+// Which documents exist, what they are called and which service produces each
+// live in src/data/generatedDocuments.js; this file is only the chrome. Today:
+//
+//   · Proposal (HOMES)    — WI-IRA-MF-HOMES Project Reservation enrollment
+//   · Proposal (HEAR)     — WI-IRA-MF-HEAR Project Reservation enrollment
 //   · Assessment Invoice  — Assessment Pre-Approval enrollment (fixed price)
 //   · Payment Request Inv — WI-IRA-MF-HOMES Project Payment Request incentive app
 //
 // There is nothing to configure: opening the modal generates the document from
-// the record (owner / contractor / unit count on the record; the two Asset
-// Score reports on the Project Reservation enrollment). The generated PDF is
-// shown inline — Download saves a copy to your computer, Save adds it to this
-// record's Documents. If an input is missing it says exactly what to fix.
+// the record. The generated PDF is shown inline — Download saves a copy to your
+// computer, Save adds it to this record's Documents. If an input is missing it
+// says exactly what to fix.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
-import { generateHomesDocument, saveHomesDocument } from '../data/homesProposalService'
+import { generatedDocumentSpec } from '../data/generatedDocuments'
 
 const CARD_SECONDARY = '#f7f9fc'
-
-// title + noun per document kind
-const DOC = {
-  proposal: { title: 'Generate Proposal',                noun: 'proposal' },
-  invoice:  { title: 'Generate Payment Request Invoice', noun: 'invoice'  },
-  audit:    { title: 'Generate Assessment Invoice',      noun: 'invoice'  },
-}
 
 // friendly name for the record the document attaches to
 const OBJECT_LABEL = {
@@ -34,9 +30,9 @@ const OBJECT_LABEL = {
   incentive_applications: 'Incentive Application',
 }
 
-export default function HomesProposalModal({ recordObject = 'enrollments', recordId, kind = 'proposal', onClose, onSaved }) {
+export default function GeneratedDocumentModal({ recordObject = 'enrollments', recordId, kind = 'proposal', onClose, onSaved }) {
   const toast = useToast()
-  const doc = DOC[kind] || DOC.proposal
+  const doc = generatedDocumentSpec(kind) || generatedDocumentSpec('proposal')
   const objectLabel = OBJECT_LABEL[recordObject] || 'Record'
 
   const [generating, setGenerating] = useState(true)
@@ -52,7 +48,7 @@ export default function HomesProposalModal({ recordObject = 'enrollments', recor
     setGenerating(true); setMissing(null); setErr(null); setResult(null); setSaved(false)
     ;(async () => {
       try {
-        const r = await generateHomesDocument({ object: recordObject, id: recordId, kind })
+        const r = await doc.generate({ object: recordObject, id: recordId })
         if (!alive) return
         setResult({ ...r, url: URL.createObjectURL(r.blob) })
       } catch (e) {
@@ -62,7 +58,7 @@ export default function HomesProposalModal({ recordObject = 'enrollments', recor
       } finally { if (alive) setGenerating(false) }
     })()
     return () => { alive = false }
-  }, [recordObject, recordId, kind])
+  }, [recordObject, recordId, kind])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Revoke the object URL when it's replaced or the modal closes.
   useEffect(() => () => { if (result?.url) URL.revokeObjectURL(result.url) }, [result])
@@ -71,7 +67,7 @@ export default function HomesProposalModal({ recordObject = 'enrollments', recor
     if (!result) return
     setSaving(true)
     try {
-      await saveHomesDocument({ object: recordObject, id: recordId }, result.blob, result.fileName, result.documentType)
+      await doc.save({ object: recordObject, id: recordId }, result.blob, result.fileName, result.documentType)
       setSaved(true)
       toast.success(`Saved to this ${objectLabel.toLowerCase()}’s Documents: ${result.fileName}`)
       if (onSaved) onSaved()
@@ -138,6 +134,22 @@ export default function HomesProposalModal({ recordObject = 'enrollments', recor
             <>
               {/* the actual document, shown inline */}
               <iframe title="Document preview" src={result.url} style={preview} />
+              {/* A line item the proposal could not place is named, never
+                  silently dropped — a mis-coded product is then visible on the
+                  screen that would otherwise just be missing it. */}
+              {result.unmapped && result.unmapped.length > 0 && (
+                <div style={{ ...notice, marginTop: 10 }}>
+                  <Icon path="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" size={15} color="#1e466b" />
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                      Not on this proposal — {result.unmapped.length === 1 ? 'this line item is' : 'these line items are'} not a programme measure:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {result.unmapped.map((x, i) => <li key={i} style={{ marginBottom: 2 }}>{x}</li>)}
+                    </ul>
+                  </div>
+                </div>
+              )}
               {m && (m.savings != null || (m.total != null)) && (
                 <div style={summaryLine}>
                   {m.total != null && (

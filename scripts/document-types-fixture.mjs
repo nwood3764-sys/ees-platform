@@ -100,6 +100,18 @@ check('a registered row with no label falls back to humanizing',
   documentTypeOptions([{ value: 'assessment_asset_score' }], []).at(-1).label,
   'Assessment Asset Score')
 
+// ── The IRA programme names survive humanization ─────────────────────────
+// A generated proposal files itself under a slug; before 20260903001834 none of
+// them were registered, so the 2 HOMES proposals on prod printed as "Homes
+// Proposal" and a HEAR one would have printed "Hear Proposal" — the verb.
+check('an unregistered HOMES slug keeps the programme name',
+  humanizeDocumentType('homes_proposal'), 'HOMES Proposal')
+check('an unregistered HEAR slug is the programme, not the verb',
+  humanizeDocumentType('hear_proposal'), 'HEAR Proposal')
+check('a registered label still wins over the humanizer',
+  documentTypeLabel('hear_proposal', { hear_proposal: 'IRA Multifamily HEAR Proposal' }),
+  'IRA Multifamily HEAR Proposal')
+
 console.log(failures === 0
   ? `document-types fixture: ${checks} checks passed`
   : `document-types fixture: ${failures} of ${checks} checks FAILED`)
