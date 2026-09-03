@@ -24,7 +24,8 @@
     "verify:topbar-menus": "node tools/topbar-menu-check/run.mjs",
     "verify:photo-upload": "node tools/photo-upload-check/run.mjs",
     "verify:datetime-field": "node tools/datetime-field-check/run.mjs",
-    "verify:service-appointment-list": "node tools/service-appointment-list-check/run.mjs"
+    "verify:service-appointment-list": "node tools/service-appointment-list-check/run.mjs",
+    "verify:page-layout-alignment": "node tools/page-layout-alignment-check/run.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
