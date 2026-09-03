@@ -88,14 +88,10 @@
       </div>
 
       <label class="lp-label" for="objectType">Log to</label>
-      <select class="lp-input" id="objectType">
-        <option value="opportunities">Opportunity</option>
-        <option value="properties">Property</option>
-        <option value="accounts">Account</option>
-        <option value="contacts">Contact</option>
-        <option value="projects">Project</option>
-        <option value="work_orders">Work Order</option>
-      </select>
+      <!-- Filled from list_email_log_objects() on sign-in: every object a
+           conversation can be anchored to. Hard-coding six of them here is
+           what limited the add-in until 2026-09-03. -->
+      <select class="lp-input" id="objectType"></select>
 
       <label class="lp-label" for="search">Find the record</label>
       <input class="lp-input" id="search" type="text" placeholder="Search by name or record number…" autocomplete="off"/>

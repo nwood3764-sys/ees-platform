@@ -375,8 +375,44 @@
     refreshSharedContext(function () {
       renderEmailSummary();
       setupAttachments();
-      runSearch();          // seed with recent records for the default object
+      loadLogTargets(function () {
+        runSearch();          // seed with recent records for the default object
+      });
       refreshParticipants(); // match the people on the email to LEAP contacts
+    });
+  }
+
+  // Which objects an email can be filed onto — asked, never listed here.
+  // list_email_log_objects() returns exactly the objects a conversation can be
+  // anchored to, so the picker gains an object the day that object can hold a
+  // thread, and can never offer one it cannot.
+  function loadLogTargets(done) {
+    var sel = $('objectType');
+    sb.rpc('list_email_log_objects').then(function (res) {
+      sel.innerHTML = '';
+      var rows = (res && !res.error && Array.isArray(res.data)) ? res.data : [];
+      if (!rows.length) {
+        // Say so rather than falling back to a list of our own: a stale list
+        // is how this went wrong in the first place.
+        var opt = document.createElement('option');
+        opt.value = ''; opt.textContent = 'Could not load the record types';
+        sel.appendChild(opt);
+        sel.disabled = true;
+        done();
+        return;
+      }
+      sel.disabled = false;
+      rows.forEach(function (row) {
+        var opt = document.createElement('option');
+        opt.value = row.object_name;
+        opt.textContent = row.label;
+        sel.appendChild(opt);
+      });
+      done();
+    }).catch(function () {
+      sel.innerHTML = '<option value="">Could not load the record types</option>';
+      sel.disabled = true;
+      done();
     });
   }
 
@@ -480,6 +516,7 @@
   function runSearch() {
     if (!sb) return;
     var obj = $('objectType').value;
+    if (!obj) { renderResults([], 'No record types are available to log onto.'); return; }
     var q = $('search').value.trim();
     sb.rpc('search_records_for_email_log', { p_object: obj, p_query: q || null, p_limit: 20 })
       .then(function (res) {
