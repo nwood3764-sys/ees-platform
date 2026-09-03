@@ -6853,17 +6853,27 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   const meaningfulSectionWidgets = sectionWidgets.filter(w =>
     w.widget_type === 'field_group' ? ((w.widget_config?.fields || []).length > 0) : true)
   if (meaningfulSectionWidgets.length === 0 && cardCount > 0) return null
-  // A section with no title typed in — blank, or the "Untitled Section"
-  // placeholder the save path stores for an unnamed section — must not render
-  // an empty titled box on the record page (Nicholas, 2026-07-29: "if I don't
-  // have anything typed in the section name, it just needs to disappear").
+  // A section with no title typed in — blank, or one of the two placeholders a
+  // section carries until somebody names it — must not render an empty titled
+  // box on the record page (Nicholas, 2026-07-29: "if I don't have anything
+  // typed in the section name, it just needs to disappear").
   // If such an untitled section also has no content to show, it disappears
   // entirely — no header, no wasted vertical space. If it DOES carry fields,
   // the fields still render, just with no header bar above them. Named empty
   // sections keep their header + muted empty state (they still match the
   // layout editor 1:1); this carve-out is only for the untitled case.
+  //
+  // "New Section" is the second placeholder: it is the label the canvas
+  // editor's Add Section button writes, and the audit of every layout on
+  // 2026-09-03 found **35 sections across 10 objects** still carrying it —
+  // each of them painting a header that literally reads "New Section" on a
+  // live record page. It is the same fact as "Untitled Section" (nobody typed
+  // a name), so it gets the same treatment. Naming them is a business
+  // decision, not one to guess at; until somebody does, they render their
+  // fields without a placeholder heading above them.
   const rawLabel = (section.section_label || '').trim()
-  const hasTitle = !!rawLabel && rawLabel.toLowerCase() !== 'untitled section'
+  const SECTION_NAME_PLACEHOLDERS = new Set(['untitled section', 'new section'])
+  const hasTitle = !!rawLabel && !SECTION_NAME_PLACEHOLDERS.has(rawLabel.toLowerCase())
   const hasContent = meaningfulSectionWidgets.length > 0
   if (!hasTitle && !hasContent) return null
   const showHeader = hasTitle

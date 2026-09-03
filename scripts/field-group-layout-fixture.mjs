@@ -267,24 +267,37 @@ check('field 0 is row 1 column 1', POS.get(0), { row: 1, column: 1, span: 1 })
 check('field 1 is row 1 column 2', POS.get(1), { row: 1, column: 2, span: 1 })
 check('field 2 wraps to row 2 column 1', POS.get(2), { row: 2, column: 1, span: 1 })
 
+// ── 7b. A placeholder section name is not a name ────────────────────────────
+// The audit of every layout on 2026-09-03 found 35 sections across 10 objects
+// still carrying "New Section" — the label the canvas editor's Add Section
+// button writes — each painting that as a heading on a live record page. It is
+// the same fact as the "Untitled Section" placeholder the renderer already
+// treated as unnamed, so it now gets the same treatment.
+const RECORD_DETAIL_SRC = src('src/components/RecordDetail.jsx')
+ok('both placeholder section names are treated as unnamed',
+  /SECTION_NAME_PLACEHOLDERS = new Set\(\['untitled section', 'new section'\]\)/.test(RECORD_DETAIL_SRC))
+ok('and the header is shown only when a section is really named',
+  /const hasTitle = !!rawLabel && !SECTION_NAME_PLACEHOLDERS\.has\(rawLabel\.toLowerCase\(\)\)/.test(RECORD_DETAIL_SRC))
+ok('the editor still writes that placeholder, which is why the renderer must know it',
+  /label: 'New Section'/.test(src('src/modules/admin/LayoutCanvasEditor.jsx')))
+
 // ── 8. Nothing reads or writes a stored column any more ─────────────────────
 // The whole point is that the second fact is gone. If a `column` is read back
 // into placement, or written by a save, the two models are in play again and
 // the stagger returns — which is how it survived a previous round of fixes.
-const RECORD_DETAIL = src('src/components/RecordDetail.jsx')
 const EDITOR = src('src/modules/admin/LayoutCanvasEditor.jsx')
 ok('the record page no longer sets grid-column-start from a field',
-  !/gridColumnStart/.test(RECORD_DETAIL))
-ok('the record page no longer reads f.column', !/\bf\.column\b/.test(RECORD_DETAIL))
+  !/gridColumnStart/.test(RECORD_DETAIL_SRC))
+ok('the record page no longer reads f.column', !/\bf\.column\b/.test(RECORD_DETAIL_SRC))
 ok('the layout editor no longer filters fields by column',
   !/f\.column\s*\|\|\s*1/.test(EDITOR))
 ok('the layout editor no longer stamps a column onto a newly placed field',
   !/label: humanize\([^)]*\), column: 1/.test(EDITOR))
 ok('both surfaces render from the shared rule',
-  /from '\.\.\/lib\/fieldGroupLayout'/.test(RECORD_DETAIL) &&
+  /from '\.\.\/lib\/fieldGroupLayout'/.test(RECORD_DETAIL_SRC) &&
   /from '\.\.\/\.\.\/lib\/fieldGroupLayout'/.test(EDITOR))
 ok('the field cell no longer carries its own bottom border — the row does',
-  /borderBottom: `1px solid \$\{C\.border\}`,\n        \}\}>\n          \{row\.cells/.test(RECORD_DETAIL))
+  /borderBottom: `1px solid \$\{C\.border\}`,\n        \}\}>\n          \{row\.cells/.test(RECORD_DETAIL_SRC))
 
 console.log(failures === 0
   ? `field-group-layout fixture: ${checks} checks passed`
