@@ -408,9 +408,24 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
           eq(`${who}: name and title share one line`, Math.round(nm.y), Math.round(ti.y))
           ok(`${who}: the name sits above its own rule`, nm.y > nameRow[0].y)
           ok(`${who}: the name starts at the rule`, Math.abs(nm.x - nameRow[0].x1) <= 3)
-          ok(`${who}: the title is right of the name's rule`, ti.x > nameRow[0].x2)
-          ok(`${who}: the title stays inside the block`,
-            ti.x + measure(SIGNER_TITLE, 9) <= sigRow[1].x2 + 1)
+          // The title follows the NAME, four spaces along, and stays on the
+          // name's own rule. Right-aligning it put it over the Date column,
+          // where it read as the date's label.
+          ok(`${who}: the title follows the name on the same line`,
+            ti.x > nm.x + measure(SIGNER, 10))
+          ok(`${who}: the title sits on the printed-name rule, not over Date`,
+            ti.x + measure(SIGNER_TITLE, 9) <= nameRow[0].x2 + 2)
+          ok(`${who}: four spaces between the name and the title`,
+            Math.abs((ti.x - (nm.x + measure(SIGNER, 10))) - measure('    ', 10)) < 2)
+          // …and it is captioned under its own value, like the name is.
+          const titleCap = page.text.find(o => o.s === A.CAPTIONS.title)
+          ok(`${who}: the title has its own caption`, !!titleCap)
+          if (titleCap) {
+            eq(`${who}: Title is captioned in line with the title`,
+              Math.round(titleCap.x), Math.round(ti.x))
+            eq(`${who}: both captions share the caption row`,
+              Math.round(titleCap.y), Math.round(nameCap.y))
+          }
         }
       }
 

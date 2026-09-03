@@ -301,6 +301,7 @@ export const HEAR_ACCEPTANCE = {
   FOOTER_CLEARANCE: 38,
   CAPTIONS: {
     name: 'Printed Name',
+    title: 'Title',
     signature: 'Property Owner / Authorized Representative — Signature',
     date: 'Date',
   },
@@ -395,17 +396,34 @@ function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY,
   // contact the header names as the customer, so the person signing is not
   // asked to re-type what the record already says — all that is left is the
   // signature. A record with no contact leaves the line empty to be written on.
-  if (signerName && String(signerName).trim()) {
-    tc([34, 43, 53]); font(10)
-    t(g.blockX + 2, st.y - 4, String(signerName).trim())
-    if (signerTitle && String(signerTitle).trim()) {
-      tc(CAPTION); font(9)
-      // Right-hand end of the same line, clear of the name's own rule.
-      t(g.blockX + g.blockWidth, st.y - 4, String(signerTitle).trim(), { align: 'right' })
+  const who = String(signerName || '').trim()
+  const role = String(signerTitle || '').trim()
+  let titleX = null
+  let nameRuleWidth = g.signatureWidth
+  if (who) {
+    font(10)
+    const nameWidth = d.getTextWidth(who)
+    if (role) {
+      // Four spaces after the name, on the SAME line — the title belongs to the
+      // person, so it reads straight on from their name. Right-aligning it put
+      // it over the Date column, where it read as the date's label.
+      titleX = g.blockX + 2 + nameWidth + d.getTextWidth('    ')
+      font(9)
+      // The rule has to be long enough to hold both, and no shorter than the
+      // signature rule below it — a long title lengthens the line rather than
+      // running off the end of it.
+      nameRuleWidth = Math.min(g.blockWidth,
+        Math.max(g.signatureWidth, titleX + d.getTextWidth(role) + 4 - g.blockX))
     }
+    tc([34, 43, 53]); font(10)
+    t(g.blockX + 2, st.y - 4, who)
+    if (titleX != null) { tc([34, 43, 53]); font(9); t(titleX, st.y - 4, role) }
   }
-  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + g.signatureWidth, st.y)
+  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + nameRuleWidth, st.y)
   caption(g.blockX, A.CAPTIONS.name)
+  // The title gets its own caption under the line, in line with its own value —
+  // the same way Printed Name sits under the name.
+  if (titleX != null) caption(titleX, A.CAPTIONS.title)
 
   st.y += A.NAME_TO_SIGNATURE * fit.scale                      // then Signature + Date
   stroke(rule); d.setLineWidth(1)
