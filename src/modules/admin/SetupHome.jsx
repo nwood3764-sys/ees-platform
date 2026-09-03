@@ -42,6 +42,7 @@ import ClientErrorsPane from './ClientErrorsPane'
 import ModuleSectionsPane from './ModuleSectionsPane'
 import HomePageCanvasEditor from './HomePageCanvasEditor'
 import LayoutCanvasEditor from './LayoutCanvasEditor'
+import { objectLabelPlural } from '../../lib/objectNav'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -743,7 +744,7 @@ const RECYCLE_BIN_TABLES = [
   { value: 'accounts',                     label: 'Accounts' },
   { value: 'contacts',                     label: 'Contacts' },
   { value: 'assessments',                  label: 'Assessments' },
-  { value: 'incentive_applications',       label: 'Incentive Applications' },
+  { value: 'incentive_applications',       label: objectLabelPlural('incentive_applications') },
   { value: 'project_payment_requests',     label: 'Project Payment Requests' },
   { value: 'payment_receipts',             label: 'Payment Receipts' },
   { value: 'documents',                    label: 'Documents' },

@@ -238,29 +238,24 @@ Deno.serve(async (req) => {
 
   // ── 6. Find or create conversation thread ────────────────────────────────
   // Pin the thread to the record it was sent from, whatever object that is, so
-  // it shows in that record's Conversations panel (which already supports these
-  // FKs). Map the anchor object → the conversations FK param it sets.
-  const ANCHOR_FK_PARAM: Record<string, string> = {
-    opportunities:          "p_opportunity_id",
-    properties:             "p_property_id",
-    buildings:              "p_building_id",
-    units:                  "p_unit_id",
-    projects:               "p_project_id",
-    service_appointments:   "p_service_appointment_id",
-    incentive_applications: "p_incentive_application_id",
-    work_orders:            "p_work_order_id",
-    assessments:            "p_assessment_id",
-    accounts:               "p_account_id",
-  }
+  // it shows in that record's Communications card.
+  //
+  // This used to be a hand-kept anchor-object → parameter map, and an object
+  // missing from it was sent UNANCHORED — the email went out and then appeared
+  // on no record page at all. find_or_create_conversation now resolves the
+  // column itself from conversation_anchor_columns(), which is derived from
+  // the conversations table's own foreign keys, so a new anchor object works
+  // the day its column exists and an object that has none fails loudly instead
+  // of quietly losing the thread.
   const convParams: Record<string, unknown> = {
     p_channel:          "email",
     p_our_address:      mailbox.obm_address,
     p_customer_address: body.to.email,
     p_contact_id:       body.contact_id || null,
     p_subject:          subject,
+    p_anchor_object:    body.anchor_object,
+    p_anchor_id:        body.anchor_record_id,
   }
-  const anchorParam = ANCHOR_FK_PARAM[body.anchor_object]
-  if (anchorParam) convParams[anchorParam] = body.anchor_record_id
 
   let conversationId: string
   if (body.conversation_id) {
@@ -699,6 +694,17 @@ const RELATED_MERGE_ROOTS: Record<string, Array<[string, string, string]>> = {
   ],
   contacts: [
     ["account", "accounts", "contact_account_id"],
+  ],
+  enrollments: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["opportunity", "opportunities", "opportunity_id"],
+  ],
+  incentive_applications: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["opportunity", "opportunities", "opportunity_id"],
+    ["project", "projects", "project_id"],
   ],
 }
 

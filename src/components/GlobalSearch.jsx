@@ -58,6 +58,7 @@ import { supabase } from '../lib/supabase'
 import { listRecentlyViewed } from '../data/recentlyViewedService'
 import RecordLink from './RecordLink'
 import NavLink from './NavLink'
+import { objectLabelPlural } from '../lib/objectNav'
 
 // ─── Object type → icon path (lucide-style single-stroke paths) ──────────────
 // Keep paths single-d so they render through the existing Icon convention.
@@ -112,7 +113,7 @@ export const SEARCH_GROUP_LABELS = {
   project:               'Projects',
   work_order:            'Work Orders',
   service_appointment:   'Service Appointments',
-  incentive_application: 'Incentive Applications',
+  incentive_application: objectLabelPlural('incentive_applications'),
   assessment:            'Assessments',
   envelope:              'Signature Envelopes',
   program:               'Programs',

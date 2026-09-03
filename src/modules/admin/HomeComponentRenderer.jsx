@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import RecordLink from '../../components/RecordLink'
+import { objectLabelPlural } from '../../lib/objectNav'
 
 // Renders a single home-page component by type. Used both in the builder canvas
 // (preview=true shows a labeled placeholder where live data would load) and on
@@ -40,11 +41,12 @@ export default function HomeComponentRenderer({ component, preview = false, sour
 
 // Object table → friendly plural label, for the Recently Viewed card's default
 // title, empty state, and header. Mirrors the tables the recents log tracks.
+// A renamed object takes its name from objectNav, the one place it is written.
 export const RECENTLY_VIEWED_OBJECT_LABELS = {
   accounts: 'Accounts', contacts: 'Contacts', properties: 'Properties',
   buildings: 'Buildings', units: 'Units', opportunities: 'Opportunities',
   projects: 'Projects', work_orders: 'Work Orders',
-  incentive_applications: 'Incentive Applications', assessments: 'Assessments',
+  incentive_applications: objectLabelPlural('incentive_applications'), assessments: 'Assessments',
   programs: 'Programs', vehicles: 'Vehicles', equipment: 'Equipment',
   product_items: 'Product Items', users: 'Users', envelopes: 'Signature Envelopes',
   service_appointments: 'Service Appointments',
