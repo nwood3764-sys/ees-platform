@@ -58,13 +58,19 @@ export async function loadEnrollmentProposalContext(enrollmentId) {
         .select('picklist_value, picklist_label').eq('id', enr.enrollment_record_type).maybeSingle()
     : { data: null }
 
-  const [{ data: prop }, { data: bld }] = await Promise.all([
+  const [{ data: prop }, { data: bld }, { data: signer }] = await Promise.all([
     enr.property_id
       ? supabase.from('properties').select('*').eq('id', enr.property_id).maybeSingle()
       : Promise.resolve({ data: null }),
     enr.building_id
       ? supabase.from('buildings')
           .select('building_total_units, building_number_of_units').eq('id', enr.building_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    // The CONTACT the record actually names. See the note on pjContact below.
+    UUID.test(String(enr.enrollment_signer_contact_id || ''))
+      ? supabase.from('contacts')
+          .select('contact_name, contact_title, contact_email, contact_phone')
+          .eq('id', enr.enrollment_signer_contact_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ])
 
@@ -91,14 +97,27 @@ export async function loadEnrollmentProposalContext(enrollmentId) {
   const csz = [prop?.property_city,
     [prop?.property_state, prop?.property_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
 
+  // The customer contact is the enrollment's CONTACT LOOKUP
+  // (enrollment_signer_contact_id), falling back to the free-text columns for a
+  // record saved before that lookup existed — the same precedence
+  // build_wi_ira_hear_project_reservation_form_prefill applies when it fills
+  // the programme's own submittal form.
+  //
+  // The proposal was the last consumer still reading the free-text columns
+  // ALONE, and on ENR-00077 those hold a stale contact: the record page and the
+  // submittal both name Dennis Hanson (the lookup) while the printed proposal
+  // named Josiah Brazle. All four values move together — a name from one person
+  // beside another's phone number is worse than either one alone.
+  const pick = (fromContact, typed) =>
+    (fromContact && String(fromContact).trim()) || typed || ''
   const fields = {
     pjOwner:       ownerName || '',
     pjOwnerAddr:   owner.addr,
     pjOwnerCsz:    owner.csz,
-    pjContact:     enr.enrollment_contact_name  || '',
-    pjContactTitle:enr.enrollment_contact_title || '',
-    pjEmail:       enr.enrollment_contact_email || '',
-    pjPhone:       enr.enrollment_contact_phone || '',
+    pjContact:     pick(signer?.contact_name,  enr.enrollment_contact_name),
+    pjContactTitle:pick(signer?.contact_title, enr.enrollment_contact_title),
+    pjEmail:       pick(signer?.contact_email, enr.enrollment_contact_email),
+    pjPhone:       pick(signer?.contact_phone, enr.enrollment_contact_phone),
     pjPropName:    prop?.property_name || '',
     pjInstallAddr: prop?.property_street || '',
     pjCsz:         csz,
