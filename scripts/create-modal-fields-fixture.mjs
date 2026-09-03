@@ -119,7 +119,52 @@ check('no layout: every non-system required column is asked for',
     neverAsk, recordTypeColumn: 'building_record_type',
   }), ['building_number_or_name', 'property_id'])
 
+
+// ── show_in_create: the conditionally-required field ──────────────────────
+//
+// The equipment on an opportunity line item is required by the DATABASE only
+// when the line's product installs a model-numbered device (a fan, a heat
+// pump), and REFUSED when it does not (electrical wiring, a service panel). It
+// can therefore be neither `required` on the layout — that would block every
+// line item that must leave it empty — nor left out of the create form, which
+// would mean the one field the save is about to demand is the one field nobody
+// was offered. So it is always ASKED and never CLIENT-VALIDATED.
+{
+  const sections = [{
+    section_label: 'Record',
+    section_order: 1,
+    widgets: [{
+      widget_type: 'field_group',
+      widget_config: {
+        fields: [
+          { name: 'product_id', type: 'lookup', label: 'Product' },
+          { name: 'oli_equipment_product_id', type: 'lookup', label: 'Equipment', show_in_create: true },
+          { name: 'oli_line_description', type: 'textarea', label: 'Line Description' },
+        ],
+      },
+    }],
+  }]
+  const out = buildCreateModalGroups(sections, { requiredFields: new Set(['product_id']) })
+  const names = out.groups.flatMap(g => g.fields.map(f => f.name))
+  check('show_in_create field IS offered though it is not required',
+    names.includes('oli_equipment_product_id'), true)
+  check('an ordinary optional field stays behind Show all fields',
+    names.includes('oli_line_description'), false)
+  const equip = out.groups.flatMap(g => g.fields).find(f => f.name === 'oli_equipment_product_id')
+  check('and it is NOT marked required, so a line that must leave it empty still saves',
+    equip.required, false)
+  // Control: without the flag it would be hidden, which is the bug this avoids.
+  const without = buildCreateModalGroups(
+    [{ section_label: 'Record', section_order: 1, widgets: [{ widget_type: 'field_group', widget_config: { fields: [
+      { name: 'oli_equipment_product_id', type: 'lookup', label: 'Equipment' },
+    ] } }] }],
+    { requiredFields: new Set() })
+  check('CONTROL: the same field WITHOUT show_in_create is not offered',
+    without.groups.flatMap(g => g.fields.map(f => f.name)).includes('oli_equipment_product_id'), false)
+}
+
 console.log(failures === 0
   ? `create-modal-fields fixture: ${checks} checks passed`
   : `create-modal-fields fixture: ${failures} of ${checks} checks FAILED`)
 process.exit(failures === 0 ? 0 : 1)
+

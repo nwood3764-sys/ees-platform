@@ -2696,8 +2696,15 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
               Preview unavailable — could not generate a signed URL.
             </div>
           ) : kind === 'pdf' ? (
+            /* `#toolbar=0` hides the browser PDF viewer's own toolbar. That
+               toolbar has its own download button, and it can only see the URL
+               it was handed — so it saved this document as "cbc523f5-….pdf"
+               while the record, the card and LEAP's own Download button all
+               carry the real name. Two download buttons, one of which cannot
+               name the file, is the whole defect; the named one is the only
+               one now. */
             <iframe
-              src={doc._previewUrl || url}
+              src={`${doc._previewUrl || url}#toolbar=0&navpanes=0`}
               title={doc.name || 'Document preview'}
               style={{
                 width: '100%', height: '100%',

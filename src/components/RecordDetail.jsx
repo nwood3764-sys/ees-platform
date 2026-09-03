@@ -2500,6 +2500,12 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       const opp = dependencyValues.opportunity_id
       return opp ? { opportunity_id: opp } : null
     }
+    if (dep.kind === 'qualifying_equipment_for_measure') {
+      // Inline-create from this picker would be creating a PRODUCT, which is
+      // catalogue administration rather than something done mid-line-item, so
+      // there is no seed to carry.
+      return null
+    }
     if (dep.kind === 'buildings_for_opportunity') {
       const opp = dependencyValues.opportunity_id
       return opp ? { opportunity_id: opp } : null
@@ -8663,6 +8669,56 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // and re-sends the original signing-request email through the envelope
   // owner's Outlook. We pass window.location.origin as signing_base_url so
   // the magic link resolves to whatever host the user is on (dev/prod).
+  // ── The Quality Installation Supplemental Data Sheet ────────────────────
+  //
+  // Produced automatically when a HEAR Project Reservation enrollment is
+  // created (see the effect below) and rebuilt on demand here. Both routes go
+  // through the same service call, so a regenerated sheet is byte-for-byte the
+  // sheet a fresh create would have produced — nothing is only reachable from
+  // one of the two paths.
+  // A ref, not state: nothing renders from it, and a ref is read synchronously
+  // so two fast presses cannot both pass the guard before a re-render lands.
+  const supplementalBusyRef = useRef(false)
+  // Takes the enrollment id rather than closing over recordId, because the
+  // create path calls it for a record that has just come into existence and
+  // which this component is not yet mounted on.
+  const generateSupplementalSheetFor = useCallback(async (enrollmentId, { silent }) => {
+    if (!enrollmentId) return
+    // A second press while the first run is still uploading would file two
+    // sheets on one enrollment.
+    if (supplementalBusyRef.current) return
+    supplementalBusyRef.current = true
+    try {
+      const { generateVentilationSupplementalDataSheet } =
+        await import('../data/ventilationSupplementalDataSheetService')
+      const res = await generateVentilationSupplementalDataSheet(enrollmentId)
+      if (res.skipped) return
+      const unitWord = res.rows.length === 1 ? 'unit' : 'units'
+      // Warnings are the point, not decoration: an empty Model Number column or
+      // a building with no unit records still produces a valid-looking workbook,
+      // and the person filing it needs to know before it reaches the programme
+      // administrator. They are shown even on the silent create path.
+      if (res.warnings.length > 0) {
+        toast.error(`Supplemental Data Sheet generated with ${res.rows.length} ${unitWord}, but: ${res.warnings.join(' ')}`)
+      } else if (!silent) {
+        toast.success(`Supplemental Data Sheet generated — ${res.rows.length} ${unitWord}.`)
+      }
+      setReloadTick(t => t + 1)
+    } catch (err) {
+      // A failure on the automatic create path is reported, never swallowed —
+      // the enrollment itself saved fine, and the person needs to know the
+      // sheet did not come with it.
+      toast.error(`Supplemental Data Sheet: ${err.message}`)
+    } finally {
+      supplementalBusyRef.current = false
+    }
+  }, [])
+
+  const handleRegenerateSupplementalSheet = useCallback(
+    () => generateSupplementalSheetFor(recordId, { silent: false }),
+    [generateSupplementalSheetFor, recordId])
+
+
   const handleResendEnvelope = useCallback(async () => {
     if (envelopeBusy) return
     if (tableName !== 'envelopes') return
@@ -9071,6 +9127,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
         const created = await insertRecord(tableName, fields)
         toast.success(cloneSource ? 'Clone created' : 'Record created')
+
+        // The Quality Installation Supplemental Data Sheet is produced the
+        // moment a HEAR Project Reservation enrollment exists — Nicholas: "this
+        // needs to auto-generate when the enrollment record is created based
+        // off the opportunity."
+        //
+        // Awaited BEFORE navigating so the record page opens with the sheet
+        // already on it, rather than appearing a few seconds later on a screen
+        // the person is already reading. Its own failures are reported inside
+        // runSupplementalSheet and never rethrown: the enrollment saved, and a
+        // create that reports "Create failed" because a spreadsheet did not
+        // build would be a lie about what happened.
+        if (tableName === 'enrollments') {
+          // The service decides whether this record type files a sheet — it
+          // resolves the saved record's record type itself. Calling it for
+          // every new enrollment and letting it no-op keeps that rule in one
+          // place instead of duplicating it against a draft whose record type
+          // is still a raw uuid here.
+          await generateSupplementalSheetFor(created.id, { silent: true })
+        }
 
         if (onRecordCreated) {
           onRecordCreated({ table: tableName, id: created.id })
@@ -9637,6 +9713,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
+    [ACTION_KEYS.REGENERATE_SUPPLEMENTAL_DATA_SHEET]:   handleRegenerateSupplementalSheet,
     [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setDocumentModalKind('proposal'),
     [ACTION_KEYS.GENERATE_HEAR_PROPOSAL]:              () => setDocumentModalKind('hear_proposal'),
     [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setDocumentModalKind('invoice'),

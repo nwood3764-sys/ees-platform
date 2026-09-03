@@ -294,10 +294,13 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
         ok(`${who}: the ${what} is on the same page as Printed Name`, !!find(page, s))
       }
 
-      // (b2) The heading is a CLEAR BREAK from the section above it (Nicholas,
-      //      2026-09-03: "too close to the total remaining amount"). Measured
-      //      from the last rule drawn above the heading — the Project Summary's
-      //      closing rule on a single-page proposal.
+      // (b2) The block SITS ON THE FOOT OF THE PAGE (Nicholas, 2026-09-03:
+      //      "there's a ton of room at the bottom, you just need to move that
+      //      whole section down"). A fixed lead below the Project Summary can
+      //      only ever be as generous as the fullest page allows; anchoring the
+      //      block to the page's floor spends whatever the page has left on the
+      //      gap above it. So the check is not "is the gap big" — it is "is the
+      //      block on the floor", which makes the gap as big as it can be.
       {
         const headText = find(page, 'ACCEPTANCE & AUTH')
         const above = page.rules.filter(r => r.y > headText.y + 6)
@@ -306,6 +309,11 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
           ok(`${who}: the heading clears the section above it (${Math.round(above.y - headText.y)}pt)`,
             above.y - headText.y >= 20)
         }
+        const dateCapY = find(page, A.CAPTIONS.date).y
+        const footerRule = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)
+          .reduce((lo, r) => (lo == null || r.y < lo ? r.y : lo), null)
+        eq(`${who}: the block sits on the page floor`,
+          Math.round(dateCapY - footerRule), A.FOOTER_CLEARANCE)
       }
 
       const nameCap = find(page, A.CAPTIONS.name)
@@ -328,11 +336,25 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
       ok(`${who}: the block does not run the full width of the page`,
         sigRow[1].x2 < W - MARGIN - 20)
 
-      // (d) room to actually sign: rule to rule, PDF y counts up from the foot
-      eq(`${who}: printed name to signature`, Math.round(nameRow[0].y - sigRow[0].y),
-        A.NAME_TO_SIGNATURE)
-      ok(`${who}: the signature line has room above it`,
-        A.NAME_TO_SIGNATURE - A.CAPTION_DROP >= 30)
+      // (d) Room to actually sign, and to print a name. Both gaps give way
+      //     before the page does (GAP_SCALES), so the check is the FLOOR each
+      //     one may fall to — the tightest scale must still leave a person
+      //     somewhere to write. The Sealed proposal names two companies, so its
+      //     paragraph runs a line longer and it is the document that tightens.
+      const tightest = A.GAP_SCALES[A.GAP_SCALES.length - 1]
+      const ruleGap = Math.round(nameRow[0].y - sigRow[0].y)
+      ok(`${who}: printed name to signature is a declared gap (${ruleGap}pt)`,
+        A.GAP_SCALES.some(sc => Math.round(A.NAME_TO_SIGNATURE * sc) === ruleGap))
+      ok(`${who}: the signature line has room above it (${ruleGap - A.CAPTION_DROP}pt clear)`,
+        ruleGap - A.CAPTION_DROP >= 18)
+      ok('even the tightest signing gap leaves room to sign',
+        A.NAME_TO_SIGNATURE * tightest - A.CAPTION_DROP >= 18)
+      ok('even the tightest name gap leaves room to write a name',
+        A.PARAGRAPH_TO_RULE * tightest >= 24)
+      // CONTROL: the 20pt this used to be is NOT room to write a name in —
+      // which is what Nicholas hit ("there's no room for the printed name to be
+      // entered"). Every declared gap must beat it.
+      ok('CONTROL: the previous 20pt name gap is below the floor', 20 < 24)
 
       // (e) every caption starts at the left end of the rule it names, and fits
       for (const [cap, row, src] of [[nameCap, nameRow[0], A.CAPTIONS.name],
@@ -402,6 +424,12 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
     //    the smallest declared size must need less room than the largest.
     const big = hearAcceptanceHeight(3, A.FONT_SIZES[0], 32)
     const small = hearAcceptanceHeight(3, A.FONT_SIZES[A.FONT_SIZES.length - 1], 32)
+    // The footer clearance belongs to the PAGE, not to the block: counting it
+    // inside the height as well as in the floor made the block shorter than the
+    // room it had, which is part of why it sat too high.
+    ok('CONTROL: the block height does not include the footer clearance',
+      hearAcceptanceHeight(1, 10, 0) === 10 * A.LINE_RATIO + A.PARAGRAPH_TO_RULE
+        + A.NAME_TO_SIGNATURE + A.CAPTION_DROP)
     ok('a smaller size needs less room than the largest', small < big)
     ok('the ladder starts at the largest size',
       A.FONT_SIZES[0] === Math.max(...A.FONT_SIZES))

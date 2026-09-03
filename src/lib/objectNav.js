@@ -233,6 +233,11 @@ const OBJECT_HOME = {
   equipment_information:        ['stock', null],
   price_books:                  ['stock', null],
   price_book_entries:           ['stock', null],
+  // The approved-model list linking an incentive measure to the equipment that
+  // qualifies for it. Catalogue configuration, so it lives with Products in
+  // Stock and has no list of its own — it is reached from the product it
+  // configures.
+  product_qualifying_equipment: ['stock', null],
 
   // ── Fleet ───────────────────────────────────────────────────────────────
   vehicles:             ['fleet', 'vehicles'],
