@@ -188,6 +188,8 @@ const OBJECT_HOME = {
   work_steps:                   ['field', 'work_steps'],
   service_appointments:         ['field', 'service_appointments'],
   service_appointment_assignments: ['field', null],
+  outbound_message_approvals:   ['field', 'approvals'],
+  outbound_message_policy:      ['field', null],
   resource_absences:            ['field', 'absences'],
   time_sheets:                  ['field', 'timesheets'],
   time_sheet_entries:           ['field', null],
