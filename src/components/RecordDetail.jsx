@@ -4327,9 +4327,9 @@ export function FieldGroupWidget({ widget, record, picklists, lookups, editing, 
   const columns = resolveFieldGroupColumns({ declared: sectionColumns, containerWidth })
   // A section that reflowed to fewer columns than it was designed for drops its
   // spacers — they hold slots in a shape that no longer exists, and two landing
-  // together paint an empty band. `rowHasContent` is the belt to that braces: a
-  // row left holding nothing (every field in it hidden by field permissions) is
-  // not drawn at all.
+  // together paint an empty band. `rowHasContent` is the second guard: a row
+  // left holding nothing at all (every field in it hidden by the caller's field
+  // permissions) is not drawn.
   const kept = fieldsForRenderedColumns(rendered, {
     columns, declaredColumns: sectionColumns, fieldOf: (r) => r.field,
   })
