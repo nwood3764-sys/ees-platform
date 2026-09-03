@@ -47,6 +47,24 @@ A clean build answers: new purpose-named artifact? yes. Own definition, not inhe
 
 In particular: **every opportunity record type has its own unique, never-shared opportunity stage picklist**, scoped via `picklist_value_record_type_assignments`. Absolute rule, no exceptions.
 
+**A service appointment is for an ASSESSMENT and nothing else (Nicholas, 2026-09-03).**
+*"They only should be used for assessments. That's it... I don't want them to
+have anything to do with regular work orders at all."* The object exists for the
+customer-facing half of the business — an assessment is booked with a homeowner
+who is confirmed, reminded and told when the technician is on the way. Regular
+work orders have none of that, and attaching an appointment to one gated the
+technician's day and carried a customer into the notification pipeline.
+**A technician's day is a list of WORK ORDERS**: `my_service_appointments`
+selects FROM `work_orders`, and a work order reaches its technician on its own
+**Assigned Technician + Scheduled Start Date** alone. An appointment is joined
+laterally only to supply a time window and can never decide whether a job is
+shown. `enforce_service_appointment_is_for_an_assessment` refuses a new
+appointment on any other work type (matched on the work type NAME, so a new
+programme's assessment is covered with no migration; audit counts, per the
+2026-08-23 ruling that an audit is the assessment programme's own field work).
+The 76 pre-existing appointments on non-assessment work orders are deliberately
+left in place — they record that a crew was on a site on a day.
+
 **One account per real-world company (Nicholas, 2026-07-25).** A company is ONE account regardless of how many roles it plays — never create a second account just to carry a different record type (e.g. a property owner that also manages properties). The **Property Owner account is primary**; `properties.property_management_company_id` may point at a Property Owner account (the lookup is not record-type filtered). Any import or automation must match accounts by normalized name across record types before inserting.
 
 ## Naming hard rule
@@ -103,6 +121,24 @@ Security advisor baseline is ~179 known lints (mostly `auth_security_definer_fun
 ## Working style
 
 Drive the work to completion; don't check in constantly. Surface only genuine binary decisions — state a recommendation first, then ask once, yes/no. Don't list options. Don't defer builds. No tangential commentary or unsolicited analysis. Verify a push actually reached the live bundle before reporting success.
+
+**Never send an email without a person approving it (Nicholas, 2026-09-03). HARD RULE, EVERYWHERE.**
+*"Do not ever send out emails without prompting the user to verify."* Said after
+LEAP emailed a real property contact **"Your home energy assessment is
+scheduled"** about an **insulation removal**, with a blank date, because a field
+got populated: the appointment notification pipeline's only gate was whether
+`service_appointments.contact_id` happened to be filled in, and a change that
+made child records inherit their parent's relationships filled it in. **A field
+being populated is not consent to contact somebody.**
+`enqueue_notification` no longer sends. It records the intent in
+**`outbound_message_approvals` (OMA-)** with status *Pending Approval*, and
+nothing leaves the building until a person opens it, reads the recipient and the
+body, and approves. The switch is `outbound_message_policy.omp_requires_approval`
+— a row, so a genuinely unattended pipeline can be exempted later without a
+migration — but it **defaults to requiring approval and a missing or unreadable
+row also requires approval**. The failure direction is always *held*, never
+*sent*. Any new outbound path — email, SMS, portal notification — goes through
+the same gate; never add one that sends directly.
 
 **Never tell Nicholas to refresh his screen (Nicholas, 2026-08-22).** "Hard-refresh once" is not an answer — it makes the user do the app's job. A deploy landing while a tab is open is LEAP's problem to solve: the running app polls `/build-manifest.json` (emitted per build by `emitBuildManifest` in `vite.config.js`, compared against `__BUILD_SHA__`) on a slow timer, on tab focus, and when the network returns, then reloads itself — deferring while a record is being edited or a create pop-up is open (`holdAppReload` in `src/lib/appUpdate.js`), and never more than once per 60s cooldown. If an update path is broken, fix the update path; do not hand the user a manual step.
 
