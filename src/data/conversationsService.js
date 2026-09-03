@@ -204,7 +204,7 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
     } else {
       const resolved = resolveAnchorFromConversation(conversation)
       if (!resolved) {
-        throw new Error('Email reply requires an anchor record but the thread has no resolvable parent.')
+        throw new Error('This thread is not related to any record, so a reply has nowhere to send from.')
       }
       anchorObject = resolved.anchorObject
       anchorRecordId = resolved.anchorRecordId
@@ -353,7 +353,7 @@ export async function sendNewEmail({
   outboundMailboxId,
   contactId,
 }) {
-  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!anchorObject || !anchorRecordId) throw new Error('a record to relate the message to is required')
   if (!to?.email) throw new Error('Recipient email required')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email)) throw new Error('Recipient email is not a valid address')
   const trimmedSubject = (subject || '').trim()
@@ -1150,7 +1150,7 @@ export async function sendTemplateEmail({
   subjectOverride,     // optional — user-edited subject line
   attachments,         // optional — pre-uploaded metas from uploadAttachmentToStorage
 }) {
-  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!anchorObject || !anchorRecordId) throw new Error('a record to relate the message to is required')
   if (!emailTemplateId)                  throw new Error('emailTemplateId required')
   if (!to?.email)                        throw new Error('Recipient email required')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email))
@@ -1200,7 +1200,7 @@ export async function sendNewEmailHtml({
   contactId,
   attachments,         // optional — pre-uploaded metas from uploadAttachmentToStorage
 }) {
-  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!anchorObject || !anchorRecordId) throw new Error('a record to relate the message to is required')
   if (!to?.email) throw new Error('Recipient email required')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email))
     throw new Error('Recipient email is not a valid address')

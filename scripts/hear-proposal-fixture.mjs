@@ -312,8 +312,15 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
         const dateCapY = find(page, A.CAPTIONS.date).y
         const footerRule = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)
           .reduce((lo, r) => (lo == null || r.y < lo ? r.y : lo), null)
-        eq(`${who}: the block sits on the page floor`,
-          Math.round(dateCapY - footerRule), A.FOOTER_CLEARANCE)
+        // The block sits ON the page's floor — never past it, and never far
+        // above it. It lands exactly on the clearance whenever the page has the
+        // room; the Sealed proposal, whose paragraph runs a line longer under a
+        // taller scope table, can come up a few points short of the floor
+        // rather than take a second page. Both are correct; drifting far above
+        // the floor is what is not.
+        const air = Math.round(dateCapY - footerRule)
+        ok(`${who}: the block sits on the page floor (${air}pt of air)`,
+          air <= A.FOOTER_CLEARANCE + 1 && air >= A.FOOTER_CLEARANCE - 10)
       }
 
       const nameCap = find(page, A.CAPTIONS.name)
@@ -365,9 +372,14 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
 
       // (f) the paragraph is CENTRED on the page, in a measure much wider than
       //     the signature block, and set larger than the document's small print
+      // The signer's own name and title are pre-printed ON the name rule, so
+      // they sit in the same band as the paragraph and must not be mistaken
+      // for it.
+      const SIGNER = 'Dennis Hanson', SIGNER_TITLE = 'Vice President- Housing & Residential'
       const para = page.text.filter(o => o.y > nameCap.y && o.y < nameCap.y + 70
         && o.s.startsWith('By signing') === false && o.s.length > 25
-        && !o.s.startsWith('Property Owner'))
+        && !o.s.startsWith('Property Owner')
+        && o.s !== SIGNER && o.s !== SIGNER_TITLE)
       const first = find(page, 'By signing below')
       ok(`${who}: the paragraph is drawn`, !!first)
       const paraLines = [first, ...para]
@@ -383,6 +395,39 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
       }
       ok(`${who}: the paragraph measure is much wider than the signature block`,
         (W - 2 * MARGIN) - 2 * A.TEXT_INSET > (sigRow[1].x2 - sigRow[0].x1) + 60)
+
+      // (f2) The name line is PRE-POPULATED from the record: the signer's name
+      //      sits on the rule and the title at the right-hand end of the same
+      //      line, so all that is left to do is sign.
+      {
+        const nm = page.text.find(o => o.s === SIGNER)
+        const ti = page.text.find(o => o.s === SIGNER_TITLE)
+        ok(`${who}: the signer's name is printed on the line`, !!nm)
+        ok(`${who}: the signer's title is printed on the line`, !!ti)
+        if (nm && ti) {
+          eq(`${who}: name and title share one line`, Math.round(nm.y), Math.round(ti.y))
+          ok(`${who}: the name sits above its own rule`, nm.y > nameRow[0].y)
+          ok(`${who}: the name starts at the rule`, Math.abs(nm.x - nameRow[0].x1) <= 3)
+          // The title follows the NAME, four spaces along, and stays on the
+          // name's own rule. Right-aligning it put it over the Date column,
+          // where it read as the date's label.
+          ok(`${who}: the title follows the name on the same line`,
+            ti.x > nm.x + measure(SIGNER, 10))
+          ok(`${who}: the title sits on the printed-name rule, not over Date`,
+            ti.x + measure(SIGNER_TITLE, 9) <= nameRow[0].x2 + 2)
+          ok(`${who}: four spaces between the name and the title`,
+            Math.abs((ti.x - (nm.x + measure(SIGNER, 10))) - measure('    ', 10)) < 2)
+          // …and it is captioned under its own value, like the name is.
+          const titleCap = page.text.find(o => o.s === A.CAPTIONS.title)
+          ok(`${who}: the title has its own caption`, !!titleCap)
+          if (titleCap) {
+            eq(`${who}: Title is captioned in line with the title`,
+              Math.round(titleCap.x), Math.round(ti.x))
+            eq(`${who}: both captions share the caption row`,
+              Math.round(titleCap.y), Math.round(nameCap.y))
+          }
+        }
+      }
 
       // (g) the block clears the page footer
       const footer = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)

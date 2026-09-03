@@ -497,7 +497,7 @@ export default function ConversationPanelWidget({
           {channelFilter === 'sms' ? (
             <button
               onClick={(e) => { e.stopPropagation(); setShowSmsCompose(true) }}
-              title="Send a new text message anchored to this record"
+              title="Send a new text message related to this record"
               style={headerButton({
                 background: C.emerald || '#3ecf8e', color: '#fff',
                 border: 'none', fontWeight: 600,
@@ -510,7 +510,7 @@ export default function ConversationPanelWidget({
           ) : FK_TO_ANCHOR_OBJECT[fk] && (
             <button
               onClick={(e) => { e.stopPropagation(); setShowCompose(true) }}
-              title="Compose a new email anchored to this record"
+              title="Compose a new email related to this record"
               style={headerButton({
                 background: C.emerald || '#3ecf8e', color: '#fff',
                 border: 'none', fontWeight: 600,

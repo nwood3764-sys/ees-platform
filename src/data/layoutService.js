@@ -2334,6 +2334,21 @@ export async function fetchDependentLookupOptions(field, record) {
   const currentValue = record?.[field.name] ?? null
 
   switch (dep.kind) {
+    // A contractor picker is scoped by WHAT AN ACCOUNT IS, not by another
+    // field on the record, so this kind carries no depends_on and must not be
+    // short-circuited by the empty-dependency guard every other kind uses.
+    // The RPC also returns the currently-saved account whatever its record
+    // type, so an existing contractor never renders as an empty dropdown.
+    case 'service_provider_accounts': {
+      const { data, error } = await supabase.rpc('list_service_provider_accounts', {
+        p_include_account_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.account_name || r.id.slice(0, 8),
+      }))
+    }
     case 'contacts_for_accounts': {
       if (dependencyValues.length === 0) {
         return []
@@ -2473,6 +2488,30 @@ export async function fetchDependentLookupOptions(field, record) {
       return (data || []).map(r => ({
         value: r.id,
         label: r.opportunity_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'qualifying_equipment_for_measure': {
+      // The equipment picker on an opportunity line item offers only the models
+      // approved for THAT line's incentive measure. With no measure chosen yet
+      // it offers nothing rather than the whole product catalogue — an
+      // unscoped fallback is how a water heater gets recorded as the fan
+      // installed in a bathroom, and the line-item trigger would refuse the
+      // save anyway, after the person had already picked.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_qualifying_equipment_for_measure', {
+        p_measure_product_ids: dependencyValues,
+        p_include_product_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        // Named the way the supplemental data sheet will report it, so what a
+        // person picks here is literally what the programme administrator
+        // reads in the Model Number column.
+        label: [r.product_manufacturer, r.product_model_number].filter(Boolean).join(' ')
+          || r.product_name || r.id.slice(0, 8),
       }))
     }
     case 'buildings_for_opportunity': {

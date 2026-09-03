@@ -294,9 +294,14 @@ export const HEAR_ACCEPTANCE = {
                             // no room for the printed name to be entered")
   NAME_TO_SIGNATURE: 42,    // rule to rule — a signature needs room above its line
   CAPTION_DROP: 11,         // caption baseline below its rule
-  FOOTER_CLEARANCE: 12,     // air between the last caption and the page footer rule
+  // Air between the last caption and the page footer rule. Two lines' worth
+  // (Nicholas, 2026-09-03: "it can't be all the way at the bottom, maybe leave
+  // it like two lines from the bottom") — the block reads as sitting at the
+  // foot of the page rather than falling off it.
+  FOOTER_CLEARANCE: 38,
   CAPTIONS: {
     name: 'Printed Name',
+    title: 'Title',
     signature: 'Property Owner / Authorized Representative — Signature',
     date: 'Date',
   },
@@ -333,7 +338,8 @@ export function hearAcceptanceGeometry(P) {
     dateX: blockX + signatureWidth + A.COLUMN_GAP, centerX: W / 2 }
 }
 
-function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY, needH }) {
+function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY, needH,
+                                signerName, signerTitle }) {
   const { d, st, font, t, wrap, stroke, tc } = P
   const A = HEAR_ACCEPTANCE
   const g = hearAcceptanceGeometry(P)
@@ -384,8 +390,40 @@ function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY,
   const caption = (x, txt) => { tc(CAPTION); font(8); t(x, st.y + A.CAPTION_DROP, txt) }
 
   st.y += A.PARAGRAPH_TO_RULE * fit.scale                      // Printed Name on top
-  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + g.signatureWidth, st.y)
+  // The name is already known, so it is already there (Nicholas, 2026-09-03:
+  // "put printed name, his name, then on the right-hand side of that same line
+  // put his title... let's make this kind of pre-populated"). It is the same
+  // contact the header names as the customer, so the person signing is not
+  // asked to re-type what the record already says — all that is left is the
+  // signature. A record with no contact leaves the line empty to be written on.
+  const who = String(signerName || '').trim()
+  const role = String(signerTitle || '').trim()
+  let titleX = null
+  let nameRuleWidth = g.signatureWidth
+  if (who) {
+    font(10)
+    const nameWidth = d.getTextWidth(who)
+    if (role) {
+      // Four spaces after the name, on the SAME line — the title belongs to the
+      // person, so it reads straight on from their name. Right-aligning it put
+      // it over the Date column, where it read as the date's label.
+      titleX = g.blockX + 2 + nameWidth + d.getTextWidth('    ')
+      font(9)
+      // The rule has to be long enough to hold both, and no shorter than the
+      // signature rule below it — a long title lengthens the line rather than
+      // running off the end of it.
+      nameRuleWidth = Math.min(g.blockWidth,
+        Math.max(g.signatureWidth, titleX + d.getTextWidth(role) + 4 - g.blockX))
+    }
+    tc([34, 43, 53]); font(10)
+    t(g.blockX + 2, st.y - 4, who)
+    if (titleX != null) { tc([34, 43, 53]); font(9); t(titleX, st.y - 4, role) }
+  }
+  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + nameRuleWidth, st.y)
   caption(g.blockX, A.CAPTIONS.name)
+  // The title gets its own caption under the line, in line with its own value —
+  // the same way Printed Name sits under the name.
+  if (titleX != null) caption(titleX, A.CAPTIONS.title)
 
   st.y += A.NAME_TO_SIGNATURE * fit.scale                      // then Signature + Date
   stroke(rule); d.setLineWidth(1)
@@ -543,6 +581,8 @@ function buildHearPdfBlob(m) {
     text: 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [70, 82, 98],
     needH,
+    signerName: F.pjContact,
+    signerTitle: F.pjContactTitle,
     // head() costs its gap + 18pt of heading and rule. The 24pt lead is a
     // clear break from the Project Summary above it (Nicholas, 2026-09-03:
     // "move the acceptance and authorization down some, it's too close to the
@@ -670,6 +710,8 @@ function buildHearSealedPdfBlob(m) {
     text: 'By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of ' + stateFullName(m.state) + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [68, 88, 110],
     needH,
+    signerName: F.pjContact,
+    signerTitle: F.pjContactTitle,
     headingHeight: 36,               // sh() leads 18pt and clears 18pt after its rule
     floorY: H - 24 - HEAR_ACCEPTANCE.FOOTER_CLEARANCE,   // Sealed draws its footer 24pt up
     drawHeading: () => sh('Acceptance & Authorization'),
