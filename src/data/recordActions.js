@@ -74,6 +74,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION: 'generate_hear_project_reservation_application',
   REGENERATE_SUPPLEMENTAL_DATA_SHEET:          'regenerate_supplemental_data_sheet',
   SEND_HEAR_PROPOSAL_FOR_SIGNATURE:            'send_hear_proposal_for_signature',
+  SEND_PAYMENT_REQUEST_FOR_SIGNATURE:          'send_payment_request_for_signature',
   GENERATE_HOMES_PAYMENT_INVOICE:              'generate_homes_payment_invoice',
   GENERATE_HOMES_ASSESSMENT_INVOICE:           'generate_homes_assessment_invoice',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
@@ -542,6 +543,25 @@ export const ACTION_REGISTRY = Object.freeze({
     isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
       !editing && !!record?.id && tableName === 'enrollments'
       && recordTypeValue === 'WI-IRA-MF-HEAR-Project-Reservation',
+  },
+
+  // Send the HOMES Project Payment Request invoice for signature.
+  //
+  // On the INCENTIVE APPLICATION, not the enrollment (Nicholas: "those are on
+  // incentive objects, right?"). Wisconsin only — NC and MI carry the same
+  // record type with zero live records, and enabling a customer send on an
+  // untested programme is not something to do speculatively.
+  send_payment_request_for_signature: {
+    key:                 ACTION_KEYS.SEND_PAYMENT_REQUEST_FOR_SIGNATURE,
+    label:               'Send Invoice for Signature',
+    icon:                'M22 2 11 13 M22 2l-7 20-4-9-9-4 20-7z',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['incentive_applications'],
+    defaultTier:         'menu',
+    defaultSortOrder:    47,
+    isAvailable: ({ tableName, editing, record, recordTypeLabel }) =>
+      !editing && !!record?.id && tableName === 'incentive_applications'
+      && recordTypeLabel === 'WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST',
   },
 
   // Project Reservation proposal for the IRA Multifamily HEAR programme. Its

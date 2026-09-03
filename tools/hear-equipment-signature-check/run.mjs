@@ -78,13 +78,14 @@ function stubPlugin() {
   const map = [
     [join('src', 'data', 'opportunityProductsService.js'), join(here, 'opportunityProductsServiceStub.js')],
     [join('src', 'data', 'hearProposalService.js'),        join(here, 'hearProposalServiceStub.js')],
+    [join('src', 'data', 'homesProposalService.js'),       join(here, 'homesProposalServiceStub.js')],
   ]
   return {
     name: 'hear-equipment-check-stubs',
     enforce: 'pre',
     async resolveId(source, importer) {
       if (!importer || source.startsWith('\0')) return null
-      if (!/opportunityProductsService|hearProposalService/.test(source)) return null
+      if (!/opportunityProductsService|hearProposalService|homesProposalService/.test(source)) return null
       const r = await this.resolve(source, importer, { skipSelf: true })
       if (!r) return null
       for (const [tail, stub] of map) if (r.id.endsWith(tail)) return stub
@@ -233,6 +234,34 @@ try {
 
   const confirmed = await page.locator('text=Sent for signature').isVisible().catch(() => false)
   note(confirmed, 'and the modal confirms what happened rather than closing silently')
+
+  // ── 6. The SAME modal, the payment request invoice ─────────────────────
+  // On incentive_applications, not the enrollment. One modal, two documents —
+  // so the recipient confirmation cannot exist on one path and not the other.
+  await page.locator('button', { hasText: 'Close' }).first().click().catch(() => {})
+  await page.locator('[data-test="open-invoice"]').click()
+  await page.waitForSelector('text=Send Invoice for Signature', { timeout: 8000 })
+  await page.waitForTimeout(600)
+
+  const invEmail = page.locator('input[placeholder*="@"]').first()
+  note((await invEmail.inputValue().catch(() => '')) === 'dennis.hanson@example.org',
+    'the invoice path pre-fills the recipient from the incentive application')
+
+  const invNote = await page.locator('text=Project Payment Request invoice').isVisible().catch(() => false)
+  note(invNote, 'and describes the INVOICE, not the proposal — the modal is configured per document')
+
+  const invSend = page.locator('button', { hasText: 'Send for Signature' }).first()
+  await invEmail.fill('')
+  await page.waitForTimeout(200)
+  note(!(await invSend.isEnabled()), 'the invoice path also disables Send with the address emptied')
+
+  await invEmail.fill('dennis.hanson@example.org')
+  await page.waitForTimeout(200)
+  await invSend.click()
+  await page.waitForTimeout(700)
+  const invSent = await page.evaluate(() => window.__invoice.sent)
+  note(invSent.length === 1 && invSent[0].email === 'dennis.hanson@example.org',
+    'the invoice send passes the recipient through', JSON.stringify(invSent))
 
   note(pageErrors.length === 0, 'no page error across the whole run', pageErrors.join(' | '))
 } finally {
