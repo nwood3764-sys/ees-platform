@@ -32,6 +32,8 @@ const CODE_SECTIONS = [
   { id:'projects',             label:'Projects'            },
   { id:'workorders',           label:'Work Orders'         },
   { id:'reviews',              label:'Verification Reviews'},
+  { id:'work_plans',           label:'Work Plans'          },
+  { id:'work_steps',           label:'Work Steps'          },
   { id:'schedule',             label:'Schedule'            },
   { id:'absences',             label:'Out of Office'       },
   { id:'technicians',          label:'Technicians'         },
@@ -832,6 +834,16 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
     // technicians in src/lib/objectSectionScopes.js, at the fetch, so no filter
     // or saved view can widen it.
     technicians: 'users',
+    // Work plans and work steps are the work order's own children, and until
+    // 2026-09-03 neither had a list anywhere in LEAP. That is what greyed out
+    // "View All" on the Work Steps card: buildScopedListUrl falls back to
+    // getTableListUrl, which returns null for an object with no list section,
+    // and the widget then renders a dead label instead of a link (Nicholas:
+    // "I'm trying to view all the work steps, and I can't see them. It's just
+    // a grayed-out thing"). A card that counts 22 steps has to be able to open
+    // them.
+    work_plans:  'work_plans',
+    work_steps:  'work_steps',
     credentials: 'contact_skills',
     timesheets:  'time_sheets',
     absences:    'resource_absences',
