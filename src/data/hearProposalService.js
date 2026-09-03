@@ -22,9 +22,10 @@
 
 import { supabase } from '../lib/supabase'
 import { uploadDocument } from './storageService'
+import { requireOutboundApproval } from '../lib/outboundSendGuard'
 import { loadEnrollmentProposalContext } from './enrollmentProposalContext'
 import {
-  computeHearModel, generateHearProposalBlob, hearRowsFromLineItems,
+  computeHearModel, generateHearProposalBlob, generateHearProposalWithSignatureTabs, hearRowsFromLineItems,
 } from '../lib/hearProposal'
 
 // The enrollment record type this proposal is built for.
@@ -137,4 +138,99 @@ export async function saveHearProposal({ object = 'enrollments', id }, blob, fil
   documentType = HEAR_PROPOSAL_DOCUMENT_TYPE) {
   const file = new File([blob], fileName, { type: 'application/pdf' })
   return uploadDocument({ file, relatedObject: object, relatedId: id, documentType, name: fileName })
+}
+
+
+// ---------------------------------------------------------------------------
+// Send for signature
+//
+// Nicholas: "When we make the proposal for the HEAR project reservation, we need
+// to send it out for signature and then through the LEAP software. Then it comes
+// back when it's signed." And: "I know you need to build the action just like we
+// have for everything else."
+//
+// Mirrors the project submittal route (ProjectSubmittalDocumentsModal) rather
+// than inventing a second one: generate with tabs -> upload -> send-envelope
+// with source_document_id. The difference is only the parent object — this hangs
+// off an ENROLLMENT, which is what makes the envelope's own status move the
+// enrollment (trg_zzz_enrollment_status_from_envelope, 20260903044012).
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate the HEAR proposal, file it, and send it to the property owner for
+ * signature.
+ *
+ * The recipient is NAMED BACK to the sender through requireOutboundApproval
+ * before anything leaves the building. That is LEAP's hard rule and it applies
+ * here for the reason it exists: this address is inherited from a record, not
+ * typed, and the last time a populated field was treated as consent to contact
+ * somebody a real property contact was emailed about work that was not theirs.
+ *
+ * Returns { document, envelope, signingUrl, emailed }.
+ */
+export async function sendHearProposalForSignature(enrollmentId, { name, email, subject } = {}) {
+  const to = String(email || '').trim()
+  if (!to) throw new Error('Enter the property owner’s email address.')
+
+  const ctx = await loadHearProposalContext(enrollmentId)
+  const missing = hearProposalMissing(ctx)
+  if (missing.length) { const e = new Error('This record is missing inputs the proposal needs.'); e.missing = missing; throw e }
+
+  const input = { fields: ctx.fields, units: ctx.units, rows: ctx.rows, contractor: ctx.contractor }
+  const { blob, tabs } = await generateHearProposalWithSignatureTabs(input)
+  if (!tabs.length) {
+    throw new Error('The proposal rendered without a signature block, so there is nowhere to place a signature.')
+  }
+
+  const model = computeHearModel(input)
+  const fileName = `${(ctx.enr?.enrollment_name || '').trim()
+    || `${ctx.fields.pjPropName || 'Project'} - ${model.state} IRA Multifamily HEAR Proposal`}.pdf`
+    .replace(/[\\/:*?"<>|]/g, '-')
+  const line = `Please sign: ${fileName.replace(/\.pdf$/, '')}`
+  const subj = String(subject || '').trim() || line
+
+  // The gate, before the upload — so a declined send leaves no orphan document
+  // on the record implying something went out.
+  requireOutboundApproval({
+    channel: 'email',
+    to,
+    subject: subj,
+    context: 'This sends the HEAR proposal to the property owner for signature.',
+  })
+
+  const file = new File([blob], fileName, { type: 'application/pdf' })
+  const document = await uploadDocument({
+    file, relatedObject: 'enrollments', relatedId: enrollmentId,
+    documentType: HEAR_PROPOSAL_DOCUMENT_TYPE, name: fileName,
+  })
+
+  const { data: sess } = await supabase.auth.getSession()
+  const token = sess?.session?.access_token
+  if (!token) throw new Error('Not signed in — refresh and sign in again.')
+
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-envelope`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      source_document_id: document.id,
+      parent_object: 'enrollments',
+      parent_record_id: enrollmentId,
+      recipients: [{
+        name: String(name || '').trim() || ctx.fields?.pjContact || 'Property Owner',
+        email: to, role: 'Property Owner', order: 1,
+      }],
+      subject: subj,
+      signing_base_url: window.location.origin,
+      tabs,
+    }),
+  })
+  const j = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(j.error || j.failure_reason || `send-envelope returned ${resp.status}`)
+
+  return {
+    document,
+    envelope: j.envelope_id || null,
+    signingUrl: j.signing_urls?.find(u => u.order === 1)?.signing_url || null,
+    emailed: j.email_send_results?.[0]?.status === 'sent',
+  }
 }

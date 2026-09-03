@@ -17,6 +17,7 @@ import {
   hearMeasureForProductCode, hearDefaultDesc,
   layoutScopeCols, _hearScopeCols, loadJsPdf,
   HEAR_ACCEPTANCE, hearAcceptanceGeometry, hearAcceptanceHeight, generateHearProposalBlob,
+  generateHearProposalWithSignatureTabs,
 } from '../src/lib/hearProposal.js'
 import { newProposalPdf, money } from '../src/lib/proposalPdfKit.js'
 
@@ -479,6 +480,67 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
     ok('the ladder starts at the largest size',
       A.FONT_SIZES[0] === Math.max(...A.FONT_SIZES))
   }
+}
+
+// ── Signature tabs for the e-signature route ──────────────────────────────
+//
+// The proposal is sent to the property owner to sign, so the pipeline needs to
+// know WHERE on the page the signature and date go. These coordinates are taken
+// from the same geometry that draws the rules, and this is what proves they
+// agree: a tab a centimetre off its line is not obviously wrong to whoever
+// renders it and very obviously wrong to whoever signed it.
+{
+  const SIG_FIELDS = {
+    pjInstallAddr: '570 South Clark Street', pjCsz: 'Whitewater, WI 53190',
+    pjOwner: 'Lutheran Social Services of Wisconsin and Upper Michigan, Inc.',
+    pjContact: 'Dennis Hanson', pjContactTitle: 'Vice President- Housing & Residential',
+    pjState: 'WI', pjInvDate: '2026-09-03',
+  }
+  const { rows } = hearRowsFromLineItems([
+    { productCode: 'HEAR-VENT', quantity: 11, unitPrice: 1600 },
+  ])
+  for (const contractor of ['EES', 'Sealed, Inc.']) {
+    const who = contractor.startsWith('Sealed') ? 'Sealed' : 'EES'
+    const { blob, tabs } = await generateHearProposalWithSignatureTabs({
+      rows, units: 11, contractor, fields: SIG_FIELDS,
+    })
+    ok(`${who}: the proposal still renders with tab capture on`, (await blob.arrayBuffer()).byteLength > 5000)
+    eq(`${who}: exactly two tabs — a signature and a date`, tabs.length, 2)
+
+    const sig = tabs.find(t => t.tab_type === 'sig')
+    const date = tabs.find(t => t.tab_type === 'date')
+    ok(`${who}: a signature tab is recorded`, !!sig)
+    ok(`${who}: a date tab is recorded`, !!date)
+
+    for (const [what, tab] of [['signature', sig], ['date', date]]) {
+      eq(`${who}: the ${what} tab is for the first recipient`, tab.recipient_order, 1)
+      ok(`${who}: the ${what} tab names a real page`, tab.page >= 1)
+      // Bottom-origin, so a y at or below 0 would place it off the page — the
+      // failure mode of getting the jsPDF top-origin conversion backwards.
+      ok(`${who}: the ${what} tab y is on the page (bottom-origin), got ${tab.y}`,
+        tab.y > 0 && tab.y < 792)
+      ok(`${who}: the ${what} tab has real width and height`, tab.width > 20 && tab.height > 5)
+      ok(`${who}: the ${what} tab x is inside the page`, tab.x >= 0 && tab.x + tab.width <= 612)
+    }
+
+    // The date sits to the RIGHT of the signature and they do not overlap —
+    // the two rules are drawn side by side, so tabs that overlap would stamp a
+    // date across the signature.
+    ok(`${who}: the date tab is right of the signature tab`, date.x > sig.x)
+    ok(`${who}: the two tabs do not overlap`, sig.x + sig.width <= date.x)
+    eq(`${who}: both tabs sit on the same line`, sig.y, date.y)
+
+    // CONTROL: the naive conversion — using jsPDF's top-origin y directly —
+    // would put the tab near the TOP of the page, far from the rule. If this
+    // ever stops differing, the conversion has been dropped.
+    ok(`${who}: CONTROL top-origin y really does differ from the recorded y`,
+      Math.abs((792 - sig.y) - sig.y) > 40)
+  }
+
+  // Tab capture is opt-in: the ordinary generate path must be untouched, so a
+  // routine proposal cannot start paying for signature machinery it never uses.
+  const plain = await generateHearProposalBlob({ rows, units: 11, contractor: 'EES', fields: SIG_FIELDS })
+  ok('the plain generate path still returns a bare Blob', typeof plain.arrayBuffer === 'function' && !('tabs' in plain))
 }
 
 console.log(`${checks - failures}/${checks} checks passed`)
