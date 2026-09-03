@@ -6,6 +6,7 @@ import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorStat
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
+import WorkOrdersToSchedule from '../components/scheduler/WorkOrdersToSchedule'
 import NavLink from '../components/NavLink'
 import RecordLink from '../components/RecordLink'
 import HelpIcon from '../components/help/HelpIcon'
@@ -1005,6 +1006,20 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
               onBack={() => setReviewWorkOrder(null)}
               onOpenRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: 'view', name: r.name })} />
           : <WorkOrderReviewQueue onOpenReview={(r) => setReviewWorkOrder(r)} />)}
+        {/* The dispatcher's worklist sits ABOVE the board, because the board can
+            only draw what is already scheduled — the unscheduled work is the
+            thing this screen exists to find (Nicholas, 2026-09-03: "they need
+            to see what work orders are to be scheduled so that they can
+            schedule"). Scheduling one refreshes the board beneath it. */}
+        {sec==='schedule' && (
+          /* Matches ScheduleView's own horizontal padding so the queue and the
+             board line up as one screen rather than two stacked panels. */
+          <div style={{ padding:'20px 24px 0' }}>
+            <WorkOrdersToSchedule
+              onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name, mode: 'view' })}
+              onScheduled={() => setScheduleDate(d => new Date(d))} />
+          </div>
+        )}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}
