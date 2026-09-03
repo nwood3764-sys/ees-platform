@@ -294,10 +294,13 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
         ok(`${who}: the ${what} is on the same page as Printed Name`, !!find(page, s))
       }
 
-      // (b2) The heading is a CLEAR BREAK from the section above it (Nicholas,
-      //      2026-09-03: "too close to the total remaining amount"). Measured
-      //      from the last rule drawn above the heading — the Project Summary's
-      //      closing rule on a single-page proposal.
+      // (b2) The block SITS ON THE FOOT OF THE PAGE (Nicholas, 2026-09-03:
+      //      "there's a ton of room at the bottom, you just need to move that
+      //      whole section down"). A fixed lead below the Project Summary can
+      //      only ever be as generous as the fullest page allows; anchoring the
+      //      block to the page's floor spends whatever the page has left on the
+      //      gap above it. So the check is not "is the gap big" — it is "is the
+      //      block on the floor", which makes the gap as big as it can be.
       {
         const headText = find(page, 'ACCEPTANCE & AUTH')
         const above = page.rules.filter(r => r.y > headText.y + 6)
@@ -306,6 +309,11 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
           ok(`${who}: the heading clears the section above it (${Math.round(above.y - headText.y)}pt)`,
             above.y - headText.y >= 20)
         }
+        const dateCapY = find(page, A.CAPTIONS.date).y
+        const footerRule = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)
+          .reduce((lo, r) => (lo == null || r.y < lo ? r.y : lo), null)
+        eq(`${who}: the block sits on the page floor`,
+          Math.round(dateCapY - footerRule), A.FOOTER_CLEARANCE)
       }
 
       const nameCap = find(page, A.CAPTIONS.name)
@@ -402,6 +410,12 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
     //    the smallest declared size must need less room than the largest.
     const big = hearAcceptanceHeight(3, A.FONT_SIZES[0], 32)
     const small = hearAcceptanceHeight(3, A.FONT_SIZES[A.FONT_SIZES.length - 1], 32)
+    // The footer clearance belongs to the PAGE, not to the block: counting it
+    // inside the height as well as in the floor made the block shorter than the
+    // room it had, which is part of why it sat too high.
+    ok('CONTROL: the block height does not include the footer clearance',
+      hearAcceptanceHeight(1, 10, 0) === 10 * A.LINE_RATIO + A.PARAGRAPH_TO_RULE
+        + A.NAME_TO_SIGNATURE + A.CAPTION_DROP)
     ok('a smaller size needs less room than the largest', small < big)
     ok('the ladder starts at the largest size',
       A.FONT_SIZES[0] === Math.max(...A.FONT_SIZES))

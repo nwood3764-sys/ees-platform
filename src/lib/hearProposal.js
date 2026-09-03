@@ -284,9 +284,9 @@ export const HEAR_ACCEPTANCE = {
   DATE_WIDTH: 150,
   COLUMN_GAP: 24,           // between the signature rule and the date rule
   PARAGRAPH_TO_RULE: 20,    // paragraph down to the printed-name rule
-  NAME_TO_SIGNATURE: 46,    // rule to rule — a signature needs room above its line
+  NAME_TO_SIGNATURE: 42,    // rule to rule — a signature needs room above its line
   CAPTION_DROP: 11,         // caption baseline below its rule
-  FOOTER_CLEARANCE: 6,      // the last caption never sits on the page footer
+  FOOTER_CLEARANCE: 12,     // air between the last caption and the page footer rule
   CAPTIONS: {
     name: 'Printed Name',
     signature: 'Property Owner / Authorized Representative — Signature',
@@ -294,14 +294,19 @@ export const HEAR_ACCEPTANCE = {
   },
 }
 
-// How much vertical room the whole block needs, heading included. `headingHeight`
-// is what the caller's own section heading costs, because the two documents draw
-// theirs differently — measured, not guessed: leaving the heading out of this
-// sum once put the Sealed proposal's Date caption 0.4pt above the page footer.
+// How much vertical room the whole block needs, heading included, measured from
+// the cursor down to the last caption's baseline. `headingHeight` is what the
+// caller's own section heading costs, because the two documents draw theirs
+// differently — measured, not guessed: leaving the heading out of this sum once
+// put the Sealed proposal's Date caption 0.4pt above the page footer.
+//
+// The footer clearance is NOT in here. It belongs to the page (the caller's
+// floorY), not to the block, and counting it twice is what made the block
+// shorter than the room it was actually given.
 export function hearAcceptanceHeight(lineCount, size, headingHeight) {
   const A = HEAR_ACCEPTANCE
   return headingHeight + lineCount * (size * A.LINE_RATIO) + A.PARAGRAPH_TO_RULE
-    + A.NAME_TO_SIGNATURE + A.CAPTION_DROP + A.FOOTER_CLEARANCE
+    + A.NAME_TO_SIGNATURE + A.CAPTION_DROP
 }
 
 export function hearAcceptanceGeometry(P) {
@@ -320,7 +325,7 @@ export function hearAcceptanceGeometry(P) {
     dateX: blockX + signatureWidth + A.COLUMN_GAP, centerX: W / 2 }
 }
 
-function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, limitY, needH }) {
+function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY, needH }) {
   const { d, st, font, t, wrap, stroke, tc } = P
   const A = HEAR_ACCEPTANCE
   const g = hearAcceptanceGeometry(P)
@@ -335,9 +340,21 @@ function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, limitY,
     font(size)
     const lines = wrap(text, g.textWidth)
     fit = { size, lines, height: hearAcceptanceHeight(lines.length, size, headingHeight) }
-    if (st.y + fit.height <= limitY) break
+    if (st.y + fit.height <= floorY) break
   }
-  needH(fit.height)
+  if (st.y + fit.height > floorY) {
+    needH(fit.height)                 // genuinely no room: a fresh page, whole
+  } else {
+    // ANCHORED TO THE FOOT OF THE PAGE (Nicholas, 2026-09-03: "move the
+    // acceptance and authorization section down more"). A fixed lead below the
+    // Project Summary can only ever be as generous as the emptiest page allows;
+    // sitting the block on the page's floor instead spends every point the page
+    // has left on the gap above it, and spends it automatically — a fuller
+    // proposal keeps the block where it lands, a lighter one pushes it right
+    // down. The separation is a RESULT of the page, not a number somebody has
+    // to re-tune each time a section grows.
+    st.y = floorY - fit.height
+  }
   drawHeading()
 
   const lineHeight = fit.size * A.LINE_RATIO
@@ -514,7 +531,9 @@ function buildHearPdfBlob(m) {
     // total remaining amount") — the block buys it back out of its own text
     // size if a page ever runs short, never out of a second page.
     headingHeight: 24 + 18,
-    limitY: H - M - 24,
+    // The page's floor for this block: its own footer rule (drawn 28pt up on
+    // this document), less the air the last caption keeps above it.
+    floorY: H - 28 - HEAR_ACCEPTANCE.FOOTER_CLEARANCE,
     drawHeading: () => head('Acceptance & Authorization', 24),
   })
   _stampEesFooters(P, m.state, pv(F.pjInvDate), 28)
@@ -634,7 +653,7 @@ function buildHearSealedPdfBlob(m) {
     rule: [68, 88, 110],
     needH,
     headingHeight: 36,               // sh() leads 18pt and clears 18pt after its rule
-    limitY: H - M - 16,
+    floorY: H - 24 - HEAR_ACCEPTANCE.FOOTER_CLEARANCE,   // Sealed draws its footer 24pt up
     drawHeading: () => sh('Acceptance & Authorization'),
   })
   _stampSealedFooters(P, 'Project Proposal', F.pjProjInvNo || F.pjIQ || '', F.pjInvDate)

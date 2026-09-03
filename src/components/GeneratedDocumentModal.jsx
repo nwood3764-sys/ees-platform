@@ -168,7 +168,16 @@ export default function GeneratedDocumentModal({ recordObject = 'enrollments', r
 
         <div style={footer}>
           <div style={{ fontSize: 12, color: C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {saved ? `Saved to this ${objectLabel.toLowerCase()}’s Documents` : (result ? 'Download a copy, or save it to this record’s Documents' : '')}
+            {saved
+              ? `Saved to this ${objectLabel.toLowerCase()}’s Documents`
+              : (result
+                  // Name the file here, and say which button applies it. The
+                  // preview above is the browser's own PDF viewer, and ITS save
+                  // button can only see a blob: URL — whose entire identity is a
+                  // uuid, so it saves "2ef5cbfd-….pdf". Download and Save both
+                  // carry the real name; nothing in a blob URL can.
+                  ? `Download saves it as “${result.fileName}” — the preview’s own save button cannot name it`
+                  : '')}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button onClick={onClose} style={btnGhost}>Close</button>
