@@ -32,8 +32,22 @@
 /** The enrollment record type that files this sheet. */
 export const SUPPLEMENTAL_SHEET_ENROLLMENT_RECORD_TYPE = 'WI-IRA-MF-HEAR-Project-Reservation'
 
-/** The documents.document_type this sheet is filed under. */
-export const SUPPLEMENTAL_SHEET_DOCUMENT_TYPE = 'hear_quality_installation_supplemental_data_sheet'
+/**
+ * The documents.document_type this sheet is filed under.
+ *
+ * NOT a type of this feature's own coining. The HEAR Project Reservation layout
+ * has carried a "Multifamily Supplemental Data Sheet" SLOT all along, typed
+ * `mf_supplemental_data_sheet` — the named place on the record where this file
+ * is meant to live. Filing under a new type put every generated sheet in the
+ * catch-all Documents card at the bottom of the page while the slot built for
+ * it sat empty (Nicholas: "it needs to go under the multi-family supplemental
+ * data sheet area").
+ *
+ * The rule this records: before minting a document type, look for the slot the
+ * layout already declares. A slot lists ONLY its own type, so a near-miss here
+ * is invisible — the file uploads fine, and lands in the wrong card.
+ */
+export const SUPPLEMENTAL_SHEET_DOCUMENT_TYPE = 'mf_supplemental_data_sheet'
 
 /** The documents.category the sheet and its supporting product files share. */
 export const SUPPLEMENTAL_SHEET_CATEGORY = 'HEAR Project Reservation'
