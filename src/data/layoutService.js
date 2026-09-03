@@ -976,7 +976,7 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
     layout,
     sections: applyConventionalReadOnly(
       objectName,
-      await applyChoiceColumnOptions(objectName, await applyColumnTypeFallbacks(objectName, sectionList)),
+      await applyLookupFilters(objectName, await applyChoiceColumnOptions(objectName, await applyColumnTypeFallbacks(objectName, sectionList))),
     ),
     actionOverrides,
   }
@@ -1036,6 +1036,51 @@ async function applyChoiceColumnOptions(objectName, sectionList) {
       return { ...f, type: 'select', options: opts }
     })
     w.widget_config = { ...w.widget_config, fields }
+  }
+  return sectionList
+}
+
+// ─── Lookup option scoping ───────────────────────────────────────────────────
+// A lookup renders every live row of the table it points at. That is right for
+// a property or an opportunity, and wrong for a column that names a PERSON with
+// a job: Assigned Technician offered all 13 users — three Admins, a Program
+// Manager and an Operations Manager included — none of whom take a work order
+// (Nicholas, 2026-09-02: "only technicians and people that can get work orders
+// should show up under the assigned technician picklist").
+//
+// The scope is a declared property of the FIELD, held in field_metadata
+// alongside fm_display_type, so one row scopes the column on every layout that
+// carries it and on any layout built later. Ten work-order layouts carry
+// assigned_technician_id; hand-editing them would have to find all ten and be
+// redone for the eleventh.
+//
+// A failure here leaves every lookup unscoped — the behaviour before this
+// existed — rather than emptying a picker the user then cannot fill.
+async function applyLookupFilters(objectName, sectionList) {
+  let rows
+  try {
+    const { data, error } = await supabase
+      .from('field_metadata')
+      .select('fm_column, fm_lookup_filter')
+      .eq('fm_object', objectName)
+      .eq('fm_is_deleted', false)
+      .not('fm_lookup_filter', 'is', null)
+    if (error) return sectionList
+    rows = data || []
+  } catch { return sectionList }
+  if (!rows.length) return sectionList
+
+  const byCol = new Map(rows.map(r => [r.fm_column, r.fm_lookup_filter]))
+  for (const sec of sectionList) {
+    for (const w of sec.widgets || []) {
+      if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
+      const fields = w.widget_config.fields.map(f => {
+        if (f?.type !== 'lookup' || !f.name) return f
+        const filter = byCol.get(f.name)
+        return filter ? { ...f, lookup_filter: filter } : f
+      })
+      w.widget_config = { ...w.widget_config, fields }
+    }
   }
   return sectionList
 }
@@ -2183,7 +2228,7 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, o
     isDeletedCol = meta?.is_deleted_column || null
   } catch { /* metadata RPC unavailable for this table — proceed unfiltered */ }
 
-  const { search = null, includeId = null } = opts
+  const { search = null, includeId = null, filter = null } = opts
 
   // Pull the subtitle FK too when this table has a configured disambiguator.
   const subCfg = LOOKUP_SUBTITLE[lookupTable]
@@ -2196,6 +2241,16 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, o
     .limit(limit)
 
   if (isDeletedCol) query = query.eq(isDeletedCol, false)
+  // Field-declared scoping (field_metadata.fm_lookup_filter) — e.g. Assigned
+  // Technician offers only active field technicians. Applied ON TOP of the
+  // soft-delete filter, never instead of it. A malformed entry is ignored
+  // rather than allowed to empty the picker.
+  if (filter && typeof filter === 'object') {
+    for (const [col, val] of Object.entries(filter)) {
+      if (!col || val === undefined) continue
+      query = query.eq(col, val)
+    }
+  }
   // Server-side search: filter by the label column so the dropdown queries the
   // full table as the user types, instead of filtering a 50-row client slice.
   // Without this, a lookup against a large table (e.g. ~2,000 accounts) can
