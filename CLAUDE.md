@@ -148,6 +148,24 @@ migration — but it **defaults to requiring approval and a missing or unreadabl
 row also requires approval**. The failure direction is always *held*, never
 *sent*. Any new outbound path — email, SMS, portal notification — goes through
 the same gate; never add one that sends directly.
+**The staff-composed sends are gated too** (Nicholas, 2026-09-03: *"any outgoing
+communications, emails, texts, anything"*): every client call to `send-email-v1`
+or `send-notification-sms` goes through `requireOutboundApproval` in
+`src/lib/outboundSendGuard.js`, which names the RECIPIENT back to the sender —
+authored is not verified, and the address is usually inherited from a record
+rather than typed. **One definition, and the build enforces it**:
+`scripts/outbound-send-guard-fixture.mjs` fails if a send path is added without
+it. With no window to ask, the answer is never *send*.
+**Two paths deliberately NOT gated, and why**: `portal-email-visit` (a portal
+user emailing THEMSELVES their own visit — there is no wrong recipient to pick)
+and `dispatch-scheduled-reports` (a scheduled internal report, no customer).
+Neither can reach a customer.
+**Held messages are reviewed at Field → Message Approvals**
+(`outbound_messages_awaiting_approval` / `approve_outbound_message` /
+`decline_outbound_message`). Approving SENDS, so it is an RPC, never a table
+update — the `fire-notification` secret must not reach a browser — and the row
+is locked with its status stamped BEFORE the post, so a second click cannot send
+twice.
 
 **Never tell Nicholas to refresh his screen (Nicholas, 2026-08-22).** "Hard-refresh once" is not an answer — it makes the user do the app's job. A deploy landing while a tab is open is LEAP's problem to solve: the running app polls `/build-manifest.json` (emitted per build by `emitBuildManifest` in `vite.config.js`, compared against `__BUILD_SHA__`) on a slow timer, on tab focus, and when the network returns, then reloads itself — deferring while a record is being edited or a create pop-up is open (`holdAppReload` in `src/lib/appUpdate.js`), and never more than once per 60s cooldown. If an update path is broken, fix the update path; do not hand the user a manual step.
 
