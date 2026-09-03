@@ -12,7 +12,7 @@ import ModuleHomeByline from '../components/ModuleHomeByline'
 
 const CODE_SECTIONS = [
   { id:'home',         label:'Home'                     },
-  { id:'applications', label:'Incentive Applications'   },
+  { id:'applications', label:'Incentives'              },
   { id:'requests',     label:'Project Payment Requests' },
   { id:'received',     label:'Payment Receipt'          },
 ]
@@ -64,14 +64,14 @@ function pmtCell(col, r) {
 
 
 // ---------------------------------------------------------------------------
-// Incentive Applications panel — the module home's first block
+// Incentives panel — the module home's first block
 // ---------------------------------------------------------------------------
 // Built for this screen and this object. The payment-request tiles below it
 // report a different thing (money already claimed), so nothing here is a
 // re-pointed copy of them: an application is the incentive being PURSUED, and
 // what matters about it is how many are open, how many are with the program
 // waiting on an answer, and what has been asked for.
-function IncentiveApplicationsPanel({ applications, setSec }) {
+function IncentivesPanel({ applications, setSec }) {
   const settled = /closed|denied|withdrawn|paid|received/i
   const withProgram = /submitted|awaiting|under review|pre-approv/i
 
@@ -87,10 +87,10 @@ function IncentiveApplicationsPanel({ applications, setSec }) {
   return (
     <div style={{ marginBottom:16 }}>
       <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:8 }}>
-        <div style={{ fontSize:13, fontWeight:700, color:C.textPrimary }}>Incentive Applications</div>
+        <div style={{ fontSize:13, fontWeight:700, color:C.textPrimary }}>Incentives</div>
         <span onClick={()=>setSec('applications')}
           style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>
-          View Incentive Applications →
+          View Incentives →
         </span>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:12 }}>
@@ -177,7 +177,7 @@ function IncentivesHome({ setSec, requests, receipts, applications = [] }) {
           <ModuleHomeByline />
         </div>
 
-        <IncentiveApplicationsPanel applications={applications} setSec={setSec} />
+        <IncentivesPanel applications={applications} setSec={setSec} />
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
           {[

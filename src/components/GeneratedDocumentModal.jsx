@@ -21,13 +21,14 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import { generatedDocumentSpec } from '../data/generatedDocuments'
+import { objectLabel as objectLabelFor } from '../lib/objectNav'
 
 const CARD_SECONDARY = '#f7f9fc'
 
 // friendly name for the record the document attaches to
 const OBJECT_LABEL = {
   enrollments:            'Enrollment',
-  incentive_applications: 'Incentive Application',
+  incentive_applications: objectLabelFor('incentive_applications'),
 }
 
 export default function GeneratedDocumentModal({ recordObject = 'enrollments', recordId, kind = 'proposal', onClose, onSaved }) {

@@ -59,10 +59,62 @@ const LABEL_ACRONYMS = {
   ia: 'IA', ppr: 'PPR', sa: 'SA', qc: 'QC', pdf: 'PDF', url: 'URL',
 }
 
+// Objects whose LABEL is not their table name humanized.
+//
+// Nicholas, 2026-09-03: "I want to rename incentives. The name of the object
+// should be incentives, not incentive applications."
+//
+// Salesforce keeps an object's LABEL and its API NAME apart, and so does LEAP:
+// the table stays `incentive_applications` (with its ia_ column prefix, its
+// foreign keys and every URL that already points at it), and what people read
+// changes. Renaming the table would rewrite a hundred references to change a
+// word on a screen.
+//
+// This is the ONE definition. Before it, six modules each carried their own
+// table → label map — the object catalog, Setup, global search, the record
+// page, the home-page renderer and the generated-document modal — so renaming
+// an object meant finding all six, and missing one left the old name showing
+// on whichever screen was forgotten. They all read from here now.
+const OBJECT_LABEL_OVERRIDES = {
+  incentive_applications: { singular: 'Incentive', plural: 'Incentives' },
+}
+
+/**
+ * What this object is CALLED, singular — "Incentive", "Work Step".
+ * Derived from the table name unless the object is listed above.
+ */
+export function objectLabel(table) {
+  const override = OBJECT_LABEL_OVERRIDES[table]
+  if (override) return override.singular
+  return singularizeLabel(humanizeObjectLabel(table))
+}
+
+/** What this object is CALLED, plural — "Incentives", "Work Steps". */
+export function objectLabelPlural(table) {
+  const override = OBJECT_LABEL_OVERRIDES[table]
+  if (override) return override.plural
+  return humanizeObjectLabel(table)
+}
+
+// Table names are plural, so the humanized label is too. Singularizing it is
+// only ever a display convenience — an object whose singular this gets wrong
+// belongs in the override map above, where the answer is written down rather
+// than guessed.
+function singularizeLabel(label) {
+  if (!label) return ''
+  if (label.endsWith('ies')) return `${label.slice(0, -3)}y`
+  if (label.endsWith('ses')) return label.slice(0, -2)
+  if (label.endsWith('s') && !label.endsWith('ss')) return label.slice(0, -1)
+  return label
+}
+
 /**
  * Readable object label derived from the table name — "work_steps" → "Work
  * Steps". Used whenever an object carries no explicit label, so a record page
  * never shows a raw table name to a user again.
+ *
+ * Prefer objectLabel / objectLabelPlural: they honour an object that has been
+ * renamed. This is the derivation underneath them.
  */
 export function humanizeObjectLabel(table) {
   if (!table) return ''
@@ -262,7 +314,7 @@ export function objectNavFor(table) {
   return {
     module: moduleId,
     moduleLabel: MODULE_LABELS[moduleId] || humanizeObjectLabel(moduleId),
-    label: humanizeObjectLabel(table),
+    label: objectLabelPlural(table),
     section,
     listUrl: section ? `/m/${moduleId}/${section}` : null,
     // Whether this object was explicitly registered. Callers use it only for

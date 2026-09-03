@@ -29,9 +29,19 @@
 // so a copy is deterministic and testable. Pinned by
 // scripts/layout-cards-fixture.mjs.
 
+import { OBJECT_CONVERSATION_FK } from './conversationAnchors.js'
+
+// What the omni-channel card is CALLED, in one place: the palette that places
+// it, the card the record page draws, and the migration that seeded it all say
+// the same word. It answered to "Conversations" on 47 seeded layouts and
+// "Communications" in the palette until 2026-09-03, so the same card had two
+// names depending on which screen you were on.
+export const CONVERSATION_CARD_TITLE = 'Communications'
+
 // ─── What the record page draws as a card ────────────────────────────────────
 // Kept in sync with RecordDetail's renderRecordCard: every type here is drawn
 // by that one function, in the main flow and in the right rail alike.
+
 export const CARD_WIDGET_TYPES = new Set([
   'related_list', 'file_gallery', 'conversation_panel', 'conversation_messages',
   'conversation_list', 'report', 'prtsn_history', 'work_plan',
@@ -49,16 +59,13 @@ export function isCardWidget(widgetOrType) {
 
 // Objects whose records can host a Communications (two-way email) panel, and
 // the FK column on `conversations` that anchors a thread to them. A
-// conversation_panel stores its anchor as widget_config.fk. Mirror of the
-// client FK_TO_ANCHOR_OBJECT / server ANCHOR_FK_PARAM maps — keep in sync when
-// a new anchor object is enabled.
-export const OBJECT_CONVERSATION_FK = {
-  contacts: 'contact_id', accounts: 'account_id', projects: 'project_id',
-  service_appointments: 'service_appointment_id', work_orders: 'work_order_id',
-  incentive_applications: 'incentive_application_id', opportunities: 'opportunity_id',
-  assessments: 'assessment_id', buildings: 'building_id', properties: 'property_id',
-  units: 'unit_id',
-}
+// conversation_panel stores its anchor as widget_config.fk.
+//
+// This used to be one of eight hand-kept copies of that fact. There is now one
+// client definition — conversationAnchors.js — and the database derives its
+// own from the conversations table's foreign keys. Re-exported here because
+// the layout palette has always been imported for it.
+export { OBJECT_CONVERSATION_FK }
 
 // Objects a PHOTOS gallery may be placed on. Mirror of PHOTO_ALLOWED_OBJECTS in
 // storageService — photos route to an evidence bucket by object, and a gallery
@@ -117,9 +124,9 @@ export const CARD_CATALOG = [
   {
     id: 'conversation_panel',
     widgetType: 'conversation_panel',
-    label: 'Communications',
+    label: CONVERSATION_CARD_TITLE,
     description: 'Two-way email threads anchored to this record.',
-    defaultTitle: 'Communications',
+    defaultTitle: CONVERSATION_CARD_TITLE,
     configure: null,
     onePerLayout: true,
     availableOn: (object) => OBJECT_CONVERSATION_FK[object]

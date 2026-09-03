@@ -21,23 +21,12 @@ import ComposeEmailModal from './ComposeEmailModal'
 import ComposeSmsModal from './ComposeSmsModal'
 import LogActivityModal from './LogActivityModal'
 import LogDroppedEmailModal from './LogDroppedEmailModal'
-
-// FK column on conversations → anchor object name expected by send-email-v1.
 // The widget knows its parent only through widget_config.fk, so the modal
-// can't infer the anchor table itself — we map it explicitly here.
-const FK_TO_ANCHOR_OBJECT = {
-  contact_id: 'contacts',
-  account_id: 'accounts',
-  project_id: 'projects',
-  service_appointment_id: 'service_appointments',
-  work_order_id: 'work_orders',
-  incentive_application_id: 'incentive_applications',
-  opportunity_id: 'opportunities',
-  assessment_id: 'assessments',
-  building_id: 'buildings',
-  property_id: 'properties',
-  unit_id: 'units',
-}
+// cannot infer the anchor table itself. One definition, shared with the
+// layout palette and the reply path (conversationAnchors.js).
+import { FK_TO_ANCHOR_OBJECT } from '../lib/conversationAnchors'
+import { CONVERSATION_CARD_TITLE } from '../lib/layoutCards'
+
 
 // ---------------------------------------------------------------------------
 // ConversationPanel — the OMNI-CHANNEL communication area on a record.
@@ -395,7 +384,7 @@ export default function ConversationPanelWidget({
     }
   }
 
-  const title = widget.widget_title || 'Conversations'
+  const title = widget.widget_title || CONVERSATION_CARD_TITLE
   const entryCount = entries.length
   const totalUnread = entries.reduce((sum, t) => sum + (t.unread_count || 0), 0)
   // Calls and other logged activities belong to the record, not to a thread,
@@ -778,7 +767,7 @@ export default function ConversationPanelWidget({
           parsed={droppedEmails[0]}
           targetObject={parentObject}
           targetId={parentRecordId}
-          targetLabel={title === 'Conversations' ? 'this record' : title}
+          targetLabel={title === CONVERSATION_CARD_TITLE ? 'this record' : title}
           onClose={() => setDroppedEmails(prev => prev.slice(1))}
           onFiled={handleEmailFiled}
         />

@@ -129,6 +129,8 @@ import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
+import { CONVERSATION_ANCHORS } from '../lib/conversationAnchors'
+import { objectLabelPlural } from '../lib/objectNav'
 
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
@@ -392,7 +394,7 @@ const TABLE_META = {
   // building — work_orders.project_id is NOT NULL and the assessment knows its
   // project (derive_assessment_project, migration 20260817163750).
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id', 'opportunity_id', 'project_id'], parentTables: ['properties', 'buildings', 'opportunities', 'projects'] },
-  incentive_applications:    { module: 'Qualification',  label: 'Incentive Applications', nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
+  incentive_applications:    { module: 'Qualification',  label: objectLabelPlural('incentive_applications'), nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
   efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
   payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
@@ -438,7 +440,7 @@ const TABLE_META = {
   // parent record (contact / account / project / SA); these registry entries
   // exist so direct-URL navigation (or a future global search hit) still
   // renders a reasonable breadcrumb and header.
-  conversations:                                     { module: 'Field', label: 'Conversations',                      nameColumn: 'conv_subject', recordNumberColumn: 'conv_record_number',  statusColumn: 'conv_status', parents: ['contact_id', 'account_id', 'project_id', 'service_appointment_id', 'work_order_id', 'incentive_application_id', 'opportunity_id', 'assessment_id', 'building_id', 'property_id'], parentTables: ['contacts', 'accounts', 'projects', 'service_appointments', 'work_orders', 'incentive_applications', 'opportunities', 'assessments', 'buildings', 'properties'] },
+  conversations:                                     { module: 'Field', label: 'Conversations',                      nameColumn: 'conv_subject', recordNumberColumn: 'conv_record_number',  statusColumn: 'conv_status', parents: CONVERSATION_ANCHORS.map(a => a.fk), parentTables: CONVERSATION_ANCHORS.map(a => a.object) },
   messages:                                          { module: 'Field', label: 'Messages',                            nameColumn: null,           recordNumberColumn: 'msg_record_number',   statusColumn: 'msg_status', parents: ['conversation_id'],                       parentTables: ['conversations'] },
   user_account_scopes:                               { module: 'Admin', label: 'User Account Scopes',                nameColumn: null,          recordNumberColumn: null,                   statusColumn: null,        parents: ['uas_user_id', 'uas_account_id', 'uas_property_id'], parentTables: ['users', 'accounts', 'properties'] },
   user_program_scopes:                               { module: 'Admin', label: 'User Program Scopes',                nameColumn: null,          recordNumberColumn: null,                   statusColumn: null,        parents: ['ups_user_id', 'ups_program_id'],           parentTables: ['users', 'programs'] },
