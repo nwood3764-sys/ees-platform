@@ -286,7 +286,7 @@ export const HEAR_ACCEPTANCE = {
   PARAGRAPH_TO_RULE: 20,    // paragraph down to the printed-name rule
   NAME_TO_SIGNATURE: 46,    // rule to rule — a signature needs room above its line
   CAPTION_DROP: 11,         // caption baseline below its rule
-  FOOTER_CLEARANCE: 8,      // the last caption never sits on the page footer
+  FOOTER_CLEARANCE: 6,      // the last caption never sits on the page footer
   CAPTIONS: {
     name: 'Printed Name',
     signature: 'Property Owner / Authorized Representative — Signature',
@@ -508,10 +508,14 @@ function buildHearPdfBlob(m) {
     text: 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [70, 82, 98],
     needH,
-    // head() costs its gap + 18pt of heading and rule.
-    headingHeight: 14 + 18,
+    // head() costs its gap + 18pt of heading and rule. The 24pt lead is a
+    // clear break from the Project Summary above it (Nicholas, 2026-09-03:
+    // "move the acceptance and authorization down some, it's too close to the
+    // total remaining amount") — the block buys it back out of its own text
+    // size if a page ever runs short, never out of a second page.
+    headingHeight: 24 + 18,
     limitY: H - M - 24,
-    drawHeading: () => head('Acceptance & Authorization', 14),
+    drawHeading: () => head('Acceptance & Authorization', 24),
   })
   _stampEesFooters(P, m.state, pv(F.pjInvDate), 28)
   return d.output('blob')
