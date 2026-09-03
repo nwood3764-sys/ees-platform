@@ -9771,8 +9771,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.REGENERATE_SUPPLEMENTAL_DATA_SHEET]:   handleRegenerateSupplementalSheet,
     [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setSignatureSend('hear_proposal'),
     [ACTION_KEYS.SEND_PAYMENT_REQUEST_FOR_SIGNATURE]:   () => setSignatureSend('payment_request'),
-    [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setSignatureSend('hear_proposal'),
-    [ACTION_KEYS.SEND_PAYMENT_REQUEST_FOR_SIGNATURE]:   () => setSignatureSend('payment_request'),
     [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setDocumentModalKind('proposal'),
     [ACTION_KEYS.GENERATE_HEAR_PROPOSAL]:              () => setDocumentModalKind('hear_proposal'),
     [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setDocumentModalKind('invoice'),

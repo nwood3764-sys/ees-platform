@@ -1,4 +1,4 @@
-// Network only. SendHearProposalModal's own loading, prefill, gating and result
+// Network only. SignatureSendModal's own loading, prefill, gating and result
 // rendering are the shipped ones.
 export const captured = { sent: [] }
 
