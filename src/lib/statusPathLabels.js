@@ -3,7 +3,7 @@
 //
 // LEAP names every status "[Object] [State]" (the platform's explicit-status
 // rule), so a nine-stage incentive-application path repeats the words
-// "Incentive Application" nine times and has ~40px of room left over for the
+// the object's own name nine times and has ~40px of room left over for the
 // part that differs. The strip then reads:
 //
 //   pplication To B | pplication To | plication To B | ... | Application V

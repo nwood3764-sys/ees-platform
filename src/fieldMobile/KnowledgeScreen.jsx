@@ -16,6 +16,7 @@ import { usePullToRefresh } from './usePullToRefresh'
 import { fetchKnowledgeArticles, fetchKnowledgeArticle } from './fieldMobileService'
 import { renderMarkdown } from '../components/help/markdown'
 import { C, FONT, card } from './styles'
+import { normalizeHelpCategory } from '../lib/helpCategories'
 
 function BookIcon() {
   return (
@@ -36,11 +37,6 @@ function ArrowIcon() {
   )
 }
 
-// Normalize category casing so "admin"/"Admin" group together for display.
-function normCat(c) {
-  const t = (c || 'General').trim()
-  return t.charAt(0).toUpperCase() + t.slice(1)
-}
 
 // ─── List mode ───────────────────────────────────────────────────────────────
 export default function KnowledgeScreen({ navigate }) {
@@ -79,7 +75,7 @@ export default function KnowledgeScreen({ navigate }) {
   const grouped = useMemo(() => {
     const m = new Map()
     for (const r of filtered) {
-      const cat = normCat(r.ha_category)
+      const cat = normalizeHelpCategory(r.ha_category)
       if (!m.has(cat)) m.set(cat, [])
       m.get(cat).push(r)
     }

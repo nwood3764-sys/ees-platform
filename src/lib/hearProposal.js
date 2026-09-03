@@ -264,68 +264,173 @@ export async function loadJsPdf() {
 // looking wrong: a caption wider than its own rule, a block that is not
 // actually centred, or a signature line with no room above it to sign in.
 export const HEAR_ACCEPTANCE = {
-  TEXT_WIDTH: 440,        // paragraph measure — narrower than the page, centred
-  LINE_HEIGHT: 11,
-  BLOCK_WIDTH: 452,       // the signature block, centred on the page
-  DATE_WIDTH: 132,
-  COLUMN_GAP: 28,         // between the signature rule and the date rule
-  NAME_TO_SIGNATURE: 46,  // rule to rule — a signature needs room above its line
-  CAPTION_DROP: 11,       // caption baseline below its rule
-  HEADING_HEIGHT: 44,     // what the centred section heading costs above it
-  FOOTER_CLEARANCE: 10,   // the last caption never sits on the page footer
+  // The paragraph runs nearly the full width of the page (Nicholas, 2026-09-03:
+  // "the margins a lot less"), inset only enough that the centred text does not
+  // touch the rules above it, and set larger than the document's small print
+  // because it is the sentence being agreed to.
+  TEXT_INSET: 12,
+  // Largest first. THE BLOCK NEVER SPILLS ONTO A SECOND PAGE (Nicholas: "there
+  // is no way this can spill onto two pages with one measure record") — so the
+  // size is not a constant but the largest of these that still fits in the room
+  // left on the page. A longer sentence (the Sealed proposal names two
+  // companies) or a longer state name costs a line and steps the size down
+  // instead of pushing a signature page out.
+  FONT_SIZES: [10, 9.5, 9, 8.5],
+  // …and if even the smallest size will not fit, the writing gaps tighten
+  // before a second page is spent. 0.7 still leaves 28pt to print a name in and
+  // 29pt to sign in.
+  GAP_SCALES: [1, 0.85, 0.7],
+  LINE_RATIO: 1.3,          // line height as a multiple of the size
+  // The signature block is LEFT justified on the page margin, and the Date
+  // follows the signature rather than sitting at the far right edge: the two
+  // are one act, so they read as one row.
+  SIGNATURE_WIDTH: 290,
+  DATE_WIDTH: 150,
+  COLUMN_GAP: 24,           // between the signature rule and the date rule
+  PARAGRAPH_TO_RULE: 40,    // paragraph down to the printed-name rule — this is
+                            // the room a person WRITES their name in, so it is
+                            // sized like the signing gap below it, not like a
+                            // paragraph margin (Nicholas, 2026-09-03: "there's
+                            // no room for the printed name to be entered")
+  NAME_TO_SIGNATURE: 42,    // rule to rule — a signature needs room above its line
+  CAPTION_DROP: 11,         // caption baseline below its rule
+  // Air between the last caption and the page footer rule. Two lines' worth
+  // (Nicholas, 2026-09-03: "it can't be all the way at the bottom, maybe leave
+  // it like two lines from the bottom") — the block reads as sitting at the
+  // foot of the page rather than falling off it.
+  FOOTER_CLEARANCE: 38,
   CAPTIONS: {
     name: 'Printed Name',
+    title: 'Title',
     signature: 'Property Owner / Authorized Representative — Signature',
     date: 'Date',
   },
 }
 
+// How much vertical room the whole block needs, heading included, measured from
+// the cursor down to the last caption's baseline. `headingHeight` is what the
+// caller's own section heading costs, because the two documents draw theirs
+// differently — measured, not guessed: leaving the heading out of this sum once
+// put the Sealed proposal's Date caption 0.4pt above the page footer.
+//
+// The footer clearance is NOT in here. It belongs to the page (the caller's
+// floorY), not to the block, and counting it twice is what made the block
+// shorter than the room it was actually given.
+export function hearAcceptanceHeight(lineCount, size, headingHeight, gapScale = 1) {
+  const A = HEAR_ACCEPTANCE
+  return headingHeight + lineCount * (size * A.LINE_RATIO)
+    + A.PARAGRAPH_TO_RULE * gapScale + A.NAME_TO_SIGNATURE * gapScale + A.CAPTION_DROP
+}
+
 export function hearAcceptanceGeometry(P) {
   const { W, M, CW } = P
   const A = HEAR_ACCEPTANCE
-  const textWidth = Math.min(CW, A.TEXT_WIDTH)
-  const blockWidth = Math.min(CW, A.BLOCK_WIDTH)
-  const blockX = M + (CW - blockWidth) / 2
-  const dateWidth = Math.min(A.DATE_WIDTH, blockWidth / 3)
-  const signatureWidth = blockWidth - A.COLUMN_GAP - dateWidth
+  const textWidth = CW - 2 * A.TEXT_INSET
+  // Left justified: the block starts on the page margin. It is sized to its two
+  // rules rather than to the page, so it never runs past the right margin on a
+  // narrower page.
+  const blockX = M
+  const available = CW - A.COLUMN_GAP
+  const signatureWidth = Math.min(A.SIGNATURE_WIDTH, available * 0.66)
+  const dateWidth = Math.min(A.DATE_WIDTH, available - signatureWidth)
+  const blockWidth = signatureWidth + A.COLUMN_GAP + dateWidth
   return { textWidth, blockWidth, blockX, dateWidth, signatureWidth,
-    dateX: blockX + blockWidth - dateWidth, centerX: W / 2 }
+    dateX: blockX + signatureWidth + A.COLUMN_GAP, centerX: W / 2 }
 }
 
-function drawHearAcceptance(P, { text, rule, drawHeading, needH }) {
+function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY, needH,
+                                signerName, signerTitle }) {
   const { d, st, font, t, wrap, stroke, tc } = P
   const A = HEAR_ACCEPTANCE
   const g = hearAcceptanceGeometry(P)
   const CAPTION = [70, 82, 98]
 
-  font(8.5)
-  const lines = wrap(text, g.textWidth)
-  // Reserve the heading AND the whole block before drawing any of it. Measured,
-  // not guessed: a reservation that leaves out the heading put the Sealed
-  // proposal's Date caption 0.4pt above the page footer — the block fits by
-  // arithmetic and collides in print, and one more word in the paragraph (a
-  // longer state name) would have run straight through the footer rule.
-  needH(A.HEADING_HEIGHT + lines.length * A.LINE_HEIGHT + 26 + A.NAME_TO_SIGNATURE
-        + A.CAPTION_DROP + A.FOOTER_CLEARANCE)
+  // Largest size that still fits in the room left on this page. Ends on the
+  // smallest size if none of them fit, and needH then moves the whole block to
+  // a fresh page rather than letting it run through the footer — that is the
+  // only case where a second page is correct.
+  //
+  // The writing gaps give way before the page does. A block that will not fit
+  // tries the next size down and, failing that, tighter gaps — the Sealed
+  // proposal names two companies, so its paragraph is a line longer and the
+  // full 40/42pt of writing room does not fit under its own scope table. A
+  // slightly tighter signing space on one document is worth far more than a
+  // second page on it.
+  let fit = null
+  outer:
+  for (const scale of A.GAP_SCALES) {
+    for (const size of A.FONT_SIZES) {
+      font(size)
+      const lines = wrap(text, g.textWidth)
+      fit = { size, scale, lines, height: hearAcceptanceHeight(lines.length, size, headingHeight, scale) }
+      if (st.y + fit.height <= floorY) break outer
+    }
+  }
+  if (st.y + fit.height > floorY) {
+    needH(fit.height)                 // genuinely no room: a fresh page, whole
+  } else {
+    // ANCHORED TO THE FOOT OF THE PAGE (Nicholas, 2026-09-03: "move the
+    // acceptance and authorization section down more"). A fixed lead below the
+    // Project Summary can only ever be as generous as the emptiest page allows;
+    // sitting the block on the page's floor instead spends every point the page
+    // has left on the gap above it, and spends it automatically — a fuller
+    // proposal keeps the block where it lands, a lighter one pushes it right
+    // down. The separation is a RESULT of the page, not a number somebody has
+    // to re-tune each time a section grows.
+    st.y = floorY - fit.height
+  }
   drawHeading()
 
-  tc([34, 43, 53]); font(8.5)
-  lines.forEach((ln, k) => t(g.centerX, st.y + 10 + k * A.LINE_HEIGHT, ln, { align: 'center' }))
-  st.y += lines.length * A.LINE_HEIGHT + 6
+  const lineHeight = fit.size * A.LINE_RATIO
+  tc([34, 43, 53]); font(fit.size)
+  fit.lines.forEach((ln, k) => t(g.centerX, st.y + fit.size + k * lineHeight, ln, { align: 'center' }))
+  st.y += fit.lines.length * lineHeight
 
-  const caption = (x, w, txt) => { tc(CAPTION); font(8)
-    t(x + w / 2, st.y + A.CAPTION_DROP, txt, { align: 'center' }) }
+  // Captions sit under the LEFT end of their own rule, where the writing starts.
+  const caption = (x, txt) => { tc(CAPTION); font(8); t(x, st.y + A.CAPTION_DROP, txt) }
 
-  st.y += 26                                                   // Printed Name on top
-  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + g.blockWidth, st.y)
-  caption(g.blockX, g.blockWidth, A.CAPTIONS.name)
+  st.y += A.PARAGRAPH_TO_RULE * fit.scale                      // Printed Name on top
+  // The name is already known, so it is already there (Nicholas, 2026-09-03:
+  // "put printed name, his name, then on the right-hand side of that same line
+  // put his title... let's make this kind of pre-populated"). It is the same
+  // contact the header names as the customer, so the person signing is not
+  // asked to re-type what the record already says — all that is left is the
+  // signature. A record with no contact leaves the line empty to be written on.
+  const who = String(signerName || '').trim()
+  const role = String(signerTitle || '').trim()
+  let titleX = null
+  let nameRuleWidth = g.signatureWidth
+  if (who) {
+    font(10)
+    const nameWidth = d.getTextWidth(who)
+    if (role) {
+      // Four spaces after the name, on the SAME line — the title belongs to the
+      // person, so it reads straight on from their name. Right-aligning it put
+      // it over the Date column, where it read as the date's label.
+      titleX = g.blockX + 2 + nameWidth + d.getTextWidth('    ')
+      font(9)
+      // The rule has to be long enough to hold both, and no shorter than the
+      // signature rule below it — a long title lengthens the line rather than
+      // running off the end of it.
+      nameRuleWidth = Math.min(g.blockWidth,
+        Math.max(g.signatureWidth, titleX + d.getTextWidth(role) + 4 - g.blockX))
+    }
+    tc([34, 43, 53]); font(10)
+    t(g.blockX + 2, st.y - 4, who)
+    if (titleX != null) { tc([34, 43, 53]); font(9); t(titleX, st.y - 4, role) }
+  }
+  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + nameRuleWidth, st.y)
+  caption(g.blockX, A.CAPTIONS.name)
+  // The title gets its own caption under the line, in line with its own value —
+  // the same way Printed Name sits under the name.
+  if (titleX != null) caption(titleX, A.CAPTIONS.title)
 
-  st.y += A.NAME_TO_SIGNATURE                                  // then Signature + Date
+  st.y += A.NAME_TO_SIGNATURE * fit.scale                      // then Signature + Date
   stroke(rule); d.setLineWidth(1)
   d.line(g.blockX, st.y, g.blockX + g.signatureWidth, st.y)
   d.line(g.dateX, st.y, g.dateX + g.dateWidth, st.y)
-  caption(g.blockX, g.signatureWidth, A.CAPTIONS.signature)
-  caption(g.dateX, g.dateWidth, A.CAPTIONS.date)
+  caption(g.blockX, A.CAPTIONS.signature)
+  caption(g.dateX, A.CAPTIONS.date)
   st.y += A.CAPTION_DROP + 4
 }
 
@@ -358,21 +463,35 @@ function buildHearPdfBlob(m) {
     (F.pjIQ ? ('IQ Number: ' + F.pjIQ) : '')].filter(v => v && String(v).trim())
   const rLines = [F.pjOwner, contactWithTitle(F), F.pjOwnerAddr, F.pjOwnerCsz, _phone(F.pjPhone), F.pjEmail]
     .filter(v => v && String(v).trim())
+  // Three EVEN columns, each read from its own left edge (Nicholas, 2026-09-03:
+  // "they're not aligned properly, they're all pushed to the right and left").
+  // The customer column used to be right-aligned on the page edge, so it was
+  // ragged down its left side while its two neighbours were ragged down their
+  // right — three columns, three different reading edges. A wrapped value (a
+  // long contact title) now indents under its own column instead of drifting
+  // away from the two beside it.
   const drawParties = () => {
-    const pT = st.y, colW = CW / 3, x2 = M + colW, wCol = colW - 12
+    const pT = st.y, colW = CW / 3, wCol = colW - 14
+    const colX = [M, M + colW, M + 2 * colW]
     tc(BLUE); font(8.5, 'bold')
-    t(M, pT + 8, 'PRIMARY IRA CONTRACTOR'); t(x2, pT + 8, 'PROJECT INFORMATION'); t(W - M, pT + 8, 'CUSTOMER INFORMATION', { align: 'right' })
-    let cy = pT + 21, ly = pT + 21, ry = pT + 21; tc(C.ink); font(9)
-    for (const v of cLines) for (const ln of wrap(v, wCol)) { t(M, cy, ln); cy += 11.5 }
-    for (const v of lLines) for (const ln of wrap(v, wCol)) { t(x2, ly, ln); ly += 11.5 }
-    for (const v of rLines) for (const ln of wrap(v, wCol)) { t(W - M, ry, ln, { align: 'right' }); ry += 11.5 }
-    st.y = Math.max(cy, ly, ry) + 6; stroke(BLUE); d.setLineWidth(.8); d.line(M, st.y, W - M, st.y); st.y += 2
+    t(colX[0], pT + 8, 'PRIMARY IRA CONTRACTOR')
+    t(colX[1], pT + 8, 'PROJECT INFORMATION')
+    t(colX[2], pT + 8, 'CUSTOMER INFORMATION')
+    const ys = [pT + 21, pT + 21, pT + 21]; tc(C.ink); font(9)
+    const cols = [cLines, lLines, rLines]
+    cols.forEach((lines, i) => {
+      for (const v of lines) for (const ln of wrap(v, wCol)) { t(colX[i], ys[i], ln); ys[i] += 11.5 }
+    })
+    st.y = Math.max(...ys) + 6; stroke(BLUE); d.setLineWidth(.8); d.line(M, st.y, W - M, st.y); st.y += 2
   }
   const drawHead = withParties => {
     st.y = 18   // a little room above the title so it isn't squished against the top
     tc(BLUE);        font(15, 'bold');   t(W / 2, st.y, 'Project Proposal', { align: 'center' })
     tc([70, 82, 98]); font(10.5, 'bold'); t(W / 2, st.y + 15, _state + ' IRA Multifamily HEAR Program', { align: 'center' })
-    st.y += 23; stroke(BLUE); d.setLineWidth(1); d.line(M, st.y, W - M, st.y)
+    // A clear line's worth of air under the programme name before the rule
+    // (Nicholas, 2026-09-03) — it was sitting 8pt under a 10.5pt line, which
+    // reads as the rule underlining the text rather than closing the header.
+    st.y += 29; stroke(BLUE); d.setLineWidth(1); d.line(M, st.y, W - M, st.y)
     if (withParties) { st.y += 8; drawParties() } else { st.y += 10 }
   }
   const contPage = () => { d.addPage(); st.y = M; drawHead(false) }
@@ -462,7 +581,18 @@ function buildHearPdfBlob(m) {
     text: 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [70, 82, 98],
     needH,
-    drawHeading: () => head('Acceptance & Authorization', 24),   // clearly separated below the summary
+    signerName: F.pjContact,
+    signerTitle: F.pjContactTitle,
+    // head() costs its gap + 18pt of heading and rule. The 24pt lead is a
+    // clear break from the Project Summary above it (Nicholas, 2026-09-03:
+    // "move the acceptance and authorization down some, it's too close to the
+    // total remaining amount") — the block buys it back out of its own text
+    // size if a page ever runs short, never out of a second page.
+    headingHeight: 24 + 18,
+    // The page's floor for this block: its own footer rule (drawn 28pt up on
+    // this document), less the air the last caption keeps above it.
+    floorY: H - 28 - HEAR_ACCEPTANCE.FOOTER_CLEARANCE,
+    drawHeading: () => head('Acceptance & Authorization', 24),
   })
   _stampEesFooters(P, m.state, pv(F.pjInvDate), 28)
   return d.output('blob')
@@ -485,22 +615,25 @@ function buildHearSealedPdfBlob(m) {
   const drawTitle = () => {
     tc(GREEN);        font(15, 'bold');   t(W / 2, st.y + 11, 'Project Proposal', { align: 'center' })   // no SEALED, INC. line — the name is in the Primary IRA Contractor column
     tc([70, 82, 98]); font(10.5, 'bold'); t(W / 2, st.y + 26, stateFullName(m.state) + ' IRA Multifamily HEAR Program - Project Reservation', { align: 'center' })
-    st.y += 34; stroke(GREEN); d.setLineWidth(1); d.line(M, st.y, W - M, st.y); st.y += 10
+    st.y += 40; stroke(GREEN); d.setLineWidth(1); d.line(M, st.y, W - M, st.y); st.y += 10   // same air under the programme name as the EES header
   }
   const contPage = () => { d.addPage(); st.y = M - 6; drawTitle() }
   const needH = h => { if (st.y + h > H - M - 16) contPage() }
   st.y = M - 6; drawTitle()
-  const CX2 = M + 200
+  // Three EVEN columns, each read from its own left edge — the same rule as the
+  // EES header above; the customer column used to be right-aligned on the page
+  // edge and read as a fourth alignment.
+  const colW3 = CW / 3, CX2 = M + colW3, CX3 = M + 2 * colW3, wCol3 = colW3 - 14
   const projInfo = [F.pjInstallAddr, F.pjCsz, 'Multi-Family', (m.units ? ('Total Units: ' + m.units) : ''),
     (F.pjIQ ? ('IQ Number: ' + F.pjIQ) : '')].filter(v => v && String(v).trim())
   const ci = [F.pjOwner, contactWithTitle(F), F.pjOwnerAddr, F.pjOwnerCsz, _phone(F.pjPhone), F.pjEmail]
-  bh('Primary IRA Contractor:', M, st.y); bh('Project Information:', CX2, st.y); bh('Customer Information:', W - M, st.y, 'right')
-  const cW1 = CX2 - M - 8
+    .filter(v => v && String(v).trim()).flatMap(v => wrap(String(v), wCol3))
+  bh('Primary IRA Contractor:', M, st.y); bh('Project Information:', CX2, st.y); bh('Customer Information:', CX3, st.y)
   const contractorLines = ['Sealed, Inc.', '200 E Verona Ave', 'Verona, WI 53593', _phone('(949) 832-6798'),
-    ('Support Contractor: Energy Efficiency Services of ' + stateFullName(m.state))].filter(v => v && String(v).trim()).flatMap(v => wrap(String(v), cW1))
+    ('Support Contractor: Energy Efficiency Services of ' + stateFullName(m.state))].filter(v => v && String(v).trim()).flatMap(v => wrap(String(v), wCol3))
   let y1 = lines9(contractorLines, M, st.y + 13)
-  let y2 = lines9(projInfo, CX2, st.y + 13)
-  let y3 = lines9(ci, W - M, st.y + 13, 'right')
+  let y2 = lines9(projInfo.flatMap(v => wrap(String(v), wCol3)), CX2, st.y + 13)
+  let y3 = lines9(ci, CX3, st.y + 13)
   st.y = Math.max(y1, y2, y3)
   st.y += 8; stroke(GREEN); d.setLineWidth(.8); d.line(M, st.y, W - M, st.y); st.y += 2
   /* scope table — Contractor | Measure | Qty | Labor | Material | Total. EES is
@@ -577,6 +710,10 @@ function buildHearSealedPdfBlob(m) {
     text: 'By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of ' + stateFullName(m.state) + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [68, 88, 110],
     needH,
+    signerName: F.pjContact,
+    signerTitle: F.pjContactTitle,
+    headingHeight: 36,               // sh() leads 18pt and clears 18pt after its rule
+    floorY: H - 24 - HEAR_ACCEPTANCE.FOOTER_CLEARANCE,   // Sealed draws its footer 24pt up
     drawHeading: () => sh('Acceptance & Authorization'),
   })
   _stampSealedFooters(P, 'Project Proposal', F.pjProjInvNo || F.pjIQ || '', F.pjInvDate)

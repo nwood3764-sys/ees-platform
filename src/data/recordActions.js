@@ -407,7 +407,7 @@ export const ACTION_REGISTRY = Object.freeze({
       && recordTypeRequiresIncomeQualification === true
       && !incomeQualificationComplete,
   },
-  // ── Incentive Applications ────────────────────────────────────────────────
+  // ── Incentives ────────────────────────────────────────────────────────────
   // Verify Fields checks every editable field on the record's layout is
   // populated (inherited/read-only related fields are skipped, but the lookups
   // that drive them are checked) so the JotForm-mirrored submittal is confirmed

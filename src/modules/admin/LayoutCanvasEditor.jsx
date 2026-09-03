@@ -3,10 +3,13 @@
 //
 // The new record page-layout builder. Three-pane (palette / canvas / inspector)
 // on the SECTION model the live record renderer understands — Sections →
-// COLUMNS → Fields (+ related lists / reports / etc.). A section's column count
-// is shown for real: fields live in specific columns (left / center / right)
-// and drag between/within them (dnd-kit multi-container). Each field carries a
-// `column` (1-based); RecordDetail's FieldGroupWidget honors it.
+// ROWS → Fields (+ related lists / reports / etc.). A section's column count
+// is shown for real: fields fill rows left to right and wrap, exactly as the
+// record page draws them (packFieldGroupRows is shared by both)
+// and drag between/within them (dnd-kit multi-container). A field carries NO
+// column of its own: its index in the array is its position, and which column
+// that lands in is derived by src/lib/fieldGroupLayout.js — the one definition
+// this editor and RecordDetail's FieldGroupWidget both render from.
 //
 // One shared DndContext drives three drag families, kept apart by id prefix
 // and a family-filtered collision detection:
@@ -15,7 +18,7 @@
 //   wgt::<key>     — non-field-group widget tiles (related lists, galleries,
 //                    reports…) draggable within and between sections;
 //                    wzone::<sectionKey> is each section's widget drop zone
-//   <field name>   — field tiles; <sectionKey>::col:N are column drop zones
+//   <field name>   — field tiles; <sectionKey>::fields is the group drop zone
 //
 // Related lists are first-class here: rename inline (widget_title is the card
 // heading on the record's Related tab), reorder/move by drag, remove, and add
@@ -43,7 +46,7 @@ import { useState, useEffect, useCallback, memo } from 'react'
 import {
   DndContext, closestCorners, PointerSensor, KeyboardSensor, useSensor, useSensors, useDroppable,
 } from '@dnd-kit/core'
-import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, rectSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../../components/UI'
@@ -51,6 +54,7 @@ import { inputStyle } from '../../builder/inspectorControls'
 import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapters/pageLayoutAdapter'
 import { describeObject } from '../../data/adminService'
 import { consumeLayoutReturnRecord } from '../../lib/urlNav'
+import { packFieldGroupRows } from '../../lib/fieldGroupLayout'
 import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
 import { CardPaletteModal, CardConfigModal, CopyCardModal } from './widgets/CardPaletteModal'
 import {
@@ -139,18 +143,26 @@ function pickLookupDisplayField(refCols, refTable) {
 // System plumbing columns hidden from the related-fields drill-down.
 const RELATED_HIDDEN_COLUMNS = /(^id$|^created_at$|^updated_at$|_created_at$|_updated_at$|_created_by$|_updated_by$|is_deleted|_deleted_at$|_deleted_by$|deletion_reason|^auth_user_id$)/
 
-// Ensure every field in a field group has a valid `column` (1..cols). Fields
-// loaded without one are distributed round-robin so they don't pile into col 1.
-function normalizeColumns(sections) {
+// A field's position in the array IS its position in the section — the column
+// it lands in is derived at render time by packFieldGroupRows and stored
+// nowhere. This drops any `column` still carried by a layout saved before that
+// rule, so re-saving a layout cannot put the second fact back.
+//
+// It replaced a normalizer that ASSIGNED `column` round-robin ((i % cols) + 1)
+// to every field loaded without one. Those numbers are what the record page
+// then read as pinned slots, and whenever the assignment and the array order
+// disagreed the page left an empty slot beside the field — the staggered rows
+// Nicholas reported. See src/lib/fieldGroupLayout.js.
+function stripDerivedFieldColumns(sections) {
   return sections.map(s => ({
     ...s,
     widgets: (s.widgets || []).map(w => {
       if (w.type !== 'field_group') return w
-      const cols = s.columns || 2
-      const fields = (w.config?.fields || []).map((f, i) => ({
-        ...f,
-        column: f.column && f.column >= 1 && f.column <= cols ? f.column : (i % cols) + 1,
-      }))
+      const fields = (w.config?.fields || []).map(f => {
+        if (f.column === undefined) return f
+        const { column, ...rest } = f   // eslint-disable-line no-unused-vars
+        return rest
+      })
       return { ...w, config: { ...w.config, fields } }
     }),
   }))
@@ -162,8 +174,8 @@ function normalizeColumns(sections) {
 let _newKeySeq = 0
 const nextCardKey = () => String(++_newKeySeq)
 
-// Which drag family an id belongs to. Field ids are raw column names and
-// column-zone ids ("<sectionKey>::col:N") — neither can collide with the
+// Which drag family an id belongs to. Field ids are raw column names and the
+// per-section field drop target ("<sectionKey>::fields") — neither can collide with the
 // "sec::" / "wgt::" / "wzone::" / "tabdrop::" prefixes since section keys
 // never contain "::". Tab pills ("tabdrop::<tab>") are drop targets for the
 // SECTION family: dropping a section card on a pill moves it to that tab.
@@ -224,7 +236,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
         if (cancelled) return
         if (!data) { setError(new Error('Layout not found.')); setLoading(false); return }
         setMeta(data.layout); setColumns(data.columns || [])
-        const normalized = normalizeColumns(data.sections)
+        const normalized = stripDerivedFieldColumns(data.sections)
         setSections(normalized)
         setCustomTabs([...new Set(normalized.map(s => s.tab || 'Details'))]
           .filter(t => !RESERVED_TAB_NAMES.has(t.toLowerCase())))
@@ -291,7 +303,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     // Display label on the record page is just the field name — the parent
     // context ("Opportunity ·") is shown only in the editor tile below, not on
     // the live page.
-    const field = { name, type: 'related_field', label: humanize(col.column_name, group.table), column: 1, related }
+    const field = { name, type: 'related_field', label: humanize(col.column_name, group.table), related }
     setSections(s => s.map(sec => {
       if (sec.key !== activeSection) return sec
       const widgets = sec.widgets || []
@@ -308,12 +320,6 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     setSections(s => s.map(x => {
       if (x.key !== key) return x
       const next = { ...x, ...patch }
-      // Re-clamp field columns if the column count shrank.
-      if (patch.columns) {
-        next.widgets = next.widgets.map(w => w.type !== 'field_group' ? w : {
-          ...w, config: { ...w.config, fields: (w.config?.fields || []).map(f => ({ ...f, column: Math.min(f.column || 1, patch.columns) })) },
-        })
-      }
       return next
     }))
   }, [])
@@ -488,21 +494,23 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
         if (f) { srcField = f; break }
       }
       if (!srcField) return prev
-      // Resolve the drop target's section + column.
-      let tgtSecKey = null, tgtCol = 1, overName = null
-      if (overId.includes('::col:')) {
-        const [secKey, colPart] = overId.split('::col:')
-        tgtSecKey = secKey; tgtCol = Number(colPart) || 1
+      // Resolve the drop target's section, and the tile it landed on. A drop
+      // on the group itself (an empty section, or the space below the last
+      // row) appends — there is no column to resolve any more, because where a
+      // field sits is entirely its position in the array.
+      let tgtSecKey = null, overName = null
+      if (overId.endsWith('::fields')) {
+        tgtSecKey = overId.slice(0, -'::fields'.length)
       } else {
         overName = overId
         for (const sec of prev) {
           const fg = (sec.widgets || []).find(w => w.type === 'field_group')
           const f = fg?.config?.fields?.find(x => x.name === overName)
-          if (f) { tgtSecKey = sec.key; tgtCol = f.column || 1; break }
+          if (f) { tgtSecKey = sec.key; break }
         }
       }
       if (!tgtSecKey) return prev
-      const moved = { ...srcField, column: tgtCol }
+      const moved = srcField
       return prev.map(sec => {
         const fg = (sec.widgets || []).find(w => w.type === 'field_group')
         if (!fg) return sec
@@ -510,14 +518,10 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
         let fields = (fg.config?.fields || []).filter(f => f.name !== activeName)
         // ...and insert it into the target section at the right spot.
         if (sec.key === tgtSecKey) {
-          let insertAt
+          let insertAt = fields.length
           if (overName) {
-            insertAt = fields.findIndex(f => f.name === overName)
-            if (insertAt < 0) insertAt = fields.length
-          } else {
-            let last = -1
-            fields.forEach((f, i) => { if ((f.column || 1) === tgtCol) last = i })
-            insertAt = last + 1
+            const at = fields.findIndex(f => f.name === overName)
+            if (at >= 0) insertAt = at
           }
           fields = [...fields.slice(0, insertAt), moved, ...fields.slice(insertAt)]
         }
@@ -564,7 +568,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     // additionally get display wiring so the page shows the referenced
     // record's name, not its UUID.
     const type = ownColumnFieldType(col)
-    const field = { name: col.name, type, label: humanize(col.name, meta.object), column: 1 }
+    const field = { name: col.name, type, label: humanize(col.name, meta.object) }
     if (type === 'lookup' && col.references_table) {
       const refCols = await describeObject(col.references_table).catch(() => [])
       const displayField = pickLookupDisplayField(refCols, col.references_table)
@@ -759,7 +763,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
         <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.border}`, background: C.card, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Fields</div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Click to add to the selected section (column 1; drag to place).</div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Click to add to the end of the selected section; drag a tile to move it.</div>
             <input
               value={fieldSearch}
               onChange={e => setFieldSearch(e.target.value)}
@@ -1186,7 +1190,7 @@ const SectionCard = memo(function SectionCard({
       </div>
       <div style={{ padding: 12 }}>
         {fg ? (
-          <MultiColumnFields
+          <FieldRowGrid
             cols={cols}
             fields={fg.config?.fields || []}
             object={object}
@@ -1295,50 +1299,118 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenCa
   )
 }
 
-// ─── Multi-column field placement (dnd-kit multi-container) ──────────────────
-// No DndContext here — the whole canvas shares ONE context (in LayoutCanvasEditor)
-// so a field can be dragged across sections, not just within this one. This just
-// lays out the columns as section-scoped drop zones. `removeField` (the × button)
-// still edits this section's fields directly via onChange.
-function MultiColumnFields({ cols, fields, object, onChange, sectionKey }) {
-  const colFields = (c) => fields.filter(f => (f.column || 1) === c)
-  const removeField = (name) => onChange(fields.filter(f => f.name !== name))
+// ─── Field placement — the record page's own rows ────────────────────────────
+// The canvas lays fields out with packFieldGroupRows, the SAME function the
+// record page renders them with, so what is built here is what ships.
+//
+// This replaced three column drop zones (Left / Center / Right), each an
+// independent stack. That UI could not state which ROW a field was on at all,
+// and the one number it did write — `column` — was read by the record page as
+// a pinned slot. Two models, one number: whenever a field pinned to column 2
+// sat ahead of one pinned to column 1, the page could not place the second
+// field in a cell it had already passed and left the slot beside it empty.
+// There is one fact to edit now — the ORDER — and dragging a tile sets it.
+//
+// No DndContext here: the whole canvas shares ONE context (in
+// LayoutCanvasEditor) so a field can be dragged across sections, not just
+// within one.
+// Exported for tools/page-layout-alignment-check, which renders it beside the
+// record page's own FieldGroupWidget in a real browser and requires the two to
+// produce the same rows. "View == build" is the whole point of the canvas
+// editor, and the two surfaces disagreeing about placement is what caused the
+// staggered rows in the first place.
+export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
+  // Section-scoped drop target for the group as a whole — a drop that lands on
+  // no particular tile (an empty section, or the gap below the last row)
+  // appends. Without it a section with no fields could not be dropped into.
+  const { setNodeRef, isOver } = useDroppable({ id: `${sectionKey}::fields` })
+  const rows = packFieldGroupRows(fields, cols)
+  // Removal is by INDEX, not by name: a `spacer` is a real entry in the array
+  // and has no name (the widget-config validator checks any field that has
+  // one, and a spacer names no column). Spacers are the blanks that used to be
+  // the tail of a shorter column — an admin can see them here and delete them.
+  const removeAt = (index) => onChange(fields.filter((_, i) => i !== index))
+  const toggleFullWidth = (index) => onChange(fields.map((f, i) => {
+    if (i !== index) return f
+    if (!f.full_width) return { ...f, full_width: true }
+    const { full_width, ...rest } = f   // eslint-disable-line no-unused-vars
+    return rest
+  }))
+  // Only named fields are sortable — dnd-kit needs a stable id, and the shared
+  // drag handler resolves a drop target by field name across sections.
+  const sortableNames = fields.map(f => f?.name).filter(Boolean)
 
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 8 }}>
-      {Array.from({ length: cols }, (_, i) => i + 1).map(c => (
-        <ColumnZone key={c} sectionKey={sectionKey} col={c} fields={colFields(c)} object={object} onRemoveField={removeField} />
-      ))}
-    </div>
-  )
-}
-
-function ColumnZone({ sectionKey, col, fields, object, onRemoveField }) {
-  // Section-scoped id so the shared drag handler knows which section + column a
-  // field was dropped into ("<sectionKey>::col:<n>").
-  const { setNodeRef, isOver } = useDroppable({ id: `${sectionKey}::col:${col}` })
   return (
     <div ref={setNodeRef} style={{
-      minHeight: 56, padding: 6, borderRadius: 6,
-      border: `1px dashed ${isOver ? C.emerald : C.border}`, background: isOver ? '#f0faf5' : C.cardSecondary,
+      padding: 6, borderRadius: 6,
+      border: `1px dashed ${isOver ? C.emerald : C.border}`,
+      background: isOver ? '#f0faf5' : C.cardSecondary,
     }}>
-      <div style={{ fontSize: 9.5, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5, paddingLeft: 2 }}>
-        {col === 1 ? 'Left' : col === 2 ? 'Center' : col === 3 ? 'Right' : `Col ${col}`}
-      </div>
-      <SortableContext items={fields.map(f => f.name)} strategy={verticalListSortingStrategy}>
-        {fields.length === 0 && <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic', padding: '6px 2px' }}>Drop fields here</div>}
-        {fields.map(f => <FieldTile key={f.name} field={f} object={object} onRemove={() => onRemoveField(f.name)} />)}
+      {fields.length === 0 && (
+        <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic', padding: '10px 2px' }}>
+          Drop fields here — they fill left to right, then wrap to the next row.
+        </div>
+      )}
+      <SortableContext items={sortableNames} strategy={rectSortingStrategy}>
+        {rows.map((row, rowIndex) => (
+          <div key={`row-${rowIndex}`} style={{ display: 'flex', alignItems: 'stretch', gap: 6, marginBottom: 6 }}>
+            {row.cells.map((cell, cellIndex) => (
+              <div key={cell.blank ? `pad-${rowIndex}-${cellIndex}` : (cell.field.name || `spacer-${cell.index}`)}
+                style={{ flex: `${cell.span} 1 0%`, minWidth: 0, display: 'flex' }}>
+                {cell.blank ? (
+                  // The padding at the end of a short row is drawn, not
+                  // omitted: the record page renders it too, and seeing it here
+                  // is how an admin knows the row is short before shipping it.
+                  <div aria-hidden="true" style={{
+                    flex: 1, borderRadius: 6, border: `1px dashed ${C.border}`, opacity: 0.5,
+                  }} />
+                ) : cell.field.type === 'spacer' ? (
+                  <SpacerTile onRemove={() => removeAt(cell.index)} />
+                ) : (
+                  <FieldTile
+                    field={cell.field}
+                    object={object}
+                    fullWidth={cell.span > 1}
+                    canSpan={cols > 1}
+                    onToggleFullWidth={() => toggleFullWidth(cell.index)}
+                    onRemove={() => removeAt(cell.index)}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
       </SortableContext>
     </div>
   )
 }
 
-function FieldTile({ field, object, onRemove }) {
+// A deliberate empty slot. These exist because a column-fill layout whose
+// columns were uneven had blanks at the bottom of the shorter ones; the
+// 2026-09-03 migration made them explicit so the layout kept its shape when
+// `column` was dropped. Not draggable (it has no name to key on) and not
+// something the palette can add — the only thing to do with one is delete it.
+function SpacerTile({ onRemove }) {
+  return (
+    <div style={{
+      flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px',
+      background: C.cardSecondary, border: `1px dashed ${C.border}`, borderRadius: 6,
+    }}>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: C.textMuted, fontStyle: 'italic' }}>
+        Empty slot
+      </span>
+      <button onClick={onRemove} title="Remove this empty slot so the fields after it move up" style={miniBtn()}>×</button>
+    </div>
+  )
+}
+
+function FieldTile({ field, object, fullWidth, canSpan, onToggleFullWidth, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.name })
   return (
     <div ref={setNodeRef} style={{
       transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
-      display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', marginBottom: 5,
+      flex: 1, minWidth: 0,
+      display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px',
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
     }}>
       <span {...attributes} {...listeners} title="Drag" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
@@ -1348,6 +1420,18 @@ function FieldTile({ field, object, onRemove }) {
         )}
         {field.label || humanize(field.name, object)}
       </span>
+      {canSpan && (
+        <button
+          onClick={onToggleFullWidth}
+          title={fullWidth
+            ? 'Full width — click to put this field back in a single column'
+            : 'Make this field span the whole row (address blocks, long text, checkbox lists)'}
+          style={{
+            ...miniBtn(),
+            color: fullWidth ? C.emeraldMid : C.textMuted,
+            borderColor: fullWidth ? C.emeraldMid : C.border,
+          }}>↔</button>
+      )}
       <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )

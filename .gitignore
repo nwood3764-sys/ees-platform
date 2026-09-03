@@ -9,3 +9,4 @@ dist/
 
 # Screenshots written by the tools/*-check browser harnesses
 tools/*-check/*.png
+tools/page-layout-alignment-check/*.png

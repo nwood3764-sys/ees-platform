@@ -21,13 +21,14 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import { generatedDocumentSpec } from '../data/generatedDocuments'
+import { objectLabel as objectLabelFor } from '../lib/objectNav'
 
 const CARD_SECONDARY = '#f7f9fc'
 
 // friendly name for the record the document attaches to
 const OBJECT_LABEL = {
   enrollments:            'Enrollment',
-  incentive_applications: 'Incentive Application',
+  incentive_applications: objectLabelFor('incentive_applications'),
 }
 
 export default function GeneratedDocumentModal({ recordObject = 'enrollments', recordId, kind = 'proposal', onClose, onSaved }) {
@@ -133,7 +134,14 @@ export default function GeneratedDocumentModal({ recordObject = 'enrollments', r
           {!generating && result && (
             <>
               {/* the actual document, shown inline */}
-              <iframe title="Document preview" src={result.url} style={preview} />
+              {/* `#toolbar=0` hides the browser PDF viewer's own toolbar, which is
+                  the ONLY reason a generated document ever saved as
+                  "2ef5cbfd-….pdf": that toolbar's save button can see nothing
+                  but the blob: URL, whose entire identity is a uuid, while the
+                  Download button below names the file for its record. Removing
+                  the second, unnameable route is the fix — there is now one way
+                  to save this document and it is the named one. */}
+              <iframe title="Document preview" src={`${result.url}#toolbar=0&navpanes=0`} style={preview} />
               {/* A line item the proposal could not place is named, never
                   silently dropped — a mis-coded product is then visible on the
                   screen that would otherwise just be missing it. */}
@@ -167,7 +175,16 @@ export default function GeneratedDocumentModal({ recordObject = 'enrollments', r
 
         <div style={footer}>
           <div style={{ fontSize: 12, color: C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {saved ? `Saved to this ${objectLabel.toLowerCase()}’s Documents` : (result ? 'Download a copy, or save it to this record’s Documents' : '')}
+            {saved
+              ? `Saved to this ${objectLabel.toLowerCase()}’s Documents`
+              : (result
+                  // Name the file here, and say which button applies it. The
+                  // preview above is the browser's own PDF viewer, and ITS save
+                  // button can only see a blob: URL — whose entire identity is a
+                  // uuid, so it saves "2ef5cbfd-….pdf". Download and Save both
+                  // carry the real name; nothing in a blob URL can.
+                  ? `Download saves it as “${result.fileName}” — the preview’s own save button cannot name it`
+                  : '')}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button onClick={onClose} style={btnGhost}>Close</button>

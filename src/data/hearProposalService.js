@@ -30,7 +30,15 @@ import {
 // The enrollment record type this proposal is built for.
 export const HEAR_PROPOSAL_RECORD_TYPE = 'WI-IRA-MF-HEAR-Project-Reservation'
 // The document type the saved PDF is filed under.
-export const HEAR_PROPOSAL_DOCUMENT_TYPE = 'hear_proposal'
+// The proposal IS the customer's contract and scope of work, so it files itself
+// into that slot on the enrollment (Nicholas, 2026-09-03: "I just saved the
+// record, but it disappeared. This needs to go in the proposal section... we
+// call it Customer Contract and Scope of Work Section").
+//
+// It was saved as `hear_proposal`, a type no card on the layout reads, so the
+// document existed and appeared nowhere — which reads exactly like a save that
+// did not happen. A generated document has to land in a slot somebody looks at.
+export const HEAR_PROPOSAL_DOCUMENT_TYPE = 'customer_contract_sow'
 
 // Line items plus the product facts the proposal prints: which measure it is
 // (the code), what was installed (manufacturer + model) and how efficient it is.
@@ -110,8 +118,17 @@ export async function generateHearProposal(enrollmentId) {
   const input = { fields: ctx.fields, units: ctx.units, rows: ctx.rows, contractor: ctx.contractor }
   const model = computeHearModel(input)
   const blob = await generateHearProposalBlob(input)
-  const fileName = `${ctx.fields.pjPropName || 'Project'} - ${model.state} IRA Multifamily HEAR Proposal.pdf`
-    .replace(/[\\/]/g, '-')
+  // The document is named for the RECORD it belongs to (Nicholas, 2026-09-03):
+  // the enrollment's own name, verbatim — "570 South Clark Street - Whitewater -
+  // 570 - WI-IRA-MF-HEAR-Project-Reservation". It already carries the address,
+  // the building and the programme, composed by the enrollment's own name
+  // trigger, so a second composed title here would be a second naming rule that
+  // could disagree with the record it is filed under. Only characters a file
+  // name cannot hold are changed. The old composed title is the fallback for a
+  // record with no name.
+  const fileName = `${(ctx.enr?.enrollment_name || '').trim()
+    || `${ctx.fields.pjPropName || 'Project'} - ${model.state} IRA Multifamily HEAR Proposal`}.pdf`
+    .replace(/[\\/:*?"<>|]/g, '-')
   return { blob, fileName, model, ctx, documentType: HEAR_PROPOSAL_DOCUMENT_TYPE, unmapped: ctx.unmapped }
 }
 
