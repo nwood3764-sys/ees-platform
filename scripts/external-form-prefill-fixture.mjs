@@ -29,6 +29,17 @@ eq('day drops the leading zero',  applyTransform('2026-06-05', 'date_day'), '5')
 eq('day keeps two digits',        applyTransform('2026-06-10', 'date_day'), '10')
 eq('year',                        applyTransform('2026-06-10', 'date_year'), '2026')
 eq('January is not month 0',      applyTransform('2026-01-31', 'date_month_abbr'), 'Jan')
+// Jotform's native date control is three inputs and asks for "2 digit month,
+// 2 digit day, 4 digit year" — the opposite of Formstack's day, which drops the
+// leading zero. Two forms, two transforms; one shared rule would be wrong for
+// one of them.
+eq('Jotform month keeps its leading zero', applyTransform('2026-09-25', 'date_month_2'), '09')
+eq('Jotform day keeps its leading zero',   applyTransform('2026-09-05', 'date_day_2'), '05')
+eq('a two-digit day is unchanged',         applyTransform('2026-09-25', 'date_day_2'), '25')
+eq('December is 12, not 13',               applyTransform('2026-12-01', 'date_month_2'), '12')
+// The Formstack pair must NOT have changed underneath them.
+eq('Formstack day still drops the zero',   applyTransform('2026-09-05', 'date_day'), '5')
+eq('a value that is not a date yields nothing', applyTransform('sometime', 'date_month_2'), '')
 eq('December is in range',        applyTransform('2026-12-01', 'date_month_abbr'), 'Dec')
 eq('a non-date yields nothing rather than junk', applyTransform('not a date', 'date_month_abbr'), '')
 

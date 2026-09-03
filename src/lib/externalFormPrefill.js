@@ -53,6 +53,12 @@ function datePart(value, part) {
   if (!m) return ''
   if (part === 'month') return MONTH_ABBR[Number(m[2]) - 1] || ''
   if (part === 'day')   return String(Number(m[3]))
+  // Jotform's native date control is three inputs and its own hint says
+  // "2 digit month, 2 digit day, 4 digit year" — so the leading zero that
+  // Formstack's day drops is exactly what this one needs. Two questions, two
+  // transforms, rather than one that is wrong for one of them.
+  if (part === 'month2') return m[2]
+  if (part === 'day2')   return m[3]
   return m[1]
 }
 
@@ -73,6 +79,8 @@ export function applyTransform(value, transform) {
     case 'date_mmddyyyy': return toMmddyyyy(value)
     case 'date_month_abbr': return datePart(value, 'month')
     case 'date_day':        return datePart(value, 'day')
+    case 'date_month_2':    return datePart(value, 'month2')
+    case 'date_day_2':      return datePart(value, 'day2')
     case 'date_year':       return datePart(value, 'year')
     case 'money_plain':     return toPlainMoney(value)
     default:              return value
