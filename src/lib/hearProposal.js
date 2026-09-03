@@ -276,6 +276,10 @@ export const HEAR_ACCEPTANCE = {
   // companies) or a longer state name costs a line and steps the size down
   // instead of pushing a signature page out.
   FONT_SIZES: [10, 9.5, 9, 8.5],
+  // …and if even the smallest size will not fit, the writing gaps tighten
+  // before a second page is spent. 0.7 still leaves 28pt to print a name in and
+  // 29pt to sign in.
+  GAP_SCALES: [1, 0.85, 0.7],
   LINE_RATIO: 1.3,          // line height as a multiple of the size
   // The signature block is LEFT justified on the page margin, and the Date
   // follows the signature rather than sitting at the far right edge: the two
@@ -283,7 +287,11 @@ export const HEAR_ACCEPTANCE = {
   SIGNATURE_WIDTH: 290,
   DATE_WIDTH: 150,
   COLUMN_GAP: 24,           // between the signature rule and the date rule
-  PARAGRAPH_TO_RULE: 20,    // paragraph down to the printed-name rule
+  PARAGRAPH_TO_RULE: 40,    // paragraph down to the printed-name rule — this is
+                            // the room a person WRITES their name in, so it is
+                            // sized like the signing gap below it, not like a
+                            // paragraph margin (Nicholas, 2026-09-03: "there's
+                            // no room for the printed name to be entered")
   NAME_TO_SIGNATURE: 42,    // rule to rule — a signature needs room above its line
   CAPTION_DROP: 11,         // caption baseline below its rule
   FOOTER_CLEARANCE: 12,     // air between the last caption and the page footer rule
@@ -303,10 +311,10 @@ export const HEAR_ACCEPTANCE = {
 // The footer clearance is NOT in here. It belongs to the page (the caller's
 // floorY), not to the block, and counting it twice is what made the block
 // shorter than the room it was actually given.
-export function hearAcceptanceHeight(lineCount, size, headingHeight) {
+export function hearAcceptanceHeight(lineCount, size, headingHeight, gapScale = 1) {
   const A = HEAR_ACCEPTANCE
-  return headingHeight + lineCount * (size * A.LINE_RATIO) + A.PARAGRAPH_TO_RULE
-    + A.NAME_TO_SIGNATURE + A.CAPTION_DROP
+  return headingHeight + lineCount * (size * A.LINE_RATIO)
+    + A.PARAGRAPH_TO_RULE * gapScale + A.NAME_TO_SIGNATURE * gapScale + A.CAPTION_DROP
 }
 
 export function hearAcceptanceGeometry(P) {
@@ -335,12 +343,22 @@ function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY,
   // smallest size if none of them fit, and needH then moves the whole block to
   // a fresh page rather than letting it run through the footer — that is the
   // only case where a second page is correct.
+  //
+  // The writing gaps give way before the page does. A block that will not fit
+  // tries the next size down and, failing that, tighter gaps — the Sealed
+  // proposal names two companies, so its paragraph is a line longer and the
+  // full 40/42pt of writing room does not fit under its own scope table. A
+  // slightly tighter signing space on one document is worth far more than a
+  // second page on it.
   let fit = null
-  for (const size of A.FONT_SIZES) {
-    font(size)
-    const lines = wrap(text, g.textWidth)
-    fit = { size, lines, height: hearAcceptanceHeight(lines.length, size, headingHeight) }
-    if (st.y + fit.height <= floorY) break
+  outer:
+  for (const scale of A.GAP_SCALES) {
+    for (const size of A.FONT_SIZES) {
+      font(size)
+      const lines = wrap(text, g.textWidth)
+      fit = { size, scale, lines, height: hearAcceptanceHeight(lines.length, size, headingHeight, scale) }
+      if (st.y + fit.height <= floorY) break outer
+    }
   }
   if (st.y + fit.height > floorY) {
     needH(fit.height)                 // genuinely no room: a fresh page, whole
@@ -365,11 +383,11 @@ function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY,
   // Captions sit under the LEFT end of their own rule, where the writing starts.
   const caption = (x, txt) => { tc(CAPTION); font(8); t(x, st.y + A.CAPTION_DROP, txt) }
 
-  st.y += A.PARAGRAPH_TO_RULE                                  // Printed Name on top
+  st.y += A.PARAGRAPH_TO_RULE * fit.scale                      // Printed Name on top
   stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + g.signatureWidth, st.y)
   caption(g.blockX, A.CAPTIONS.name)
 
-  st.y += A.NAME_TO_SIGNATURE                                  // then Signature + Date
+  st.y += A.NAME_TO_SIGNATURE * fit.scale                      // then Signature + Date
   stroke(rule); d.setLineWidth(1)
   d.line(g.blockX, st.y, g.blockX + g.signatureWidth, st.y)
   d.line(g.dateX, st.y, g.dateX + g.dateWidth, st.y)

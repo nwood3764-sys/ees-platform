@@ -134,7 +134,14 @@ export default function GeneratedDocumentModal({ recordObject = 'enrollments', r
           {!generating && result && (
             <>
               {/* the actual document, shown inline */}
-              <iframe title="Document preview" src={result.url} style={preview} />
+              {/* `#toolbar=0` hides the browser PDF viewer's own toolbar, which is
+                  the ONLY reason a generated document ever saved as
+                  "2ef5cbfd-….pdf": that toolbar's save button can see nothing
+                  but the blob: URL, whose entire identity is a uuid, while the
+                  Download button below names the file for its record. Removing
+                  the second, unnameable route is the fix — there is now one way
+                  to save this document and it is the named one. */}
+              <iframe title="Document preview" src={`${result.url}#toolbar=0&navpanes=0`} style={preview} />
               {/* A line item the proposal could not place is named, never
                   silently dropped — a mis-coded product is then visible on the
                   screen that would otherwise just be missing it. */}
