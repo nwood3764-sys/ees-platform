@@ -51,6 +51,19 @@ eq('low-flow qty = units', H.rows[2].qty, 8)
 // line costs sum back to the gross exactly → TOTAL DUE $0.00
 const sum = Math.round(H.rows.reduce((a, r) => a + r.cost, 0) * 100) / 100
 near('line-item costs sum to the gross (TOTAL DUE $0.00)', sum, H.total)
+
+// THE RULING, pinned so the build refuses a change that breaks it.
+// Nicholas, 2026-09-03: "There is no cost. Customers don't pay us anything.
+// The program pays us. This invoice is just fake so the customer can see that
+// there's no out-of-pocket cost." The customer's balance is zero BY DESIGN:
+// the cost is defined as the rebate, and the rebate is credited against it.
+// A future change that prices this document from anything else — the
+// opportunity line items being the obvious candidate, since they hold the only
+// real dollars in LEAP — makes these fail, which is the entire point.
+const credits = Math.round((H.homesAmt + H.foeAmt) * 100) / 100
+near('every rebate credit sums to the gross cost', credits, H.total)
+near('BALANCE DUE FROM THE CUSTOMER IS ZERO — by design, never "fix" it',
+  Math.round((H.total - credits) * 100) / 100, 0)
 near('largest row absorbs rounding drift', H.rows[1].cost, 47784.34)
 eq('money formatter', formatMoney(87150), '$87,150.00')
 eq('money formatter (cents)', formatMoney(287.59), '$287.59')
@@ -73,6 +86,12 @@ near('FOE rate R-20–38 → $0.55/sqft', foeHi.foe.rate, 0.55)
 const noAttic = buildPaperworkModel({ units: 10, assetScoreBase: { euiCurrent: 100, roofArea: 1000, roofRs: [49] }, assetScoreImp: { euiUpgraded: 50, roofRs: [49] }, includeAttic: false, fields: {} })
 eq('no-attic → three low-flow rows only', noAttic.rows.length, 3)
 eq('no-attic → no FOE', noAttic.foeAmt, 0)
+// It has to hold on every tier, not just the canonical case, or the zero is a
+// coincidence of one fixture rather than a property of the document.
+for (const [label, m] of [['mid tier', mid], ['no-attic', noAttic]]) {
+  near(`balance due is zero on the ${label} case too`,
+    Math.round((m.total - (m.homesAmt + m.foeAmt)) * 100) / 100, 0)
+}
 const naSum = Math.round(noAttic.rows.reduce((a, r) => a + r.cost, 0) * 100) / 100
 near('no-attic line costs still reconcile to the gross', naSum, noAttic.total)
 

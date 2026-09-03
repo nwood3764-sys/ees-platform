@@ -10,7 +10,7 @@
 // and very obviously wrong to whoever signed it. So this renders real PDFs and
 // reads the coordinates back, rather than trusting the arithmetic.
 
-import { generateHomesProposalBlobWithSignatureTabs } from '../src/lib/homesProposal.js'
+import { generateHomesProposalBlobWithSignatureTabs, computeHomesModel } from '../src/lib/homesProposal.js'
 
 let pass = 0, fail = 0
 const ok = (label, cond, detail) => {
@@ -80,6 +80,25 @@ for (const [who, input] of [
 ]) {
   const { tabs } = await generateHomesProposalBlobWithSignatureTabs(input)
   eq(`${who} proposal: carries no signature block, so no tabs`, tabs.length, 0)
+}
+
+// The document a person SIGNS must say they owe nothing. Nicholas, 2026-09-03:
+// "There is no cost. Customers don't pay us anything. The program pays us. This
+// invoice is just fake so the customer can see that there's no out-of-pocket
+// cost." homesProposal is a SECOND engine with its own copy of this arithmetic
+// (paperworkModel is the other, guarded in paperwork-math-fixture), and this is
+// the one the Send for Signature path renders — so the zero is pinned on both.
+// A change that prices the invoice from the opportunity line items, which hold
+// the only real dollars in LEAP, fails here by name.
+{
+  const m = computeHomesModel({ ...base, assetScoreBaseText: null, assetScoreImpText: null })
+  const credits = Math.round((m.homesAmt + m.foeAmt) * 100) / 100
+  eq('signed invoice: cost is defined as the rebate, nothing else', m.total, credits)
+  eq('signed invoice: BALANCE DUE FROM THE CUSTOMER IS ZERO — by design',
+    Math.round((m.total - credits) * 100) / 100, 0)
+  const rows = Math.round(m.rows.reduce((a, r) => a + r.cost, 0) * 100) / 100
+  eq('signed invoice: the measure rows break out that one total, they are not prices',
+    rows, m.total)
 }
 
 console.log(`\n${fail ? 'FAIL' : 'PASS'}  ${pass} passed, ${fail} failed (of ${pass + fail} checks)`)
