@@ -16,6 +16,7 @@ import {
   HEAR_MEASURES, computeHearModel, hearRowsFromLineItems,
   hearMeasureForProductCode, hearDefaultDesc,
   layoutScopeCols, _hearScopeCols, loadJsPdf,
+  HEAR_ACCEPTANCE, generateHearProposalBlob,
 } from '../src/lib/hearProposal.js'
 import { newProposalPdf, money } from '../src/lib/proposalPdfKit.js'
 
@@ -215,6 +216,162 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
   const wide = layoutScopeCols(P, _hearScopeCols(money), huge.rows, W - M, M, 210)
   const block = wide.reduce((a, c) => a + c[2], 0)
   ok('the measure column never falls below its floor', (W - M) - M - block >= 210)
+}
+
+
+// ── 10. The Acceptance & Authorization block ─────────────────────────────
+// The block a person actually signs, checked against the REAL rendered PDF
+// rather than against the code that draws it: every earlier version of this
+// block read correctly and printed badly.
+//
+// Three things can go wrong without looking wrong in the source: the block is
+// not actually centred; a caption is wider than the rule it names; or the
+// block is drawn past the bottom of the page and lands on the footer, which is
+// what the shipped version did on the Sealed proposal — its Date caption
+// cleared the footer rule by 0.4pt.
+{
+  const jsPDF = await loadJsPdf()
+  const A = HEAR_ACCEPTANCE
+
+  // --- read a jsPDF document back: text with its baseline, and every rule ---
+  const readPages = (bytes) => {
+    const raw = Buffer.from(bytes).toString('latin1')
+    return raw.split('endstream').slice(0, -1).map(chunk => {
+      const body = chunk.slice(chunk.indexOf('stream') + 6)
+      const text = [], rules = []
+      const tRe = /([-\d.]+) ([-\d.]+) Td\s*\((.*?)\) Tj/g
+      for (let mt; (mt = tRe.exec(body));) {
+        text.push({ x: +mt[1], y: +mt[2], s: mt[3] })
+      }
+      const lRe = /([-\d.]+) ([-\d.]+) m\s*\n\s*([-\d.]+) ([-\d.]+) l/g
+      for (let ml; (ml = lRe.exec(body));) {
+        if (+ml[2] === +ml[4]) rules.push({ x1: +ml[1], x2: +ml[3], y: +ml[2] })
+      }
+      return { text, rules }
+    })
+  }
+  // The em dash reaches the content stream as one WinAnsi byte, so captions are
+  // matched on the half that is plain ASCII.
+  const find = (page, s) => page.text.find(o => o.s.startsWith(s.slice(0, 12)))
+  const rowAt = (page, y) => page.rules.filter(r => Math.abs(r.y - y) < 0.5)
+    .sort((a, b) => a.x1 - b.x1)
+
+  const W = 612, PAGE_H = 792
+  const measure = (txt, size) => { const p = newProposalPdf(jsPDF, 20)
+    p.font(size, 'normal'); return p.d.getTextWidth(txt) }
+
+  const FIELDS = st => ({ pjInstallAddr: '3002 West Darling Street', pjCsz: 'Appleton, WI 54914',
+    pjOwner: 'Westminster Company', pjState: st, pjInvDate: '2026-09-03' })
+  const { rows } = hearRowsFromLineItems([
+    { productCode: 'HEAR-HP-SPACE-HEAT-COOL', quantity: 11, unitPrice: 8000 },
+    { productCode: 'HEAR-HPWH', quantity: 11, unitPrice: 1750 },
+    { productCode: 'HEAR-VENT', quantity: 11, unitPrice: 1600 },
+  ])
+
+  // Both documents, and both the shortest and the longest state name — the
+  // paragraph names the state, so its length decides how many lines the block
+  // is and therefore whether it still fits above the footer.
+  for (const contractor of ['EES', 'Sealed, Inc.']) {
+    for (const state of ['WI', 'NC']) {
+      const who = `${contractor.startsWith('Sealed') ? 'Sealed' : 'EES'} ${state}`
+      const blob = await generateHearProposalBlob({ rows, units: 11, contractor,
+        fields: FIELDS(state) })
+      const pages = readPages(await blob.arrayBuffer())
+
+      const pi = pages.findIndex(p => find(p, A.CAPTIONS.name))
+      ok(`${who}: the block is drawn`, pi >= 0)
+      const page = pages[pi]
+
+      // (a) nothing in the block is split across a page break
+      for (const [what, s] of [['heading', 'ACCEPTANCE & AUTH'], ['paragraph', 'By signing below'],
+        ['signature caption', A.CAPTIONS.signature], ['date caption', A.CAPTIONS.date]]) {
+        ok(`${who}: the ${what} is on the same page as Printed Name`, !!find(page, s))
+      }
+
+      const nameCap = find(page, A.CAPTIONS.name)
+      const sigCap = find(page, A.CAPTIONS.signature)
+      const dateCap = find(page, A.CAPTIONS.date)
+      const nameRow = rowAt(page, nameCap.y + A.CAPTION_DROP)
+      const sigRow = rowAt(page, sigCap.y + A.CAPTION_DROP)
+
+      // (b) both rows are centred on the page — equal air either side
+      eq(`${who}: the printed-name rule is one centred rule`, nameRow.length, 1)
+      eq(`${who}: the signature row is a signature rule and a date rule`, sigRow.length, 2)
+      for (const [what, row] of [['printed-name', nameRow], ['signature', sigRow]]) {
+        const left = row[0].x1, right = row[row.length - 1].x2
+        ok(`${who}: the ${what} row is centred (${left} / ${W - right})`,
+          Math.abs(left - (W - right)) < 0.5)
+      }
+      eq(`${who}: the signature and date rules keep their gap`,
+        Math.round(sigRow[1].x1 - sigRow[0].x2), A.COLUMN_GAP)
+
+      // (c) room to actually sign: rule to rule, PDF y counts up from the foot
+      eq(`${who}: printed name to signature`, Math.round(nameRow[0].y - sigRow[0].y),
+        A.NAME_TO_SIGNATURE)
+      ok(`${who}: the signature line has room above it`,
+        A.NAME_TO_SIGNATURE - A.CAPTION_DROP >= 30)
+
+      // (d) every caption fits inside the rule it names, and is centred on it
+      // Measured from the SOURCE string, not the parsed one: the em dash
+      // reaches the stream as one WinAnsi byte and would measure differently.
+      for (const [cap, row, src] of [[nameCap, nameRow[0], A.CAPTIONS.name],
+        [sigCap, sigRow[0], A.CAPTIONS.signature], [dateCap, sigRow[1], A.CAPTIONS.date]]) {
+        const w = measure(src, 8), ruleW = row.x2 - row.x1
+        ok(`${who}: "${src.slice(0, 18)}" fits its rule (${Math.round(w)} of ${Math.round(ruleW)})`,
+          w <= ruleW - 8)
+        ok(`${who}: "${src.slice(0, 18)}" is centred on its rule`,
+          Math.abs((cap.x + w / 2) - (row.x1 + ruleW / 2)) < 1.5)
+      }
+
+      // (e) the paragraph is centred, and in its own narrower measure
+      const para = page.text.filter(o => o.y >= nameCap.y && o.y <= nameCap.y + 80
+        && o.s.length > 20 && !o.s.startsWith('Property Owner'))
+      ok(`${who}: the paragraph wrapped to more than one line`, para.length > 1)
+      for (const ln of para) {
+        const w = measure(ln.s, 8.5)
+        ok(`${who}: paragraph line is centred on the page`, Math.abs((ln.x + w / 2) - W / 2) < 1.5)
+        ok(`${who}: paragraph line stays inside its measure`, w <= A.TEXT_WIDTH + 1)
+      }
+
+      // (f) the block clears the page footer
+      const footer = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)
+        .reduce((lo, r) => (lo == null || r.y < lo ? r.y : lo), null)
+      ok(`${who}: the footer rule is on the page`, footer != null)
+      ok(`${who}: the last caption clears the footer (${Math.round(dateCap.y - footer)}pt)`,
+        dateCap.y - footer >= 8)
+    }
+  }
+
+  // CONTROL — the two things that were wrong, on the same run.
+  //
+  // 1. The block used to leave 28pt between the printed-name rule and the
+  //    signature rule, and the caption takes 11 of them: 17pt to sign in.
+  ok('CONTROL: the previous 28pt gap left under 20pt to sign in',
+    28 - A.CAPTION_DROP < 20)
+  // 2. The reservation used to leave out the heading. On the Sealed proposal
+  //    that is the difference between the block moving to a fresh page and the
+  //    block being drawn straight through the footer: page 1 ends where it
+  //    ends, the short reservation says the block fits, and the block's real
+  //    bottom lands below the footer rule.
+  {
+    const blob = await generateHearProposalBlob({ rows, units: 11, contractor: 'Sealed, Inc.',
+      fields: FIELDS('WI') })
+    const pages = readPages(await blob.arrayBuffer())
+    ok('CONTROL: the Sealed block needed a page of its own', pages.length === 2)
+    const p1 = pages[0]
+    // where page 1's own content ends, in the builder's top-down cursor
+    const lastY = Math.min(...p1.rules.filter(r => r.y > 40).map(r => r.y))
+    const top = PAGE_H - lastY
+    const lines = 4                     // the Sealed paragraph, Wisconsin
+    const full = A.HEADING_HEIGHT + lines * A.LINE_HEIGHT + 26 + A.NAME_TO_SIGNATURE
+      + A.CAPTION_DROP + A.FOOTER_CLEARANCE
+    const short = full - A.HEADING_HEIGHT          // the reservation that shipped
+    const THRESHOLD = PAGE_H - 20 - 16             // buildHearSealedPdfBlob's needH
+    ok('CONTROL: without the heading the block "fits" on page 1', top + short <= THRESHOLD)
+    ok('CONTROL: and its real bottom is below the Sealed footer rule',
+      PAGE_H - (top + full) < 24)
+    ok('with the heading reserved, the block is moved off page 1', top + full > THRESHOLD)
+  }
 }
 
 console.log(`${checks - failures}/${checks} checks passed`)

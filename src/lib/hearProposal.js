@@ -249,6 +249,86 @@ export async function loadJsPdf() {
   return _jspdf
 }
 
+// --- Acceptance & Authorization — ONE definition, both HEAR proposals -------
+// This is the one part of the proposal a person is asked to act on, so it is
+// centred: the paragraph sits in its own narrower measure under the centred
+// heading, and the signature lines are a centred block rather than a rule
+// running the full width of the page.
+//
+// Drawn once for the EES (blue) and Sealed (green) documents. Two hand-rolled
+// copies of one signature block is two chances for one of them to drift — the
+// lesson `pinnedTableHeader.js` and `dateDisplay.js` already record. Only the
+// ink colour and the heading differ, so only those are passed in.
+//
+// The geometry is exported because it is the thing that can be wrong without
+// looking wrong: a caption wider than its own rule, a block that is not
+// actually centred, or a signature line with no room above it to sign in.
+export const HEAR_ACCEPTANCE = {
+  TEXT_WIDTH: 440,        // paragraph measure — narrower than the page, centred
+  LINE_HEIGHT: 11,
+  BLOCK_WIDTH: 452,       // the signature block, centred on the page
+  DATE_WIDTH: 132,
+  COLUMN_GAP: 28,         // between the signature rule and the date rule
+  NAME_TO_SIGNATURE: 46,  // rule to rule — a signature needs room above its line
+  CAPTION_DROP: 11,       // caption baseline below its rule
+  HEADING_HEIGHT: 44,     // what the centred section heading costs above it
+  FOOTER_CLEARANCE: 10,   // the last caption never sits on the page footer
+  CAPTIONS: {
+    name: 'Printed Name',
+    signature: 'Property Owner / Authorized Representative — Signature',
+    date: 'Date',
+  },
+}
+
+export function hearAcceptanceGeometry(P) {
+  const { W, M, CW } = P
+  const A = HEAR_ACCEPTANCE
+  const textWidth = Math.min(CW, A.TEXT_WIDTH)
+  const blockWidth = Math.min(CW, A.BLOCK_WIDTH)
+  const blockX = M + (CW - blockWidth) / 2
+  const dateWidth = Math.min(A.DATE_WIDTH, blockWidth / 3)
+  const signatureWidth = blockWidth - A.COLUMN_GAP - dateWidth
+  return { textWidth, blockWidth, blockX, dateWidth, signatureWidth,
+    dateX: blockX + blockWidth - dateWidth, centerX: W / 2 }
+}
+
+function drawHearAcceptance(P, { text, rule, drawHeading, needH }) {
+  const { d, st, font, t, wrap, stroke, tc } = P
+  const A = HEAR_ACCEPTANCE
+  const g = hearAcceptanceGeometry(P)
+  const CAPTION = [70, 82, 98]
+
+  font(8.5)
+  const lines = wrap(text, g.textWidth)
+  // Reserve the heading AND the whole block before drawing any of it. Measured,
+  // not guessed: a reservation that leaves out the heading put the Sealed
+  // proposal's Date caption 0.4pt above the page footer — the block fits by
+  // arithmetic and collides in print, and one more word in the paragraph (a
+  // longer state name) would have run straight through the footer rule.
+  needH(A.HEADING_HEIGHT + lines.length * A.LINE_HEIGHT + 26 + A.NAME_TO_SIGNATURE
+        + A.CAPTION_DROP + A.FOOTER_CLEARANCE)
+  drawHeading()
+
+  tc([34, 43, 53]); font(8.5)
+  lines.forEach((ln, k) => t(g.centerX, st.y + 10 + k * A.LINE_HEIGHT, ln, { align: 'center' }))
+  st.y += lines.length * A.LINE_HEIGHT + 6
+
+  const caption = (x, w, txt) => { tc(CAPTION); font(8)
+    t(x + w / 2, st.y + A.CAPTION_DROP, txt, { align: 'center' }) }
+
+  st.y += 26                                                   // Printed Name on top
+  stroke(rule); d.setLineWidth(1); d.line(g.blockX, st.y, g.blockX + g.blockWidth, st.y)
+  caption(g.blockX, g.blockWidth, A.CAPTIONS.name)
+
+  st.y += A.NAME_TO_SIGNATURE                                  // then Signature + Date
+  stroke(rule); d.setLineWidth(1)
+  d.line(g.blockX, st.y, g.blockX + g.signatureWidth, st.y)
+  d.line(g.dateX, st.y, g.dateX + g.dateWidth, st.y)
+  caption(g.blockX, g.signatureWidth, A.CAPTIONS.signature)
+  caption(g.dateX, g.dateWidth, A.CAPTIONS.date)
+  st.y += A.CAPTION_DROP + 4
+}
+
 /**
  * Render the HEAR proposal PDF. `contractor` selects the design: anything
  * matching "sealed" uses the green Sealed engine, otherwise the blue EES
@@ -377,21 +457,13 @@ function buildHearPdfBlob(m) {
   { rlineE('Total Project Cost', _money(m.totalCost), false); st.y += 13; stroke(HAIR); d.setLineWidth(.6); d.line(M, st.y, W - M, st.y); st.y += 2
     rlineE('Total Rebate Amount Applied as Instant Discount', '(' + _money(incentive) + ')', false); st.y += 13; stroke(HAIR); d.setLineWidth(.6); d.line(M, st.y, W - M, st.y); st.y += 2
     rlineE('Total Remaining Amount', _money(dueVal), true); st.y += 14; stroke(BLUE); d.setLineWidth(.9); d.line(M, st.y, W - M, st.y) }
-  /* Acceptance & Authorization — signature block */
-  needH(48)
-  head('Acceptance & Authorization', 24)                                       // clearly separated below the summary
-  { const ack = 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.'
-    // Left-aligned with natural word spacing. Justifying it (Audit Builder #763)
-    // stretched the spaces badly on a paragraph this short, and #764 reverted it
-    // there for the same reason.
-    const al = wrap(ack, CW); tc(C.ink); font(8.5)
-    al.forEach((ln, k) => t(M, st.y + 9 + k * 10.5, ln)); st.y += al.length * 10.5 + 2
-    const sigW = 300, dateX = W - M - 150
-    st.y += 22; stroke([70, 82, 98]); d.setLineWidth(1); d.line(M, st.y, M + sigW, st.y)   // Printed Name on top
-    tc([70, 82, 98]); font(8.5); t(M, st.y + 11, 'Printed Name')
-    st.y += 28; stroke([70, 82, 98]); d.setLineWidth(1)                                    // Signature + Date below, with room above the line to sign
-    d.line(M, st.y, M + sigW, st.y); d.line(dateX, st.y, W - M, st.y)
-    tc([70, 82, 98]); font(8.5); t(M, st.y + 11, 'Property Owner / Authorized Representative — Signature'); t(dateX, st.y + 11, 'Date') }
+  /* Acceptance & Authorization — centred signature block (shared with Sealed) */
+  drawHearAcceptance(P, {
+    text: 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
+    rule: [70, 82, 98],
+    needH,
+    drawHeading: () => head('Acceptance & Authorization', 24),   // clearly separated below the summary
+  })
   _stampEesFooters(P, m.state, pv(F.pjInvDate), 28)
   return d.output('blob')
 }
@@ -498,18 +570,15 @@ function buildHearSealedPdfBlob(m) {
   for (const [lbl, val, strong] of trows) {
     if (strong) { rline(lbl, val, true) } else { tc(C.ink); font(9, 'normal'); t(M, st.y + 10, lbl); t(W - M, st.y + 10, val, { align: 'right' }) }
     stroke(C.line); d.setLineWidth(.5); d.line(M, st.y + 14, W - M, st.y + 14); st.y += 14 }
-  /* Acceptance & Authorization — signature block */
-  needH(118)
-  sh('Acceptance & Authorization')
-  { const ack = 'By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of ' + stateFullName(m.state) + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.'
-    const al = wrap(ack, CW); tc(C.ink); font(8.5); al.forEach((ln, k) => t(M, st.y + 9 + k * 10.5, ln)); st.y += al.length * 10.5 + 2   // full width, left-aligned
-    const sigW = 300, dateX = W - M - 150
-    st.y += 22; stroke([68, 88, 110]); d.setLineWidth(1)                                 // room above the line to actually sign
-    d.line(M, st.y, M + sigW, st.y); d.line(dateX, st.y, W - M, st.y)
-    tc(C.mut); font(8.5); t(M, st.y + 11, 'Property Owner / Authorized Representative — Signature'); t(dateX, st.y + 11, 'Date')
-    st.y += 24; stroke([68, 88, 110]); d.setLineWidth(1)                                 // separate printed-name line
-    d.line(M, st.y, M + sigW, st.y)
-    tc(C.mut); font(8.5); t(M, st.y + 11, 'Printed Name') }
+  /* Acceptance & Authorization — the same centred block as the EES proposal,
+     in Sealed's ink. It also puts Printed Name above the signature, which the
+     two documents used to disagree about. */
+  drawHearAcceptance(P, {
+    text: 'By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of ' + stateFullName(m.state) + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
+    rule: [68, 88, 110],
+    needH,
+    drawHeading: () => sh('Acceptance & Authorization'),
+  })
   _stampSealedFooters(P, 'Project Proposal', F.pjProjInvNo || F.pjIQ || '', F.pjInvDate)
   return d.output('blob')
 }
