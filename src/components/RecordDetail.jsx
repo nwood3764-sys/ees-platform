@@ -2465,7 +2465,15 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       return Object.keys(seed).length ? seed : null
     }
     if (dep.kind === 'contacts_for_accounts') {
-      const acct = dependencyValues.opportunity_account_id
+      // Every dependency of this kind IS an account id — that is what the kind
+      // means — so the seed takes the first one that is filled, in the order
+      // the field declares them. Naming the three columns it happened to be
+      // used with left the contractor and support-contractor contact pickers
+      // seeding nothing, and a contact quick-created there would have belonged
+      // to no account at all.
+      const dependsOn = Array.isArray(dep.depends_on) ? dep.depends_on : []
+      const acct = dependsOn.map(k => dependencyValues[k]).find(v => v != null && v !== '')
+        || dependencyValues.opportunity_account_id
         || dependencyValues.opportunity_managing_account_id
         || dependencyValues.account_id
       return acct ? { contact_account_id: acct } : null

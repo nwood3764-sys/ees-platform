@@ -2334,6 +2334,21 @@ export async function fetchDependentLookupOptions(field, record) {
   const currentValue = record?.[field.name] ?? null
 
   switch (dep.kind) {
+    // A contractor picker is scoped by WHAT AN ACCOUNT IS, not by another
+    // field on the record, so this kind carries no depends_on and must not be
+    // short-circuited by the empty-dependency guard every other kind uses.
+    // The RPC also returns the currently-saved account whatever its record
+    // type, so an existing contractor never renders as an empty dropdown.
+    case 'service_provider_accounts': {
+      const { data, error } = await supabase.rpc('list_service_provider_accounts', {
+        p_include_account_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.account_name || r.id.slice(0, 8),
+      }))
+    }
     case 'contacts_for_accounts': {
       if (dependencyValues.length === 0) {
         return []
