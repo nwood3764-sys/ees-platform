@@ -294,6 +294,20 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
         ok(`${who}: the ${what} is on the same page as Printed Name`, !!find(page, s))
       }
 
+      // (b2) The heading is a CLEAR BREAK from the section above it (Nicholas,
+      //      2026-09-03: "too close to the total remaining amount"). Measured
+      //      from the last rule drawn above the heading — the Project Summary's
+      //      closing rule on a single-page proposal.
+      {
+        const headText = find(page, 'ACCEPTANCE & AUTH')
+        const above = page.rules.filter(r => r.y > headText.y + 6)
+          .reduce((lo, r) => (lo == null || r.y < lo.y ? r : lo), null)
+        if (above) {
+          ok(`${who}: the heading clears the section above it (${Math.round(above.y - headText.y)}pt)`,
+            above.y - headText.y >= 20)
+        }
+      }
+
       const nameCap = find(page, A.CAPTIONS.name)
       const sigCap = find(page, A.CAPTIONS.signature)
       const dateCap = find(page, A.CAPTIONS.date)
