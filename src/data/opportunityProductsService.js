@@ -23,18 +23,36 @@ const SELECT = `
   id, oli_record_number, oli_name, opportunity_id, product_id, price_book_entry_id,
   unit_id, oli_quantity, oli_unit_price, oli_list_price, oli_total_price,
   oli_line_description, oli_notes, oli_sort_order, oli_created_at,
-  product:product_id ( product_name, product_description ),
+  oli_equipment_product_id, oli_is_equipment_line,
+  product:product_id ( product_name, product_description, product_requires_equipment_selection ),
+  equipment:oli_equipment_product_id ( product_name, product_manufacturer, product_model_number ),
   unit:unit_id ( unit_name )
 `
+
+/**
+ * How the programme administrator reads a model: "Panasonic FV-0511VF1".
+ *
+ * Composed from manufacturer + model number rather than the product NAME,
+ * because those two columns are the equipment's identity while a name is free
+ * text somebody can rename. Same rule the supplemental data sheet prints by —
+ * what you pick here is literally what lands in its Model Number column.
+ */
+function equipmentLabel(e) {
+  if (!e) return null
+  const parts = [e.product_manufacturer, e.product_model_number].filter(Boolean)
+  return parts.length ? parts.join(' ') : (e.product_name ?? null)
+}
 
 // Flatten the embedded parent objects to display strings the grid reads by name.
 function normalize(row) {
   if (!row) return row
-  const { product, unit, ...rest } = row
+  const { product, unit, equipment, ...rest } = row
   return {
     ...rest,
     product_name: product?.product_name ?? null,
     product_description: product?.product_description ?? null,
+    product_requires_equipment: product?.product_requires_equipment_selection === true,
+    equipment_name: equipmentLabel(equipment),
     unit_name: unit?.unit_name ?? null,
   }
 }
@@ -70,7 +88,44 @@ export async function listAddableProducts(opportunityId) {
     p_include_product_id: null,
   })
   if (error) throw error
-  return (data || []).map(r => ({ value: r.id, label: r.product_name || r.id.slice(0, 8) }))
+  const rows = data || []
+  if (rows.length === 0) return []
+
+  // Which of these measures demand the specific equipment being installed. The
+  // RPC does not return the flag, so it is read here in one extra round trip
+  // rather than by the grid per click — the picker has to know BEFORE the click
+  // whether choosing this product opens the equipment step.
+  const { data: flags } = await supabase
+    .from('products')
+    .select('id, product_requires_equipment_selection')
+    .in('id', rows.map(r => r.id))
+  const requires = new Map((flags || []).map(f => [f.id, f.product_requires_equipment_selection === true]))
+
+  return rows.map(r => ({
+    value: r.id,
+    label: r.product_name || r.id.slice(0, 8),
+    requiresEquipment: requires.get(r.id) === true,
+  }))
+}
+
+/**
+ * The equipment models approved for one incentive measure.
+ *
+ * Scoped by product_qualifying_equipment through the same RPC the line item's
+ * own picker uses, so the Products grid and the record page can never offer
+ * different answers for the same measure.
+ */
+export async function listQualifyingEquipment(measureProductId, includeProductId = null) {
+  if (!measureProductId) return []
+  const { data, error } = await supabase.rpc('list_qualifying_equipment_for_measure', {
+    p_measure_product_ids: [measureProductId],
+    p_include_product_id: includeProductId,
+  })
+  if (error) throw error
+  return (data || []).map(r => ({
+    value: r.id,
+    label: equipmentLabel(r) || r.id.slice(0, 8),
+  }))
 }
 
 /**
@@ -78,7 +133,7 @@ export async function listAddableProducts(opportunityId) {
  * the price book entry, list price, sales price, and description from the
  * product against the opportunity's price book.
  */
-export async function addOpportunityProduct(opportunityId, productId, sortOrder) {
+export async function addOpportunityProduct(opportunityId, productId, sortOrder, equipmentProductId = null) {
   const userId = await getCurrentUserId()
   const fields = await applyInsertDefaults(OLI, {
     opportunity_id: opportunityId,
@@ -86,6 +141,10 @@ export async function addOpportunityProduct(opportunityId, productId, sortOrder)
     oli_quantity: 1,
     oli_sort_order: sortOrder,
     oli_name: 'NEW', // overwritten by trg_oli_name from the product
+    // Only sent when the measure actually installs one. A null on a measure
+    // that forbids equipment is the same as omitting it; sending a value there
+    // is refused by enforce_line_item_equipment_selection.
+    ...(equipmentProductId ? { oli_equipment_product_id: equipmentProductId } : {}),
   }, userId)
   const inserted = await insertRecord(OLI, fields)
   return await getOpportunityProduct(inserted.id)
