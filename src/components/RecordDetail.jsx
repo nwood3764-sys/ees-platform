@@ -4268,7 +4268,18 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
   // approach (two independent left/right stacks + blank spacers) which
   // mis-aligned whenever one column held more fields than the other. Layouts
   // that opt in neither way are untouched (legacy paths below).
-  const useRowMajor = widget.widget_config?.layout === 'rows' || fields.some(f => f.full_width)
+  // Any section whose fields carry an explicit `column` renders row-major.
+  // Nicholas, 2026-09-02: "Align all rows. We should never have a stair step
+  // like this." The stair step IS the legacy column-fill path below, and the
+  // comment above it has always said so -- it "mis-aligned whenever one column
+  // held more fields than the other". Assigning a field to column 2 is a
+  // statement about which SLOT IN A ROW it occupies, so honouring it any other
+  // way is what produced the offset. Two columns only: the row-major grid is a
+  // 2-up grid, so a 3-column layout stays on the column path it was built for.
+  const maxColumn = Math.max(0, ...fields.map(f => f.column || 0))
+  const useRowMajor = widget.widget_config?.layout === 'rows'
+    || fields.some(f => f.full_width)
+    || (maxColumn > 0 && maxColumn <= 2)
   if (useRowMajor) {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoFlow: 'row', alignItems: 'start' }}>
