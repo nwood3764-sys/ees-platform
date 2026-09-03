@@ -301,9 +301,12 @@ function buildHearPdfBlob(m) {
   const head = (txt, gap) => { need(30); st.y += (gap != null ? gap : 14); tc(BLUE); font(10.5, 'bold')
     t(W / 2, st.y + 9, txt.toUpperCase(), { align: 'center' }); st.y += 13; stroke(BLUE); d.setLineWidth(.9)
     d.line(M, st.y, W - M, st.y); st.y += 5 }
-  // Every section total draws through this so they all line up: value
-  // right-aligned at a fixed column, label right-aligned just left of it.
-  const TOT_VALX = W - M, TOT_LBLX = W - M - 118
+  // Section totals line up in two fixed columns; the label sits a tight, fixed
+  // gap left of the value column, sized to the widest amount in this document —
+  // so "Total Project Cost  $262,500.00" reads as a pair while every amount
+  // still right-aligns in one column. (Audit Builder #764.)
+  font(9, 'bold')
+  const TOT_VALX = W - M, TOT_LBLX = W - M - Math.ceil(d.getTextWidth('(' + _money(m.totalCost) + ')')) - 14
   const rlineE = (lbl, val, bold) => { tc(C.ink); font(9, bold ? 'bold' : 'normal')
     t(TOT_VALX, st.y + 11, String(val), { align: 'right' }); t(TOT_LBLX, st.y + 11, lbl, { align: 'right' }) }
   /* scope table — always Quantity/Units · Labor · Material · Total */
@@ -378,12 +381,11 @@ function buildHearPdfBlob(m) {
   needH(48)
   head('Acceptance & Authorization', 24)                                       // clearly separated below the summary
   { const ack = 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.'
+    // Left-aligned with natural word spacing. Justifying it (Audit Builder #763)
+    // stretched the spaces badly on a paragraph this short, and #764 reverted it
+    // there for the same reason.
     const al = wrap(ack, CW); tc(C.ink); font(8.5)
-    { const _lhf = d.getLineHeightFactor(); d.setLineHeightFactor(10.5 / 8.5)   // justified — flush on both edges (last line natural)
-      if (al.length > 1) d.text(al.slice(0, -1), M, st.y + 9, { align: 'justify', maxWidth: CW })
-      d.setLineHeightFactor(_lhf) }
-    t(M, st.y + 9 + (al.length - 1) * 10.5, al[al.length - 1])
-    st.y += al.length * 10.5 + 2
+    al.forEach((ln, k) => t(M, st.y + 9 + k * 10.5, ln)); st.y += al.length * 10.5 + 2
     const sigW = 300, dateX = W - M - 150
     st.y += 22; stroke([70, 82, 98]); d.setLineWidth(1); d.line(M, st.y, M + sigW, st.y)   // Printed Name on top
     tc([70, 82, 98]); font(8.5); t(M, st.y + 11, 'Printed Name')
