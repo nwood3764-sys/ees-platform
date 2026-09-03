@@ -162,5 +162,53 @@ eq('an empty payload reports every required question once',
 eq('Assessment Date is listed once, not three times',
   findMissingRequiredFields({}, FIELDS).filter(l => l === 'Assessment Date').length, 1)
 
+// ── a checkbox question: several answers, one parameter ───────────────────
+//
+// "What work will be completed?" on the IRA HEAR submittal is `whatWork346[]`,
+// and a project almost always has more than one measure. Before this, the URL
+// was built with URLSearchParams.set, which keeps only the LAST value — so a
+// four-measure project opened the form claiming one measure, with nothing on
+// screen to say the other three had been dropped.
+const MEASURES_MAP = {
+  base_url: 'https://focusonenergy.jotform.com/251176242544858',
+  fields: [
+    { leap_field: 'work_measures', param: 'whatWork346[]', field_label: 'What work will be completed?', required: true },
+    { leap_field: 'income_level', param: 'whichIncome', field_label: 'Income level', required: true,
+      option_value_map: { 'Low-Income': 'Low- Income' } },
+  ],
+}
+const MEASURES = {
+  work_measures: ['Air Sealing & Insulation', 'ENERGY STAR Heat Pump Water Heater', 'Electrical Load Center'],
+  income_level: 'Low-Income',
+}
+const measureParams = mapPayloadToParams(MEASURES, MEASURES_MAP.fields)
+eq('every measure becomes its own entry', measureParams.filter(p => p.param === 'whatWork346[]').length, 3)
+eq('the last measure is not the only one',
+  measureParams.filter(p => p.param === 'whatWork346[]').map(p => p.value).join('|'),
+  'Air Sealing & Insulation|ENERGY STAR Heat Pump Water Heater|Electrical Load Center')
+
+const measured = buildPrefillUrl(MEASURES_MAP, MEASURES)
+const mqs = new URL(measured.url).searchParams
+eq('the query string repeats the parameter', mqs.getAll('whatWork346[]').length, 3)
+eq('the ampersand in a measure survives encoding',
+  mqs.getAll('whatWork346[]')[0], 'Air Sealing & Insulation')
+// A count of ANSWERS would say 4 here. The user is told how many QUESTIONS the
+// form received, and three ticked boxes in one list is one question.
+eq('filledCount counts questions, not ticks', measured.filledCount, 2)
+// The option-value map applies per element, and to a scalar as before.
+eq('the income radio matches the form\'s own spelling', mqs.get('whichIncome'), 'Low- Income')
+
+// An empty list is a question nobody answered, not an answered one.
+eq('an empty measure list sends nothing',
+  mapPayloadToParams({ work_measures: [] }, MEASURES_MAP.fields).length, 0)
+eq('an empty measure list is reported as missing',
+  findMissingRequiredFields({ work_measures: [], income_level: 'Low-Income' }, MEASURES_MAP.fields)
+    .includes('What work will be completed?'), true)
+eq('a filled measure list is not reported as missing',
+  findMissingRequiredFields(MEASURES, MEASURES_MAP.fields).length, 0)
+// A blank inside the list is skipped rather than sent as an empty tick.
+eq('a blank inside the list is skipped',
+  mapPayloadToParams({ work_measures: ['Air Sealing & Insulation', '', null] }, MEASURES_MAP.fields).length, 1)
+
 console.log(`external-form-prefill: ${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

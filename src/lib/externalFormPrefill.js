@@ -79,22 +79,44 @@ export function applyTransform(value, transform) {
   }
 }
 
+// One answer, resolved through the field's transform and option-value map.
+// Returns null when there is nothing to send, so a blank never reaches the URL.
+function resolveOne(raw, f) {
+  if (raw === null || raw === undefined || raw === '') return null
+  let v = applyTransform(raw, f.transform)
+  if (v === null || v === undefined || v === '') return null
+  // Option-value map (e.g. a radio whose stored value differs from the LEAP
+  // label) is applied after the transform.
+  const ovm = f.option_value_map
+  if (ovm && typeof ovm === 'object' && Object.prototype.hasOwnProperty.call(ovm, v)) {
+    v = ovm[v]
+  }
+  if (v === null || v === undefined || v === '') return null
+  return String(v)
+}
+
 // Turn the resolved payload + field map into the array of {param, value} the
 // query string is built from. Skips blanks so the form only receives real data.
+//
+// A CHECKBOX question is several answers to one parameter -- "What work will be
+// completed?" is `whatWork346[]` and a project usually has more than one
+// measure -- so an array value becomes one entry PER element, all under the
+// same param. That is why the URL is built by appending rather than setting:
+// setting would keep only the last measure and silently drop the rest, which
+// reads on the form as a project doing one thing.
 export function mapPayloadToParams(payload, fields) {
   const out = []
   for (const f of fields || []) {
-    let v = payload?.[f.leap_field]
-    if (v === null || v === undefined || v === '') continue
-    v = applyTransform(v, f.transform)
-    if (v === null || v === undefined || v === '') continue
-    // Option-value map (e.g. a radio whose stored value differs from the LEAP
-    // label) is applied after the transform.
-    const ovm = f.option_value_map
-    if (ovm && typeof ovm === 'object' && Object.prototype.hasOwnProperty.call(ovm, v)) {
-      v = ovm[v]
+    const raw = payload?.[f.leap_field]
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        const v = resolveOne(item, f)
+        if (v !== null) out.push({ param: f.param, value: v })
+      }
+      continue
     }
-    out.push({ param: f.param, value: String(v) })
+    const v = resolveOne(raw, f)
+    if (v !== null) out.push({ param: f.param, value: v })
   }
   return out
 }
@@ -102,9 +124,13 @@ export function mapPayloadToParams(payload, fields) {
 export function buildPrefillUrl(map, payload) {
   const params = mapPayloadToParams(payload, map?.fields)
   const qs = new URLSearchParams()
-  for (const { param, value } of params) qs.set(param, value)
+  for (const { param, value } of params) qs.append(param, value)
   const query = qs.toString()
-  return { url: query ? `${map.base_url}?${query}` : map.base_url, filledCount: params.length }
+  // Counted by QUESTION, not by answer: three ticked measures are one field
+  // filled, and telling somebody "12 fields filled" when 10 of them are boxes
+  // in one list overstates what the form received.
+  const filledCount = new Set(params.map(p => p.param)).size
+  return { url: query ? `${map.base_url}?${query}` : map.base_url, filledCount }
 }
 
 // Which required form fields are still blank in the resolved payload. The
@@ -120,7 +146,10 @@ export function findMissingRequiredFields(payload, fields) {
   for (const f of fields || []) {
     if (!f.required) continue
     const v = payload?.[f.leap_field]
-    if (v === null || v === undefined || String(v).trim() === '') {
+    // An empty array is a checkbox question nobody ticked -- blank, not answered.
+    const blank = v === null || v === undefined
+      || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '')
+    if (blank) {
       // One form field can be several parameters — a date is <id>M/<id>D/<id>Y,
       // an address is five — and they share one label. List it once; the user is
       // being told which QUESTION to answer, not which parameter is empty.
