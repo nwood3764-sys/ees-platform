@@ -13,6 +13,7 @@ import {
   listOpportunityProducts,
   listAddableProducts,
   listQualifyingEquipment,
+  createQualifyingEquipment,
   addOpportunityProduct,
   updateOpportunityProductField,
   removeOpportunityProduct,
@@ -66,6 +67,11 @@ export default function OpportunityProductsWidget({
   // (Nicholas: "it prompts the user to select the actual equipment product
   // that's going to be used for that product line item").
   const [equipStep, setEquipStep] = useState(null)   // { product, options|null }
+  // The create-it-here form inside the equipment step. Equipment is REQUIRED on
+  // a HEAR measure with no exception, so "no approved models yet" has to be
+  // something a person can resolve without leaving the opportunity.
+  const [newEquip, setNewEquip] = useState(null)     // { manufacturer, modelNumber } | null
+  const [savingEquip, setSavingEquip] = useState(false)
   const [addSearch, setAddSearch] = useState('')
   const [adding, setAdding] = useState(false)
   // Price book — lives on the opportunity.
@@ -262,10 +268,34 @@ export default function OpportunityProductsWidget({
     }
   }
 
+  const saveNewEquipment = async () => {
+    if (!equipStep || savingEquip) return
+    const model = (newEquip?.modelNumber || '').trim()
+    if (!model) {
+      toast.error('A model number is required — it is what the supplemental data sheet reports for every unit.')
+      return
+    }
+    setSavingEquip(true)
+    try {
+      const equipmentId = await createQualifyingEquipment(
+        equipStep.product.value, newEquip?.manufacturer, model)
+      // Straight through to the line item: the person came here to add a
+      // product, not to administer a catalogue.
+      await insertProduct(equipStep.product.value, equipmentId)
+      setNewEquip(null)
+    } catch (e) {
+      console.error('Create equipment failed', e)
+      toast.error(describeAddError(e))
+    } finally {
+      setSavingEquip(false)
+    }
+  }
+
   // Picking a product either adds the line straight away, or — when the measure
   // installs a model-numbered device — opens the equipment step first.
   const chooseProduct = async (option) => {
     if (!option.requiresEquipment) return insertProduct(option.value)
+    setNewEquip(null)
     setEquipStep({ product: option, options: null })
     try {
       const models = await listQualifyingEquipment(option.value)
@@ -463,7 +493,7 @@ export default function OpportunityProductsWidget({
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>Select a price book for this opportunity</span>
-                    <button onClick={() => { setAddOpen(false); setEquipStep(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
+                    <button onClick={() => { setAddOpen(false); setEquipStep(null); setNewEquip(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
                   </div>
                   <div style={{ maxHeight: 240, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff' }}>
                     {bookOptions == null ? (
@@ -507,7 +537,7 @@ export default function OpportunityProductsWidget({
                       onChange={e => setAddSearch(e.target.value)}
                       style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
                     />
-                    <button onClick={() => { setAddOpen(false); setEquipStep(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
+                    <button onClick={() => { setAddOpen(false); setEquipStep(null); setNewEquip(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
                   </div>
                   {equipStep ? (
                     /* The equipment step. The measure is chosen; now say which
@@ -523,31 +553,91 @@ export default function OpportunityProductsWidget({
                           Quality Installation Supplemental Data Sheet reports for every unit.
                         </div>
                       </div>
-                      <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
                         {equipStep.options == null ? (
                           <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>Loading models…</div>
-                        ) : equipStep.options.length === 0 ? (
-                          <div style={{ padding: 12, fontSize: 13, color: C.textSecondary }}>
-                            No approved models are set up for this measure yet. Add one on the
-                            product record — open “{equipStep.product.label}” under Stock →
-                            Products, then its Related tab → Qualifying Equipment.
-                          </div>
                         ) : (
-                          equipStep.options.map(m => (
-                            <button
-                              key={m.value}
-                              disabled={adding}
-                              onClick={() => insertProduct(equipStep.product.value, m.value)}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: adding ? 'wait' : 'pointer', color: C.textPrimary }}
-                            >
-                              {m.label}
-                            </button>
-                          ))
+                          <>
+                            {equipStep.options.map(m => (
+                              <button
+                                key={m.value}
+                                disabled={adding || savingEquip}
+                                onClick={() => insertProduct(equipStep.product.value, m.value)}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: (adding || savingEquip) ? 'wait' : 'pointer', color: C.textPrimary }}
+                              >
+                                {m.label}
+                              </button>
+                            ))}
+
+                            {/* The measure REQUIRES equipment, so "none set up
+                                yet" must be a form, not a wall. Also offered
+                                when models do exist — the first install of a
+                                new model happens on an opportunity, not in the
+                                catalogue. */}
+                            {newEquip ? (
+                              <div style={{ padding: 12, borderTop: equipStep.options.length ? `1px solid ${C.border}` : 'none', background: C.cardSecondary }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, marginBottom: 8 }}>
+                                  New equipment for {equipStep.product.label}
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  <input
+                                    autoFocus
+                                    placeholder="Manufacturer (e.g. Panasonic)"
+                                    value={newEquip.manufacturer || ''}
+                                    onChange={e => setNewEquip(v => ({ ...v, manufacturer: e.target.value }))}
+                                    style={{ flex: '1 1 160px', minWidth: 0, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
+                                  />
+                                  <input
+                                    placeholder="Model number (required)"
+                                    value={newEquip.modelNumber || ''}
+                                    onChange={e => setNewEquip(v => ({ ...v, modelNumber: e.target.value }))}
+                                    onKeyDown={e => { if (e.key === 'Enter') saveNewEquipment() }}
+                                    style={{ flex: '1 1 160px', minWidth: 0, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
+                                  />
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                  <button
+                                    disabled={savingEquip || adding}
+                                    onClick={saveNewEquipment}
+                                    style={{ background: C.emerald, border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, color: '#fff', cursor: savingEquip ? 'wait' : 'pointer' }}
+                                  >
+                                    {savingEquip ? 'Adding…' : 'Add and use it'}
+                                  </button>
+                                  <button
+                                    disabled={savingEquip}
+                                    onClick={() => setNewEquip(null)}
+                                    style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                                <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 6 }}>
+                                  Saved to the product catalogue and approved for this measure, so it is
+                                  on the list next time.
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ padding: 12, borderTop: equipStep.options.length ? `1px solid ${C.border}` : 'none' }}>
+                                {equipStep.options.length === 0 && (
+                                  <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>
+                                    No approved models are set up for this measure yet — add the one
+                                    you are installing.
+                                  </div>
+                                )}
+                                <button
+                                  onClick={() => setNewEquip({ manufacturer: '', modelNumber: '' })}
+                                  style={{ background: '#fff', border: `1px solid ${C.borderDark}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textPrimary, fontWeight: 600 }}
+                                >
+                                  + New equipment model
+                                </button>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                       <div style={{ padding: '8px 12px', borderTop: `1px solid ${C.border}` }}>
                         <button
-                          onClick={() => setEquipStep(null)}
+                          onClick={() => { setEquipStep(null); setNewEquip(null) }}
                           style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}
                         >
                           ← Back to products

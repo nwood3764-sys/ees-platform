@@ -129,6 +129,26 @@ export async function listQualifyingEquipment(measureProductId, includeProductId
 }
 
 /**
+ * Create an equipment product for a measure and approve it, in one call.
+ *
+ * The escape hatch that makes an UNCONDITIONAL equipment requirement workable
+ * (Nicholas: "If I pick a HEAR measure, a piece of equipment has to come with
+ * it. There's no option."). Without it, a measure whose models are not set up
+ * yet is a wall; with it, it is a form. The product's record type comes from
+ * the measure itself, and the product and its approval link are made together
+ * server-side so the picker can never be handed a product it cannot offer.
+ */
+export async function createQualifyingEquipment(measureProductId, manufacturer, modelNumber) {
+  const { data, error } = await supabase.rpc('create_qualifying_equipment_for_measure', {
+    p_measure_product_id: measureProductId,
+    p_manufacturer: manufacturer || null,
+    p_model_number: modelNumber,
+  })
+  if (error) throw new Error(error.message)
+  return data
+}
+
+/**
  * Add a product as a new line. Quantity defaults to 1; the DB trigger resolves
  * the price book entry, list price, sales price, and description from the
  * product against the opportunity's price book.
