@@ -73,6 +73,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_HEAR_PROPOSAL:                      'generate_hear_proposal',
   GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION: 'generate_hear_project_reservation_application',
   REGENERATE_SUPPLEMENTAL_DATA_SHEET:          'regenerate_supplemental_data_sheet',
+  SEND_HEAR_PROPOSAL_FOR_SIGNATURE:            'send_hear_proposal_for_signature',
   GENERATE_HOMES_PAYMENT_INVOICE:              'generate_homes_payment_invoice',
   GENERATE_HOMES_ASSESSMENT_INVOICE:           'generate_homes_assessment_invoice',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
@@ -518,6 +519,29 @@ export const ACTION_REGISTRY = Object.freeze({
     isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
       !editing && !!record?.id && tableName === 'enrollments'
       && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
+  },
+
+  // Send the HEAR proposal to the property owner for signature.
+  //
+  // Separate from Generate Proposal on purpose: generating is an internal
+  // rehearsal you can do ten times, and sending reaches a customer once. The
+  // recipient is named back to the sender before anything leaves the building.
+  //
+  // The envelope's own status is what then moves the enrollment — Sent to
+  // "Proposal Signature Requested", Completed to "Enrollment To Be Submitted"
+  // (trg_zzz_enrollment_status_from_envelope) — so this action does not stamp a
+  // status itself and cannot disagree with the envelope it created.
+  send_hear_proposal_for_signature: {
+    key:                 ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE,
+    label:               'Send Proposal for Signature',
+    icon:                'M22 2 11 13 M22 2l-7 20-4-9-9-4 20-7z',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'menu',
+    defaultSortOrder:    44,
+    isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
+      !editing && !!record?.id && tableName === 'enrollments'
+      && recordTypeValue === 'WI-IRA-MF-HEAR-Project-Reservation',
   },
 
   // Project Reservation proposal for the IRA Multifamily HEAR programme. Its

@@ -339,7 +339,7 @@ export function hearAcceptanceGeometry(P) {
 }
 
 function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY, needH,
-                                signerName, signerTitle }) {
+                                signerName, signerTitle, signatureTabs }) {
   const { d, st, font, t, wrap, stroke, tc } = P
   const A = HEAR_ACCEPTANCE
   const g = hearAcceptanceGeometry(P)
@@ -431,6 +431,28 @@ function drawHearAcceptance(P, { text, rule, drawHeading, headingHeight, floorY,
   d.line(g.dateX, st.y, g.dateX + g.dateWidth, st.y)
   caption(g.blockX, A.CAPTIONS.signature)
   caption(g.dateX, A.CAPTIONS.date)
+
+  // Record where the signature and date go, for the e-signature route.
+  //
+  // Taken from the SAME geometry that just drew the rules — g.blockX,
+  // g.signatureWidth, g.dateX, g.dateWidth and this st.y — rather than from
+  // constants repeated here. The acceptance block scales itself to the room
+  // left on the page (fit.scale) and can move to a fresh page, so any second
+  // set of coordinates would be right only for the layout that happened to fit
+  // first. A signature stamped a centimetre off its line is not obviously wrong
+  // to whoever renders it and is very obviously wrong to whoever signed it.
+  //
+  // jsPDF y is top-origin; the signing pipeline stores tab y bottom-origin
+  // (pdf-lib / htmlToPdf convention), so it is H - st.y. Both boxes sit ABOVE
+  // their rule, bottom edge on the line — matching the EES submittal renderer.
+  if (Array.isArray(signatureTabs)) {
+    const page = d.getNumberOfPages()
+    const boxH = 26
+    signatureTabs.push(
+      { recipient_order: 1, tab_type: 'sig',  page, x: g.blockX, y: P.H - st.y, width: g.signatureWidth, height: boxH },
+      { recipient_order: 1, tab_type: 'date', page, x: g.dateX,  y: P.H - st.y, width: g.dateWidth,      height: boxH },
+    )
+  }
   st.y += A.CAPTION_DROP + 4
 }
 
@@ -447,8 +469,25 @@ export async function generateHearProposalBlob(input) {
   return sealed ? buildHearSealedPdfBlob(m) : buildHearPdfBlob(m)
 }
 
+/**
+ * Render the HEAR proposal AND return the signature/date tab positions for the
+ * e-signature route: { blob, tabs }.
+ *
+ * Same renderer, same call, one extra out-parameter — NOT a second PDF path.
+ * Two renderers for one document is two chances for the tab coordinates to
+ * describe a layout the signer never saw.
+ */
+export async function generateHearProposalWithSignatureTabs(input) {
+  await loadJsPdf()
+  const m = computeHearModel(input)
+  const sealed = /sealed/i.test((input && input.contractor) || '')
+  const tabs = []
+  const blob = sealed ? buildHearSealedPdfBlob(m, tabs) : buildHearPdfBlob(m, tabs)
+  return { blob: await blob, tabs }
+}
+
 // --- ported: buildHearPdfBlob (index.html 4145,4275) ---
-function buildHearPdfBlob(m) {
+function buildHearPdfBlob(m, signatureTabs = null) {
   const F = m.fields
   const P = newProposalPdf(_jspdf, 20); const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
   const pv = v => (v != null && String(v).trim() !== '') ? String(v) : '—'
@@ -578,6 +617,7 @@ function buildHearPdfBlob(m) {
     rlineE('Total Remaining Amount', _money(dueVal), true); st.y += 14; stroke(BLUE); d.setLineWidth(.9); d.line(M, st.y, W - M, st.y) }
   /* Acceptance & Authorization — centred signature block (shared with Sealed) */
   drawHearAcceptance(P, {
+    signatureTabs,
     text: 'By signing below, the property owner accepts this proposal and authorizes Energy Efficiency Services of ' + _state + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [70, 82, 98],
     needH,
@@ -602,7 +642,7 @@ function buildHearPdfBlob(m) {
 // Sealed (green) HEAR proposal — Sealed, Inc. as primary contractor in the
 // header, EES as the line contractor, the Labor / Material / Total scope split,
 // the HEAR instant discount, summary.
-function buildHearSealedPdfBlob(m) {
+function buildHearSealedPdfBlob(m, signatureTabs = null) {
   const F = m.fields
   const P = newProposalPdf(_jspdf, 20); const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
   const GREEN = [33, 131, 82], HAIR = [223, 230, 238], PANEL = [246, 249, 252]
@@ -707,6 +747,7 @@ function buildHearSealedPdfBlob(m) {
      in Sealed's ink. It also puts Printed Name above the signature, which the
      two documents used to disagree about. */
   drawHearAcceptance(P, {
+    signatureTabs,
     text: 'By signing below, the property owner accepts this proposal and authorizes Sealed, Inc. and its support contractor Energy Efficiency Services of ' + stateFullName(m.state) + ' to submit the project information above to the Inflation Reduction Act program team for project reservation and pre-approval and, upon the program’s approval, to complete the work as specified in this proposal.',
     rule: [68, 88, 110],
     needH,
