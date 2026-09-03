@@ -24,6 +24,7 @@ import { proxiedStorageUrl } from '../lib/reportFileLinks'
 import { extractPdfText } from './paperworkService'
 import { computeHomesModel, generateHomesProposalBlob } from '../lib/homesProposal'
 import { loadEnrollmentProposalContext, toInt, fmtDate } from './enrollmentProposalContext'
+import { resolveOwnerAddress } from '../lib/ownerAddress'
 
 // The enrollment record type this proposal is built for.
 export const HOMES_PROPOSAL_RECORD_TYPE = 'WI-IRA-MF-HOMES-Project-Reservation'
@@ -163,11 +164,25 @@ export async function loadPaymentRequestContext(incentiveAppId) {
     ia.building_id ? supabase.from('buildings').select('building_total_units, building_number_of_units').eq('id', ia.building_id).maybeSingle() : Promise.resolve({ data: null }),
   ])
 
-  const acctIds = [ia.ia_owner, ia.ia_contractor_account_id, ia.ia_support_contractor_account_id]
+  // `ia_owner` is the RECORD's owner -- the LEAP user -- not the property
+  // owner, exactly as enrollment_owner is (it holds Nicholas Wood on every live
+  // incentive application). Looking it up in `accounts` finds nothing; the
+  // customer company is the PROPERTY's account, one account per real-world
+  // company. Here the misread was masked because ia_property_owner_name is
+  // tried first, so the invoice printed a customer anyway.
+  const ownerAccountId = UUID.test(String(prop?.property_account_id || ''))
+    ? prop.property_account_id : null
+  const acctIds = [ia.ia_contractor_account_id, ia.ia_support_contractor_account_id, ownerAccountId]
     .filter(v => v && UUID.test(String(v)))
   const { data: accts } = acctIds.length
-    ? await supabase.from('accounts').select('id, account_name').in('id', acctIds) : { data: [] }
-  const acctName = id => (accts || []).find(a => a.id === id)?.account_name || null
+    ? await supabase.from('accounts')
+        .select('id, account_name, billing_street, billing_city, billing_state, billing_zip, ' +
+                'mailing_street, mailing_city, mailing_state, mailing_zip')
+        .in('id', acctIds)
+    : { data: [] }
+  const acct = id => (accts || []).find(a => a.id === id) || null
+  const acctName = id => acct(id)?.account_name || null
+  const ownerAccount = ownerAccountId ? acct(ownerAccountId) : null
 
   const contractor = acctName(ia.ia_contractor_account_id) || ia.ia_primary_contractor_business_name || ''
   const secondaryContractor = ia.ia_has_support_contractor
@@ -192,10 +207,18 @@ export async function loadPaymentRequestContext(incentiveAppId) {
   const csz = [prop?.property_city,
     [prop?.property_state, prop?.property_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
   const ownerName = ia.ia_property_owner_name || ia.ia_building_owner_name
-    || (UUID.test(String(ia.ia_owner || '')) ? (acctName(ia.ia_owner) || '') : (ia.ia_owner || '')) || ''
+    || ownerAccount?.account_name || prop?.property_hud_owner_org || ''
+  // The customer's mailing address, from the owner account's structured
+  // columns. The payment-request invoice printed no owner address at all
+  // before this -- the invoice's own party block had nowhere to read one from.
+  const ownerAddr = resolveOwnerAddress({
+    account: ownerAccount, freeText: ia.ia_mailing_address_for_rebates,
+  })
 
   const fields = {
     pjOwner:       ownerName,
+    pjOwnerAddr:   ownerAddr.addr,
+    pjOwnerCsz:    ownerAddr.csz,
     pjContact:     contactName,
     pjContactTitle:contactTitle,
     pjEmail:       ia.ia_applicant_building_owner_email || '',

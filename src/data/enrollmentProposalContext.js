@@ -14,17 +14,15 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
+import { resolveOwnerAddress, splitOwnerAddress } from '../lib/ownerAddress'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// "6737 W Washington Street, West Allis, WI 53214" -> street line + city/state/zip line
-export function splitAddress(full) {
-  if (!full) return { addr: '', csz: '' }
-  const s = String(full).trim()
-  const i = s.indexOf(',')
-  if (i < 0) return { addr: s, csz: '' }
-  return { addr: s.slice(0, i).trim(), csz: s.slice(i + 1).trim() }
-}
+// Kept as the module's old name so nothing that imports it breaks; the rule
+// itself lives in src/lib/ownerAddress.js, where it is tested. It used to cut
+// at the FIRST comma, which put "Suite 2275" on the city line of every proposal
+// whose owner has a suite.
+export const splitAddress = splitOwnerAddress
 
 export function toInt(v) {
   if (v == null || v === '') return null
@@ -74,23 +72,47 @@ export async function loadEnrollmentProposalContext(enrollmentId) {
       : Promise.resolve({ data: null }),
   ])
 
-  // Owner and contractor are account lookups; resolve their names. The enrollment
-  // carries a PRIMARY contractor and, when enrollment_has_support_contractor is
-  // set, a SECONDARY (support) contractor — both are listed on the documents.
-  const acctIds = [enr.enrollment_owner, enr.enrollment_contractor_account_id,
+  // THE CUSTOMER IS THE PROPERTY'S ACCOUNT.
+  //
+  // `enrollments.enrollment_owner` is NOT the property owner — it is the
+  // record's own owner, the LEAP user, which is what "every record has a named
+  // owner" means on this platform. It is a `users` id on all 50 live
+  // enrollments (Nicholas, Lucas and Brittin Wood), it carries no foreign key
+  // to say so, and this function used to look it up in `accounts`. That lookup
+  // found nothing and returned '', which is why the Customer Information block
+  // on every HOMES and HEAR proposal opened with a person's name where the
+  // customer company belongs — the block named no customer at all.
+  //
+  // The owner company is the PROPERTY's account: one account per real-world
+  // company, and `properties.property_account_id` is the owner (2026-07-25).
+  const contractorIds = [enr.enrollment_contractor_account_id,
     enr.enrollment_support_contractor_account_id]
     .filter(v => v && UUID.test(String(v)))
+  const ownerAccountId = UUID.test(String(prop?.property_account_id || ''))
+    ? prop.property_account_id : null
+  const acctIds = [...contractorIds, ownerAccountId].filter(Boolean)
   const { data: accts } = acctIds.length
-    ? await supabase.from('accounts').select('id, account_name').in('id', acctIds)
+    ? await supabase.from('accounts')
+        .select('id, account_name, billing_street, billing_city, billing_state, billing_zip, ' +
+                'mailing_street, mailing_city, mailing_state, mailing_zip')
+        .in('id', acctIds)
     : { data: [] }
-  const acctName = id => (accts || []).find(a => a.id === id)?.account_name || null
-  const ownerName = UUID.test(String(enr.enrollment_owner || ''))
-    ? (acctName(enr.enrollment_owner) || '') : (enr.enrollment_owner || '')
+  const acct = id => (accts || []).find(a => a.id === id) || null
+  const acctName = id => acct(id)?.account_name || null
+  const ownerAccount = ownerAccountId ? acct(ownerAccountId) : null
+  // The HUD owner organisation on the property is the fallback for a property
+  // that has not been matched to an account yet.
+  const ownerName = ownerAccount?.account_name || prop?.property_hud_owner_org || ''
   const contractor = acctName(enr.enrollment_contractor_account_id) || ''
   const secondaryContractor = enr.enrollment_has_support_contractor
     ? (acctName(enr.enrollment_support_contractor_account_id) || '') : ''
 
-  const owner = splitAddress(enr.enrollment_owner_address)
+  // Prefer the account's STRUCTURED billing address over the enrollment's
+  // single free-text column — there is nothing to guess when the street, city,
+  // state and ZIP are already separate columns.
+  const owner = resolveOwnerAddress({
+    account: ownerAccount, freeText: enr.enrollment_owner_address,
+  })
   const units = toInt(enr.enrollment_occupied_units)
     || toInt(bld?.building_total_units) || toInt(bld?.building_number_of_units)
     || toInt(prop?.property_total_units) || toInt(prop?.property_total_number_of_units) || null
