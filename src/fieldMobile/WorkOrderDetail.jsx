@@ -29,7 +29,7 @@ import {
   fetchActiveUsers, fetchAccountContactsForWorkOrder, fetchVehiclesForInspection,
   saveWorkStepVehicle,
 } from './fieldMobileService'
-import { uploadPhoto, setPhotoReportInclusion } from '../data/storageService'
+import { uploadPhoto, setPhotoReportInclusion, softDeletePhoto } from '../data/storageService'
 import {
   imageFilesFromInputEvent,
   fileFromInputEvent,
@@ -43,6 +43,14 @@ import { supabase } from '../lib/supabase'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
 
 const DONE_STATUSES = ['completed', 'verified', 'not applicable']
+
+// Which finished steps a technician may reopen while the work order is still
+// theirs. Completed and Not Applicable are their own calls and can be revisited;
+// Verified is a second person's sign-off and is not theirs to undo.
+const REOPENABLE_STATUSES = ['completed', 'not applicable']
+function isStepReopenable(step) {
+  return REOPENABLE_STATUSES.includes(String(step?.status || '').toLowerCase())
+}
 
 // Format a scheduled timestamp as e.g. "Mon, Jun 15 · 9:00 AM" in Chicago time.
 function fmtSchedule(iso) {
@@ -262,6 +270,13 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
   const allDone = orderedSteps.length > 0 && actionableIdx === -1
   const woStatus = (header.work_order_status || '').toLowerCase()
   const canSubmit = allDone && (woStatus.includes('in progress') || woStatus.includes('correction'))
+  // Everything on this work order stays editable until it is handed over for
+  // verification. Once submitted the evidence belongs to the verifier, so the
+  // steps close. 'verified' also matches 'to be verified', and 'complete' also
+  // matches 'unable to complete' — both are meant to close the work order.
+  const stepsStayOpen = !(
+    woStatus.includes('verified') || woStatus.includes('complete') || woStatus.includes('closed')
+  )
   // Some work plans (e.g. the Single-Family Energy Assessment) let sections be
   // completed in any order — the auditor walks the house non-linearly. Order was
   // never enforced server-side, so this only relaxes the client's step locking.
@@ -408,9 +423,21 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
           const locked = anyOrder
             ? false
             : (i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step))
-          const isActionable = !isStepDone(step) && (
+          // A finished step stays open until the WORK ORDER is submitted
+          // (Nicholas, 2026-09-03: "technicians can go back to previously
+          // completed steps and edit photos... Until they submit the entire
+          // work order, they should be able to edit and modify steps").
+          // Completing a step was a one-way door: the capture controls
+          // disappeared the moment it went green, so a technician who realised
+          // in the van that a shot was blurry had no way back in.
+          //
+          // Deliberately NOT reopened: a step a verifier has marked Verified.
+          // That is a second person's sign-off and undoing it is not the
+          // technician's call — it comes back through Corrections Needed.
+          const reopenable = stepsStayOpen && isStepReopenable(step)
+          const isActionable = reopenable || (!isStepDone(step) && (
             anyOrder || i === actionableIdx || isStepCorrections(step)
-          )
+          ))
           return step.is_screen_flow ? (
             <ScreenFlowCard
               key={step.work_step_id}
@@ -418,6 +445,7 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
               index={i}
               locked={locked}
               isActionable={isActionable}
+              reopened={reopenable}
               onOpen={() => setFlowStep(step)}
               onMarkNotApplicable={() => setNaStep(step)}
             />
@@ -429,6 +457,7 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
               index={i}
               locked={locked}
               isActionable={isActionable}
+              reopened={reopenable}
               busy={busy === step.work_step_id}
               onComplete={() => handleComplete(step)}
               onMarkNotApplicable={() => setNaStep(step)}
@@ -784,7 +813,7 @@ function OutstandingSections({ steps }) {
 }
 
 // ─── StepCard ────────────────────────────────────────────────────────────────
-function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
+function StepCard({ step, woId, index, locked, isActionable, reopened = false, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
   const fileRef        = useRef(null)
   const folderRef      = useRef(null)  // library / folder picker (offline uploads)
   const videoRef       = useRef(null)
@@ -939,12 +968,18 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
         </div>
       )}
 
-      {/* Captured photos — always viewable, even after the step is completed. */}
+      {/* Captured photos — always viewable, even after the step is completed.
+          Removable only while the step is still open to editing, which is what
+          makes "replace a photo" possible: remove, then retake. */}
       {Array.isArray(step.photos) && step.photos.length > 0 && (
         <PhotoStrip
           photos={step.photos}
           pending={batch ? Math.max(0, batch.total - batch.done) : 0}
           onFlash={(msg, tone) => (tone === 'error' ? onPhotoError(msg) : onPhotoUploaded(msg))}
+          onRemove={isActionable ? async (p) => {
+            await softDeletePhoto(p.id)
+            await onPhotoUploaded('Photo removed')
+          } : null}
         />
       )}
 
@@ -1181,21 +1216,35 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
             ? <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Uploading video…</div>
             : <UploadProgress batch={batch} />}
 
-          <button
-            onClick={onComplete}
-            disabled={!!gap || busy || uploading}
-            style={(gap || busy || uploading) ? btnDisabled : { ...btnPrimary, minHeight: 46 }}
-            title={gap || undefined}
-          >
-            {busy ? 'Completing…' : 'Complete Step'}
-          </button>
+          {/* A step that is already finished shows no Complete button — it is
+              open so more evidence can be added, not so it can be completed
+              twice. The note says why the camera is still here. */}
+          {reopened ? (
+            <div style={{
+              fontSize: 12, color: C.textSecondary, background: C.cardSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px',
+            }}>
+              {notApplicable ? 'Marked Not Applicable' : 'Completed'} — you can still add or
+              replace photos until this work order is submitted for verification.
+            </div>
+          ) : (
+            <button
+              onClick={onComplete}
+              disabled={!!gap || busy || uploading}
+              style={(gap || busy || uploading) ? btnDisabled : { ...btnPrimary, minHeight: 46 }}
+              title={gap || undefined}
+            >
+              {busy ? 'Completing…' : 'Complete Step'}
+            </button>
+          )}
 
-          {gap && (
+          {gap && !reopened && (
             <div style={{ fontSize: 12, color: C.amber, marginTop: 6 }}>{gap}</div>
           )}
 
           {/* Escape hatch for steps that don't exist on this site (e.g. no can
               lights in the attic). Requires a reason; the verifier sees it. */}
+          {!reopened && (
           <button
             onClick={onMarkNotApplicable}
             disabled={busy || uploading}
@@ -1208,6 +1257,7 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
           >
             This step doesn’t apply here — mark Not Applicable
           </button>
+          )}
         </>
       )}
 
@@ -1992,7 +2042,7 @@ function ReportFlagIcon({ filled }) {
   )
 }
 
-function PhotoStrip({ photos, label = null, pending = 0, onFlash = null }) {
+function PhotoStrip({ photos, label = null, pending = 0, onFlash = null, onRemove = null }) {
   const [urls, setUrls] = useState({})   // photo.id -> signedUrl
   const [zoom, setZoom] = useState(null) // signedUrl being viewed full-screen
   const signedRef = useRef(new Map())    // `${bucket}::${path}` -> signedUrl
@@ -2001,6 +2051,31 @@ function PhotoStrip({ photos, label = null, pending = 0, onFlash = null }) {
   // flag toggled here shows immediately instead of after the next fetch.
   const [reportFlags, setReportFlags] = useState({})
   const [flagBusy, setFlagBusy] = useState(null)
+  // Photos removed here, so the strip updates on the tap rather than after the
+  // parent's refetch lands. A failed delete puts the photo back.
+  const [removed, setRemoved] = useState({})
+  const [removeBusy, setRemoveBusy] = useState(null)
+
+  // Replacing a photo is delete-then-retake, so removal is what makes "replace"
+  // possible at all (Nicholas, 2026-09-03: "they can add additional photos or
+  // replace photos"). It is a SOFT delete — the row and the storage object stay,
+  // so a photo removed by mistake is recoverable from the Recycle Bin, and the
+  // evidence trail keeps the fact that a photo existed and was withdrawn.
+  const confirmRemove = async (p) => {
+    if (!onRemove) return
+    if (typeof window !== 'undefined' &&
+        !window.confirm('Remove this photo? It stays in the Recycle Bin and can be restored.')) return
+    setRemoved((m) => ({ ...m, [p.id]: true }))
+    setRemoveBusy(p.id)
+    try {
+      await onRemove(p)
+    } catch (err) {
+      setRemoved((m) => ({ ...m, [p.id]: false }))
+      if (onFlash) onFlash(err.message || 'Could not remove the photo.', 'error')
+    } finally {
+      setRemoveBusy(null)
+    }
+  }
 
   // The technician standing in the attic knows better than anyone which shot
   // proves the work. Until now only the desktop gallery could mark a photo for
@@ -2062,7 +2137,7 @@ function PhotoStrip({ photos, label = null, pending = 0, onFlash = null }) {
 
   return (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-      {photos.map((p) => {
+      {photos.filter((p) => !removed[p.id]).map((p) => {
         const url = urls[p.id]
         const legColor = (p.photo_type || '').toLowerCase() === 'before' ? C.sky
           : (p.photo_type || '').toLowerCase() === 'after' ? C.emeraldMid : C.textMuted
@@ -2100,6 +2175,26 @@ function PhotoStrip({ photos, label = null, pending = 0, onFlash = null }) {
                   <ReportFlagIcon filled={inReport(p)} />
                 </span>
               </button>
+              {onRemove && (
+                <button
+                  onClick={() => confirmRemove(p)}
+                  disabled={removeBusy === p.id}
+                  aria-label="Remove this photo"
+                  title="Remove this photo"
+                  style={{
+                    position: 'absolute', top: 3, left: 3,
+                    width: 22, height: 22, borderRadius: '50%', padding: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(13,26,46,0.62)',
+                    border: '1px solid rgba(255,255,255,0.4)',
+                    color: '#fff', fontSize: 13, lineHeight: 1, fontWeight: 700,
+                    cursor: removeBusy === p.id ? 'default' : 'pointer',
+                    opacity: removeBusy === p.id ? 0.6 : 1,
+                  }}
+                >
+                  ×
+                </button>
+              )}
               {isMeaningfulTag(p.photo_type) && (
                 <span style={{
                   position: 'absolute', bottom: 3, left: 3, right: 3,
@@ -2258,7 +2353,7 @@ function evalCalc(expr, resolveVar) {
 // Assessment). Rather than inline capture, it renders a compact section card
 // that launches the full-screen guided flow. Completed sections show a
 // read-only summary of what was captured.
-function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotApplicable }) {
+function ScreenFlowCard({ step, index, locked, isActionable, reopened = false, onOpen, onMarkNotApplicable }) {
   const done = isStepDone(step)
   const corrections = isStepCorrections(step)
   const chip = statusChip(step.status)
