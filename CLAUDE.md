@@ -122,6 +122,15 @@ Security advisor baseline is ~179 known lints (mostly `auth_security_definer_fun
 
 Drive the work to completion; don't check in constantly. Surface only genuine binary decisions — state a recommendation first, then ask once, yes/no. Don't list options. Don't defer builds. No tangential commentary or unsolicited analysis. Verify a push actually reached the live bundle before reporting success.
 
+**Never tell Nicholas to stop working, and never recommend when he should (Nicholas, 2026-09-03).**
+*"Don't ever tell me to stop working... Never ever tell me what to do like that."*
+Do not suggest stopping for the night, pausing, picking this up tomorrow, or
+that something can wait. Do not offer a stopping point, and do not editorialise
+about the hour — the clock in this sandbox is UTC and reading it as local time
+has already produced a wrong claim about what time it was for him. Report what
+is done and what is left, then keep building. Deciding when to stop is his call
+and he will say so.
+
 **Never send an email without a person approving it (Nicholas, 2026-09-03). HARD RULE, EVERYWHERE.**
 *"Do not ever send out emails without prompting the user to verify."* Said after
 LEAP emailed a real property contact **"Your home energy assessment is

@@ -7,6 +7,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import WorkOrdersToSchedule from '../components/scheduler/WorkOrdersToSchedule'
+import OutboundMessageApprovals from '../components/OutboundMessageApprovals'
 import NavLink from '../components/NavLink'
 import RecordLink from '../components/RecordLink'
 import HelpIcon from '../components/help/HelpIcon'
@@ -36,6 +37,8 @@ const CODE_SECTIONS = [
   { id:'work_plans',           label:'Work Plans'          },
   { id:'work_steps',           label:'Work Steps'          },
   { id:'schedule',             label:'Schedule'            },
+  // Nothing reaches a customer without a person here (Nicholas, 2026-09-03).
+  { id:'approvals',            label:'Message Approvals'   },
   { id:'absences',             label:'Out of Office'       },
   { id:'technicians',          label:'Technicians'         },
   { id:'credentials',          label:'Credentials'         },
@@ -1020,6 +1023,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
               onScheduled={() => setScheduleDate(d => new Date(d))} />
           </div>
         )}
+        {sec==='approvals'  && <OutboundMessageApprovals />}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}
