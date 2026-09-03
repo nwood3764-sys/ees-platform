@@ -62,7 +62,7 @@ import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
 import ConversationListWidget from './ConversationListWidget'
 import OpportunityProductsWidget from './OpportunityProductsWidget'
-const SendHearProposalModal = lazy(() => import('./SendHearProposalModal'))
+const SignatureSendModal = lazy(() => import('./SignatureSendModal'))
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
 import PropertyMapWidget from './PropertyMapWidget'
@@ -7320,7 +7320,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // signing URLs for the user to distribute. Re-checked when tableName changes
   // so navigating between record types updates the icon visibility.
   const [showSendSignatureModal, setShowSendSignatureModal] = useState(false)
-  const [showSendHearProposal, setShowSendHearProposal] = useState(false)
+  // Which generated document is being sent for signature, or null. One modal,
+  // configured per document — the two paths differ only in which service loads
+  // and sends, and every guard a person passes through is identical.
+  const [signatureSend, setSignatureSend] = useState(null)
   const [hasActiveTemplate, setHasActiveTemplate] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
   // Re-fetch the open record when a background action (today: the LEAP
@@ -9766,8 +9769,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
     [ACTION_KEYS.REGENERATE_SUPPLEMENTAL_DATA_SHEET]:   handleRegenerateSupplementalSheet,
-    [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setShowSendHearProposal(true),
-    [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setShowSendHearProposal(true),
+    [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setSignatureSend('hear_proposal'),
+    [ACTION_KEYS.SEND_PAYMENT_REQUEST_FOR_SIGNATURE]:   () => setSignatureSend('payment_request'),
+    [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setSignatureSend('hear_proposal'),
+    [ACTION_KEYS.SEND_PAYMENT_REQUEST_FOR_SIGNATURE]:   () => setSignatureSend('payment_request'),
     [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setDocumentModalKind('proposal'),
     [ACTION_KEYS.GENERATE_HEAR_PROPOSAL]:              () => setDocumentModalKind('hear_proposal'),
     [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setDocumentModalKind('invoice'),
@@ -10841,11 +10846,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             send-envelope, displays signing URLs. After successful send the
             envelope row exists; the parent's Documents related-list will
             show the signed PDF after the last recipient signs. */}
-        {showSendHearProposal && (
+        {signatureSend && (
           <Suspense fallback={null}>
-            <SendHearProposalModal
-              enrollmentId={recordId}
-              onClose={() => setShowSendHearProposal(false)}
+            <SignatureSendModal
+              kind={signatureSend}
+              recordId={recordId}
+              onClose={() => setSignatureSend(null)}
               onSent={() => setReloadTick(t => t + 1)}
             />
           </Suspense>

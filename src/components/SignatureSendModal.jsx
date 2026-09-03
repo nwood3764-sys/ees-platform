@@ -1,7 +1,25 @@
-// Send the HEAR proposal to the property owner for signature.
+// SignatureSendModal — send a LEAP-GENERATED document for signature.
+//
+// Distinct from SendForSignatureModal, which is the three-step envelope builder
+// for DOCUMENT TEMPLATES: pick a template, edit recipients, set a subject. That
+// one starts from a template and asks who signs. This one starts from a record
+// whose document LEAP composes itself — a HEAR proposal, a HOMES payment
+// request invoice — where the signer is already known from the record and the
+// only real question is whether that inherited address is right.
+//
+// (An earlier cut of this file was written over SendForSignatureModal.jsx by
+// mistake. Two different jobs, two components, two names.)
 //
 // Nicholas: "we need to send it out for signature and then through the LEAP
-// software. Then it comes back when it's signed."
+// software. Then it comes back when it's signed." Then, on the payment request:
+// "you can do the signature stuff for the homes project payment request as well
+// ... those are on incentive objects, right?" — yes: incentive_applications,
+// record type WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST.
+//
+// ONE modal, configured per document, rather than one per programme. The two
+// send paths differ only in which service loads the record and which sends it;
+// everything a person sees and every guard they pass through is identical, and
+// two copies of that is two chances for one to lose its recipient confirmation.
 //
 // The recipient is shown and editable BEFORE anything is sent, and the service
 // puts the address through requireOutboundApproval on top of that. Both, on
@@ -18,10 +36,47 @@ import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
 import { Icon } from './UI'
-import { loadHearProposalContext, hearProposalMissing, sendHearProposalForSignature }
-  from '../data/hearProposalService'
+/**
+ * The documents that can be sent for signature, and where each one lives.
+ *
+ * A registry rather than five props at each call site: the two documents differ
+ * only in which service loads and sends them, and keeping that in one table is
+ * what stops a third document arriving with its own half-copied modal — the
+ * pattern that produced two Products cards and nine copies of an anchor list
+ * elsewhere in this codebase.
+ *
+ * Services are imported lazily so opening an enrollment does not pull the HOMES
+ * Asset Score parser, or vice versa.
+ */
+const DOCUMENTS = {
+  hear_proposal: {
+    noun: 'Proposal',
+    whatHappensNext: "The proposal is generated from this opportunity's equipment, filed on the enrollment, and emailed to the property owner to sign. When they sign, the enrollment moves itself to Enrollment To Be Submitted.",
+    async module() { return import('../data/hearProposalService') },
+    load:      (m, id) => m.loadHearProposalContext(id),
+    missingOf: (m, ctx) => m.hearProposalMissing(ctx),
+    send:      (m, id, args) => m.sendHearProposalForSignature(id, args),
+    subject:   ctx => `Please sign: ${(ctx?.enr?.enrollment_name || 'IRA Multifamily HEAR Proposal').trim()}`,
+  },
+  payment_request: {
+    noun: 'Invoice',
+    whatHappensNext: 'The Project Payment Request invoice is generated from this incentive application, filed on it, and emailed to the property owner to sign.',
+    async module() { return import('../data/homesProposalService') },
+    load:      (m, id) => m.loadPaymentRequestSignatureContext(id),
+    missingOf: (m, ctx) => m.paymentRequestSignatureMissing(ctx),
+    send:      (m, id, args) => m.sendPaymentRequestForSignature(id, args),
+    subject:   ctx => `Please sign: ${(ctx?.fields?.pjPropName || 'Project')} — Payment Request Invoice`,
+  },
+}
 
-export default function SendHearProposalModal({ enrollmentId, onClose, onSent }) {
+/**
+ * @param kind      a key of DOCUMENTS
+ * @param recordId  the record the document is generated from and filed on
+ */
+export default function SignatureSendModal({ kind, recordId, onClose, onSent }) {
+  const spec = DOCUMENTS[kind]
+  const documentNoun = spec?.noun || 'Document'
+  const whatHappensNext = spec?.whatHappensNext || null
   const toast = useToast()
   const [ctx, setCtx] = useState(null)          // null = loading
   const [missing, setMissing] = useState(null)
@@ -31,32 +86,37 @@ export default function SendHearProposalModal({ enrollmentId, onClose, onSent })
   const [subject, setSubject] = useState('')
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState(null)
+  const [svc, setSvc] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const c = await loadHearProposalContext(enrollmentId)
+        if (!spec) throw new Error(`No document is registered under "${kind}".`)
+        const mod = await spec.module()
+        if (cancelled) return
+        setSvc(mod)
+        const c = await spec.load(mod, recordId)
         if (cancelled) return
         setCtx(c)
-        setMissing(hearProposalMissing(c))
+        setMissing(spec.missingOf(mod, c))
         // Pre-filled from the record, and shown rather than assumed — the whole
         // point of the confirmation is that a person reads who this is going to.
         setName(c?.fields?.pjContact || '')
         setEmail(c?.fields?.pjEmail || '')
-        setSubject(`Please sign: ${(c?.enr?.enrollment_name || 'IRA Multifamily HEAR Proposal').trim()}`)
+        setSubject(spec.subject(c))
       } catch (e) {
         if (!cancelled) setLoadError(e.message || String(e))
       }
     })()
     return () => { cancelled = true }
-  }, [enrollmentId])
+  }, [kind, recordId])
 
   const send = async () => {
     if (sending) return
     setSending(true)
     try {
-      const r = await sendHearProposalForSignature(enrollmentId, { name, email, subject })
+      const r = await spec.send(svc, recordId, { name, email, subject })
       setResult(r)
       toast.success(r.emailed
         ? `Signature request emailed to ${email.trim()}`
@@ -93,7 +153,9 @@ export default function SendHearProposalModal({ enrollmentId, onClose, onSent })
           padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <Icon path="M22 2 11 13 M22 2l-7 20-4-9-9-4 20-7z" size={16} color={C.emerald} />
-            <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>Send Proposal for Signature</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
+              Send {documentNoun} for Signature
+            </div>
           </div>
           <button onClick={sending ? undefined : onClose} aria-label="Close"
             style={{ background: 'transparent', border: 'none', padding: 6, cursor: sending ? 'wait' : 'pointer', color: C.textMuted }}>
@@ -105,12 +167,12 @@ export default function SendHearProposalModal({ enrollmentId, onClose, onSent })
           {loadError && (
             <div style={{ fontSize: 13, color: C.textPrimary, background: C.cardSecondary,
               border: `1px solid ${C.border}`, borderRadius: 6, padding: 12 }}>
-              Could not load the proposal: {loadError}
+              Could not load the {documentNoun}: {loadError}
             </div>
           )}
 
           {!loadError && ctx == null && (
-            <div style={{ fontSize: 13, color: C.textMuted }}>Loading the proposal…</div>
+            <div style={{ fontSize: 13, color: C.textMuted }}>Loading the {documentNoun}…</div>
           )}
 
           {/* A record that cannot produce a proposal says exactly what is
@@ -128,9 +190,7 @@ export default function SendHearProposalModal({ enrollmentId, onClose, onSent })
           {ctx && missing && missing.length === 0 && !result && (
             <>
               <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55, marginBottom: 14 }}>
-                The proposal is generated from this opportunity's equipment, filed on the
-                enrollment, and emailed to the property owner to sign. When they sign, the
-                enrollment moves itself to <strong>Enrollment To Be Submitted</strong>.
+                {whatHappensNext || `The ${documentNoun} is generated from this record, filed on it, and emailed to the property owner to sign.`}
               </div>
               <div style={{ display: 'grid', gap: 12 }}>
                 <div>
@@ -160,7 +220,7 @@ export default function SendHearProposalModal({ enrollmentId, onClose, onSent })
                 {result.emailed ? 'Sent for signature.' : 'Envelope created.'}
               </div>
               {result.emailed
-                ? <div>The property owner has been emailed. The enrollment now reads <strong>Proposal Signature Requested</strong>.</div>
+                ? <div>The property owner has been emailed.{result.statusNote ? ` ${result.statusNote}` : ''}</div>
                 : <div>No email went out — share this link with the signer:</div>}
               {result.signingUrl && (
                 <div style={{ marginTop: 8, wordBreak: 'break-all', fontFamily: 'JetBrains Mono, monospace',
