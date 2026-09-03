@@ -61,6 +61,33 @@ create trigger trg_0_strip_field_group_derived_column
   before insert or update on public.page_layout_widgets
   for each row execute function public.strip_field_group_derived_column();
 
+-- Re-strip whatever is stored, so the invariant holds however the migrations
+-- are REPLAYED and not just in the order they happened to reach production. Two
+-- migrations authored in parallel sessions
+-- (…023940_the_opportunity_shows_the_equipment_it_installs and
+--  …025640_approved_models_are_managed_on_the_product) build field groups with
+-- an explicit `column`; on production they ran before …023916 stripped it, but
+-- by FILENAME they sort after it, so a branch database replaying in file order
+-- would end up carrying it again and the assertion below would fail the replay.
+-- A no-op on production, where the count is already zero.
+update public.page_layout_widgets w
+   set widget_config = jsonb_set(
+         w.widget_config, '{fields}',
+         (select coalesce(jsonb_agg(f - 'column' order by ord), '[]'::jsonb)
+            from jsonb_array_elements(w.widget_config->'fields') with ordinality t(f, ord)))
+ where w.widget_type = 'field_group'
+   -- Live rows only. A soft-deleted widget is a recycle-bin record that nothing
+   -- renders, and touching one re-runs validate_page_layout_widget_config()
+   -- against a layout that was deleted BECAUSE it referenced a column that no
+   -- longer exists — which is exactly what this hit on production
+   -- ("work_order_assigned_to does not exist on table work_orders"). The
+   -- invariant is about what the record page draws.
+   and w.is_deleted is not true
+   and jsonb_typeof(w.widget_config->'fields') = 'array'
+   and exists (
+     select 1 from jsonb_array_elements(w.widget_config->'fields') f where f ? 'column'
+   );
+
 -- ── Prove it, then leave nothing behind ────────────────────────────────────
 -- block_hard_delete() refuses a cleanup DELETE, so the probe raises to unwind
 -- its own savepoint rather than inserting a row that then has to be removed.
