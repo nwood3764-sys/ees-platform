@@ -69,6 +69,8 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_ENERGY_ASSESSMENT_REPORT:        'generate_energy_assessment_report',
   GENERATE_SUBMITTED_ENROLLMENT:               'generate_submitted_enrollment',
   GENERATE_HOMES_PROPOSAL:                     'generate_homes_proposal',
+  GENERATE_HEAR_PROPOSAL:                      'generate_hear_proposal',
+  GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION: 'generate_hear_project_reservation_application',
   GENERATE_HOMES_PAYMENT_INVOICE:              'generate_homes_payment_invoice',
   GENERATE_HOMES_ASSESSMENT_INVOICE:           'generate_homes_assessment_invoice',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
@@ -351,6 +353,22 @@ export const ACTION_REGISTRY = Object.freeze({
     isAvailable: ({ tableName, editing, recordTypeLabel }) =>
       !editing && tableName === 'enrollments' && recordTypeLabel === 'WI-IRA-MF-HOMES-Project-Reservation',
   },
+  // The same Focus On Energy submittal form, opened from a HEAR Project
+  // Reservation enrollment. The form covers both programmes; what differs is
+  // the record it is filled from, so this is a second external_form_targets key
+  // and its own resolver — never the HOMES target pointed at another record
+  // type, which would fill a HOMES filing from a HEAR project.
+  generate_hear_project_reservation_application: {
+    key:                 ACTION_KEYS.GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION,
+    label:               'Open Project Reservation Application',
+    icon:                'M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5M15 3h6m0 0v6m0-6L10 14',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'primary',
+    defaultSortOrder:    23,
+    isAvailable: ({ tableName, editing, recordTypeLabel }) =>
+      !editing && tableName === 'enrollments' && recordTypeLabel === 'WI-IRA-MF-HEAR-Project-Reservation',
+  },
   // Open the Focus On Energy IRA HOMES Multifamily Project Submittal Form
   // (hosted on Jotform), pre-filled from THIS payment request. The third form
   // on the same data-driven route: the target URL and every field's parameter
@@ -475,6 +493,23 @@ export const ACTION_REGISTRY = Object.freeze({
     isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
       !editing && !!record?.id && tableName === 'enrollments'
       && recordTypeValue === 'WI-IRA-MF-HOMES-Project-Reservation',
+  },
+
+  // Project Reservation proposal for the IRA Multifamily HEAR programme. Its
+  // scope is the opportunity's LINE ITEMS (the HEAR products), not an Asset
+  // Score: a HEAR project is a list of equipment, not a modelled saving, which
+  // is why it is its own document and not a kind of the HOMES one.
+  generate_hear_proposal: {
+    key:                 ACTION_KEYS.GENERATE_HEAR_PROPOSAL,
+    label:               'Generate Proposal',
+    icon:                'M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6 M8 13h8 M8 17h5',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'menu',
+    defaultSortOrder:    45,
+    isAvailable: ({ tableName, editing, record, recordTypeValue }) =>
+      !editing && !!record?.id && tableName === 'enrollments'
+      && recordTypeValue === 'WI-IRA-MF-HEAR-Project-Reservation',
   },
 
   // The Final Project Payment Request invoice belongs to the INCENTIVE

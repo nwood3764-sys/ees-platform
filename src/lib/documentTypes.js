@@ -36,6 +36,10 @@ const ACRONYMS = new Map([
   ['hud', 'HUD'], ['li', 'LI'], ['mf', 'MF'], ['sf', 'SF'],
   ['ees', 'EES'], ['ahri', 'AHRI'], ['id', 'ID'], ['epa', 'EPA'],
   ['doe', 'DOE'], ['ashrae', 'ASHRAE'], ['hvac', 'HVAC'], ['dhw', 'DHW'],
+  // The two IRA programme names. A registered label is the real answer for a
+  // document type (see 20260903001834), but a slug nobody registered must not
+  // print "Hear Proposal" — the verb — in a column headed Type.
+  ['homes', 'HOMES'], ['hear', 'HEAR'],
 ])
 
 /**

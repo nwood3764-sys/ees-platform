@@ -30,7 +30,7 @@ const LogActivityModal                     = lazy(() => import('./LogActivityMod
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
 const SubmittedEnrollmentModal      = lazy(() => import('./SubmittedEnrollmentModal'))
-const HomesProposalModal            = lazy(() => import('./HomesProposalModal'))
+const GeneratedDocumentModal        = lazy(() => import('./GeneratedDocumentModal'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -55,7 +55,7 @@ import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
 import { openAssessmentPreapprovalForm, openAssessmentApplicationForm, openPaymentRequestForm,
-         openProjectReservationForm,
+         openProjectReservationForm, openHearProjectReservationForm,
          loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
@@ -4268,7 +4268,18 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
   // approach (two independent left/right stacks + blank spacers) which
   // mis-aligned whenever one column held more fields than the other. Layouts
   // that opt in neither way are untouched (legacy paths below).
-  const useRowMajor = widget.widget_config?.layout === 'rows' || fields.some(f => f.full_width)
+  // Any section whose fields carry an explicit `column` renders row-major.
+  // Nicholas, 2026-09-02: "Align all rows. We should never have a stair step
+  // like this." The stair step IS the legacy column-fill path below, and the
+  // comment above it has always said so -- it "mis-aligned whenever one column
+  // held more fields than the other". Assigning a field to column 2 is a
+  // statement about which SLOT IN A ROW it occupies, so honouring it any other
+  // way is what produced the offset. Two columns only: the row-major grid is a
+  // 2-up grid, so a 3-column layout stays on the column path it was built for.
+  const maxColumn = Math.max(0, ...fields.map(f => f.column || 0))
+  const useRowMajor = widget.widget_config?.layout === 'rows'
+    || fields.some(f => f.full_width)
+    || (maxColumn > 0 && maxColumn <= 2)
   if (useRowMajor) {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoFlow: 'row', alignItems: 'start' }}>
@@ -7054,6 +7065,30 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }, [recordId, openingProjectReservation])
 
+  // The same submittal form, opened from the HEAR Project Reservation
+  // enrollment. Its own handler (and its own target key) so a HEAR filing is
+  // never built by the HOMES resolver.
+  const [openingHearReservation, setOpeningHearReservation] = useState(false)
+  const handleOpenHearProjectReservationForm = useCallback(async () => {
+    if (openingHearReservation) return
+    const win = window.open('', '_blank')
+    setOpeningHearReservation(true)
+    try {
+      const { url, error, missing } = await openHearProjectReservationForm(recordId, win)
+      if (missing && missing.length) {
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the project reservation application.')
+      }
+    } finally {
+      setOpeningHearReservation(false)
+    }
+  }, [recordId, openingHearReservation])
+
   // The assessment rebate claim, from the WI-IRA-MF-HOMES-AUDIT incentive
   // application. Same shape as the pre-approval handler above and it shares the
   // same missing-fields modal — the gate is the form's own required set either
@@ -7183,7 +7218,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
   const [showSubmittedEnrollmentModal, setShowSubmittedEnrollmentModal] = useState(false)
-  const [homesModalKind, setHomesModalKind] = useState(null)   // null | 'proposal' | 'invoice' | 'audit'
+  // Which built-from-the-record document is open, keyed by src/data/generatedDocuments.js.
+  const [documentModalKind, setDocumentModalKind] = useState(null)
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -9592,11 +9628,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
-    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setHomesModalKind('proposal'),
-    [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setHomesModalKind('invoice'),
-    [ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE]:   () => setHomesModalKind('audit'),
+    [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setDocumentModalKind('proposal'),
+    [ACTION_KEYS.GENERATE_HEAR_PROPOSAL]:              () => setDocumentModalKind('hear_proposal'),
+    [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setDocumentModalKind('invoice'),
+    [ACTION_KEYS.GENERATE_HOMES_ASSESSMENT_INVOICE]:   () => setDocumentModalKind('audit'),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_APPLICATION]: handleOpenProjectReservationForm,
+    [ACTION_KEYS.GENERATE_HEAR_PROJECT_RESERVATION_APPLICATION]: handleOpenHearProjectReservationForm,
     [ACTION_KEYS.GENERATE_ASSESSMENT_APPLICATION]: handleOpenAssessmentApplication,
     [ACTION_KEYS.GENERATE_PAYMENT_REQUEST_APPLICATION]: handleOpenPaymentRequestForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
@@ -10521,15 +10559,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           />
         )}
 
-        {/* WI IRA Multifamily HOMES documents — proposal + assessment invoice on
-            enrollments, payment-request invoice on incentive applications. Each
-            action is gated to its own object + record type in recordActions. */}
-        {homesModalKind && (tableName === 'enrollments' || tableName === 'incentive_applications') && (
-          <HomesProposalModal
+        {/* Documents built from the record — the HOMES and HEAR proposals and
+            the assessment invoice on enrollments, the payment-request invoice on
+            incentive applications. Each action is gated to its own object +
+            record type in recordActions; the kinds live in generatedDocuments. */}
+        {documentModalKind && (tableName === 'enrollments' || tableName === 'incentive_applications') && (
+          <GeneratedDocumentModal
             recordObject={tableName}
             recordId={recordId}
-            kind={homesModalKind}
-            onClose={() => setHomesModalKind(null)}
+            kind={documentModalKind}
+            onClose={() => setDocumentModalKind(null)}
             onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}
