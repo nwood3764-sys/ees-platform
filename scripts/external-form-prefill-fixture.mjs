@@ -13,6 +13,7 @@
 
 import {
   applyTransform, mapPayloadToParams, buildPrefillUrl, findMissingRequiredFields,
+  fieldsToEnterByHand,
 } from '../src/lib/externalFormPrefill.js'
 
 let pass = 0, fail = 0
@@ -209,6 +210,54 @@ eq('a filled measure list is not reported as missing',
 // A blank inside the list is skipped rather than sent as an empty tick.
 eq('a blank inside the list is skipped',
   mapPayloadToParams({ work_measures: ['Air Sealing & Insulation', '', null] }, MEASURES_MAP.fields).length, 1)
+
+// ── a question the form will not take from a URL ──────────────────────────
+//
+// The HEAR submittal's "Estimated project completion date" is a Jotform
+// control_widget whose settings carry todayDate:Yes -- it stamps today over
+// whatever the query string supplied, AFTER prefill has run. Tested on the live
+// form: the parameter is accepted and then overwritten, which is worse than not
+// sending it, because the box comes up looking answered. So the value is kept
+// out of the URL and handed to the person instead -- resolved through the same
+// transform, so what they are handed reads the way the form wants it.
+const HANDOVER_MAP = {
+  base_url: 'https://focusonenergy.jotform.com/251176242544858',
+  fields: [
+    { leap_field: 'occupied_units', param: 'numberOf284', field_label: 'Number of Occupied Units', required: true },
+    { leap_field: 'estimated_completion_date', param: 'typeA148', transform: 'date_mmddyyyy',
+      field_label: 'Estimated project completion date', required: true, url_prefillable: false },
+  ],
+}
+const HANDOVER = { occupied_units: 8, estimated_completion_date: '2026-09-25' }
+
+const handoverUrl = buildPrefillUrl(HANDOVER_MAP, HANDOVER)
+eq('an un-prefillable answer stays out of the query string',
+  new URL(handoverUrl.url).searchParams.has('typeA148'), false)
+eq('the rest of the form is still filled',
+  new URL(handoverUrl.url).searchParams.get('numberOf284'), '8')
+eq('and it is not counted as filled', handoverUrl.filledCount, 1)
+
+const handed = fieldsToEnterByHand(HANDOVER, HANDOVER_MAP.fields)
+eq('the answer is handed over rather than dropped', handed.length, 1)
+eq('handed over under its own question label', handed[0].label, 'Estimated project completion date')
+// 2026-09-25 would be useless to retype into an m/d/y box.
+eq('handed over in the format the form wants', handed[0].value, '09/25/2026')
+// Only the un-prefillable ones; a normal field is not something to retype.
+eq('a URL-filled answer is never handed over',
+  handed.some(h => h.label === 'Number of Occupied Units'), false)
+// Nothing to hand over when there is no value -- a required blank is the
+// missing-fields gate's job, not this one's.
+eq('a blank is not handed over',
+  fieldsToEnterByHand({ occupied_units: 8 }, HANDOVER_MAP.fields).length, 0)
+// The flag is opt-in: every existing map row omits it and must keep sending.
+eq('a field with no flag still goes in the URL',
+  mapPayloadToParams({ occupied_units: 8 }, HANDOVER_MAP.fields).length, 1)
+eq('and is not handed over', fieldsToEnterByHand({ occupied_units: 8 }, [HANDOVER_MAP.fields[0]]).length, 0)
+// Control: with the flag off, the parameter goes back into the URL -- so the
+// day the widget setting changes, one boolean is the whole fix.
+const PREFILLABLE = { ...HANDOVER_MAP, fields: HANDOVER_MAP.fields.map(f => ({ ...f, url_prefillable: true })) }
+eq('flipping the flag back sends it again',
+  new URL(buildPrefillUrl(PREFILLABLE, HANDOVER).url).searchParams.get('typeA148'), '09/25/2026')
 
 console.log(`external-form-prefill: ${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

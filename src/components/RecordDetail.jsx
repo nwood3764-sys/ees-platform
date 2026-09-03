@@ -6996,6 +6996,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Required fields still blank when the user tried to open the pre-approval
   // form. Non-empty → the completion modal is shown and the form is NOT opened.
   const [preapprovalMissing, setPreapprovalMissing] = useState(null)
+  // Answers the opened form will not take from its URL, handed over so nobody
+  // goes back to the record to look one up. See fieldsToEnterByHand.
+  const [formFieldsByHand, setFormFieldsByHand] = useState(null)
   // Open the Project Payment Request Jotform, pre-filled from this record —
   // the sibling of the two openers above, on the third form.
   const [openingPaymentRequest, setOpeningPaymentRequest] = useState(false)
@@ -7050,7 +7053,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const win = window.open('', '_blank')
     setOpeningProjectReservation(true)
     try {
-      const { url, error, missing } = await openProjectReservationForm(recordId, win)
+      const { url, error, missing, byHand } = await openProjectReservationForm(recordId, win)
       if (missing && missing.length) {
         if (win) win.close()
         setPreapprovalMissing(missing)
@@ -7059,7 +7062,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       if (error || !url) {
         if (win) win.close()
         window.alert(error || 'Could not open the project reservation application.')
+        return
       }
+      if (byHand && byHand.length) setFormFieldsByHand(byHand)
     } finally {
       setOpeningProjectReservation(false)
     }
@@ -7074,7 +7079,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const win = window.open('', '_blank')
     setOpeningHearReservation(true)
     try {
-      const { url, error, missing } = await openHearProjectReservationForm(recordId, win)
+      const { url, error, missing, byHand } = await openHearProjectReservationForm(recordId, win)
       if (missing && missing.length) {
         if (win) win.close()
         setPreapprovalMissing(missing)
@@ -7083,7 +7088,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       if (error || !url) {
         if (win) win.close()
         window.alert(error || 'Could not open the project reservation application.')
+        return
       }
+      if (byHand && byHand.length) setFormFieldsByHand(byHand)
     } finally {
       setOpeningHearReservation(false)
     }
@@ -10437,6 +10444,64 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             </div>
             <div style={{ padding: '12px 20px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={() => setPreapprovalMissing(null)} style={{ background: C.emerald,
+                color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13,
+                fontWeight: 600, cursor: 'pointer' }}>
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Answers the opened form will not accept from its URL. A Jotform
+          control_widget lives in its own iframe and stamps its own default over
+          anything the query string supplies, so the value is deliberately kept
+          out of the URL and handed over here instead — with the value, so the
+          person filing never goes back to the record to look one up. The form
+          is already open behind this; it never blocks the filing. */}
+      {formFieldsByHand && formFieldsByHand.length > 0 && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(13,26,46,0.48)', zIndex: 1100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setFormFieldsByHand(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 10,
+            border: `1px solid ${C.border}`, width: 'min(520px, 96vw)', maxHeight: '85vh',
+            overflow: 'auto', boxShadow: '0 12px 40px rgba(7,17,31,0.28)' }}>
+            <div style={{ padding: '18px 20px 12px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon path="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" size={20} color={C.sky} />
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>
+                  {formFieldsByHand.length === 1
+                    ? 'One answer to enter on the form'
+                    : `${formFieldsByHand.length} answers to enter on the form`}
+                </div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+                The form is open and everything else is filled in. {formFieldsByHand.length === 1
+                  ? 'This question is a date-picker widget that overwrites anything sent in the link, so it has to be set on the form.'
+                  : 'These questions are widgets that overwrite anything sent in the link, so they have to be set on the form.'}
+              </div>
+            </div>
+            <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {formFieldsByHand.map((f, i) => (
+                <div key={i} style={{ background: C.cardSecondary, border: `1px solid ${C.border}`,
+                  borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: C.textSecondary }}>{f.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary,
+                      fontFamily: "'JetBrains Mono', monospace", wordBreak: 'break-word' }}>{f.value}</div>
+                  </div>
+                  <button onClick={() => { try { navigator.clipboard?.writeText(f.value) } catch { /* clipboard unavailable */ } }}
+                    style={{ background: C.card, color: C.textPrimary, border: `1px solid ${C.borderDark}`,
+                      borderRadius: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 600,
+                      cursor: 'pointer', flexShrink: 0 }}>
+                    Copy
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: '12px 20px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setFormFieldsByHand(null)} style={{ background: C.emerald,
                 color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13,
                 fontWeight: 600, cursor: 'pointer' }}>
                 Got it

@@ -107,6 +107,9 @@ function resolveOne(raw, f) {
 export function mapPayloadToParams(payload, fields) {
   const out = []
   for (const f of fields || []) {
+    // A question the form will not take from the URL is kept OUT of the query
+    // string, not sent and hoped for. See fieldsToEnterByHand below.
+    if (f.url_prefillable === false) continue
     const raw = payload?.[f.leap_field]
     if (Array.isArray(raw)) {
       for (const item of raw) {
@@ -117,6 +120,39 @@ export function mapPayloadToParams(payload, fields) {
     }
     const v = resolveOne(raw, f)
     if (v !== null) out.push({ param: f.param, value: v })
+  }
+  return out
+}
+
+// The answers LEAP holds that the form will not accept from a URL.
+//
+// Jotform renders some questions as a `control_widget` in its own iframe. The
+// HEAR submittal's "Estimated project completion date" is one: the widget
+// stamps its own default over anything the URL supplies, so the parameter is
+// accepted and then overwritten -- which is worse than not sending it, because
+// the box looks answered. Measured on the live form, not assumed.
+//
+// Dropping the value silently would send somebody back to the record to look it
+// up. So it is resolved exactly as if it were being sent -- same transform, same
+// option map -- and handed over to be entered once, with the value in hand.
+//
+// A field is only listed when it is BOTH un-prefillable and has a value; there
+// is nothing to hand over otherwise, and a required blank is already the
+// missing-fields gate's job.
+export function fieldsToEnterByHand(payload, fields) {
+  const out = []
+  const seen = new Set()
+  for (const f of fields || []) {
+    if (f.url_prefillable !== false) continue
+    const raw = payload?.[f.leap_field]
+    const values = (Array.isArray(raw) ? raw : [raw])
+      .map(v => resolveOne(v, f))
+      .filter(v => v !== null)
+    if (!values.length) continue
+    const label = f.field_label || f.leap_field
+    if (seen.has(label)) continue
+    seen.add(label)
+    out.push({ label, value: values.join(', ') })
   }
   return out
 }
