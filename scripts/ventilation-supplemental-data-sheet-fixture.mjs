@@ -22,7 +22,7 @@ import assert from 'node:assert/strict'
 
 import {
   SHEET_COLUMNS, FIRST_DATA_ROW, LAST_TEMPLATE_ROW, MAX_TEMPLATE_ROWS,
-  NOT_APPLICABLE, MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE, BUILT_MEASURE_TYPES,
+  NOT_APPLICABLE, PROGRAMME_MEASURE_TYPES, measureTypesFor, isPrintableLine,
   hasVentilationSupplementalDataSheet, unitStreetAddress, buildingNameFor,
   modelNumberFor, compareUnitNumbers, isDwellingUnit, equipmentForUnit,
   buildSupplementalRows, supplementalSheetFileName,
@@ -54,7 +54,15 @@ const PANASONIC = {
   name: 'Panasonic FV-0511VF1', manufacturer: 'Panasonic', modelNumber: 'FV-0511VF1',
   isSerialized: false, ahriCertificateNumber: null,
 }
-const VENT_LINE = { unitId: null, measureType: 'Ventilation', equipmentProductId: 'p-fan', equipment: PANASONIC }
+const VENT_LINE = { unitId: null, measureTypes: ['Ventilation'], equipmentProductId: 'p-fan', equipment: PANASONIC }
+
+// A space-conditioning heat pump: ONE measure, TWO Measure Types. Nicholas:
+// "Two rows per unit — Heating and Cooling."
+const MITSUBISHI = {
+  name: 'Mitsubishi MSZ-FH15NA Hyper Heat', manufacturer: 'Mitsubishi Electric',
+  modelNumber: 'MSZ-FH15NA', isSerialized: false, ahriCertificateNumber: null,
+}
+const HEAT_PUMP_LINE = { unitId: null, measureTypes: ['Heating', 'Cooling'], equipmentProductId: 'p-hp', equipment: MITSUBISHI }
 
 // ── 1. Which enrollments file this sheet ──────────────────────────────────
 ok(hasVentilationSupplementalDataSheet('enrollments', 'WI-IRA-MF-HEAR-Project-Reservation'), 'HEAR reservation files the sheet')
@@ -95,11 +103,11 @@ eq(order, ['1', '2', '9', '10', 'Attic'], 'units sort naturally, named spaces la
 // ── 7. Resolving equipment per unit ───────────────────────────────────────
 eq(equipmentForUnit('u1', [VENT_LINE]).equipment, PANASONIC, 'a building-wide line covers every unit')
 const OTHER = { ...PANASONIC, modelNumber: 'FV-0810VSS1', name: 'Panasonic FV-0810VSS1' }
-eq(equipmentForUnit('u1', [VENT_LINE, { unitId: 'u1', measureType: 'Ventilation', equipment: OTHER }]).equipment, OTHER,
+eq(equipmentForUnit('u1', [VENT_LINE, { unitId: 'u1', measureTypes: ['Ventilation'], equipment: OTHER }]).equipment, OTHER,
   'a unit-scoped line beats the building-wide one')
-ok(equipmentForUnit('u1', [VENT_LINE, { unitId: null, measureType: 'Ventilation', equipment: OTHER }]).ambiguous,
+ok(equipmentForUnit('u1', [VENT_LINE, { unitId: null, measureTypes: ['Ventilation'], equipment: OTHER }]).ambiguous,
   'two building-wide lines naming different models is ambiguous, not a guess')
-eq(equipmentForUnit('u1', [VENT_LINE, { unitId: null, measureType: 'Ventilation', equipment: { ...PANASONIC } }]).equipment,
+eq(equipmentForUnit('u1', [VENT_LINE, { unitId: null, measureTypes: ['Ventilation'], equipment: { ...PANASONIC } }]).equipment,
   PANASONIC, 'two lines naming the SAME model is not ambiguous')
 
 // ── 8. The rows for the real building ─────────────────────────────────────
@@ -119,10 +127,21 @@ eq(built.rows[0], {
 eq(built.rows[7].streetAddress, '570 South Clark Street - Unit 8', 'the last row is unit 8')
 
 // ── 9. Honest gaps ────────────────────────────────────────────────────────
-const noEquip = buildSupplementalRows({ property: PROPERTY, building: BUILDING, units: UNITS, equipmentLines: [] })
-eq(noEquip.rows.length, 8, 'the rows still exist with no equipment selected')
-eq(noEquip.rows[0].modelNumber, '', 'the model number is EMPTY, never invented')
-ok(noEquip.warnings.some(w => /No ventilation equipment is recorded/.test(w)), 'and the gap is reported')
+// The state the sheet is in when it auto-generates on enrollment create: the
+// measure is on the opportunity, the model has not been chosen yet.
+const notYetChosen = buildSupplementalRows({
+  property: PROPERTY, building: BUILDING, units: UNITS,
+  equipmentLines: [{ unitId: null, measureTypes: ['Ventilation'], equipment: null }],
+})
+eq(notYetChosen.rows.length, 8, 'the rows still lay out with no equipment selected')
+eq(notYetChosen.rows[0].modelNumber, '', 'the model number is EMPTY, never invented')
+eq(notYetChosen.rows[0].measureType, 'Ventilation', 'the measure is known even before the model is')
+ok(notYetChosen.warnings.some(w => /no equipment selected/.test(w)), 'and the gap is reported')
+
+// No line items at all is a different thing, and says so differently.
+const noLines = buildSupplementalRows({ property: PROPERTY, building: BUILDING, units: UNITS, equipmentLines: [] })
+eq(noLines.rows.length, 0, 'no measures on the opportunity means no rows')
+ok(noLines.warnings.some(w => /No measures are recorded/.test(w)), 'and it names that, not a missing model')
 
 const noUnits = buildSupplementalRows({ property: PROPERTY, building: BUILDING, units: [], equipmentLines: [VENT_LINE] })
 eq(noUnits.rows.length, 0, 'a building with no unit records produces no rows')
@@ -138,18 +157,49 @@ const noDwellings = buildSupplementalRows({
 eq(noDwellings.rows.length, 0, 'a building with no DWELLING units produces no rows')
 ok(noDwellings.warnings.some(w => /none is typed as a Dwelling Unit/.test(w)), 'and names the reason')
 
-// ── 10. Measures that are declared but not built ──────────────────────────
-eq(MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE['VENTILATION-EQUIPMENT'], 'Ventilation', 'ventilation is built')
-eq(MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE['HEAT-PUMP-EQUIPMENT'], null, 'heat pumps are declared, not built')
-eq(MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE['FURNACE-EQUIPMENT'], null, 'furnaces are declared, not built')
-eq(BUILT_MEASURE_TYPES, ['Ventilation'], 'exactly one measure is built today')
-const withHeatPump = buildSupplementalRows({
+// ── 10. Measure Type rides on the MEASURE, and may be more than one ───────
+eq(measureTypesFor(VENT_LINE), ['Ventilation'], 'a ventilation line prints one Measure Type')
+eq(measureTypesFor(HEAT_PUMP_LINE), ['Heating', 'Cooling'], 'a space-conditioning heat pump prints two')
+ok(isPrintableLine(VENT_LINE), 'a configured measure prints')
+ok(!isPrintableLine({ unitId: null, measureTypes: [], equipment: PANASONIC }),
+  'a measure with no Measure Type configured does NOT print')
+ok(!isPrintableLine({ unitId: null, equipment: PANASONIC }),
+  'nor does one missing the field entirely')
+
+// Two rows per unit for the heat pump, and the SAME model number on both — one
+// physical machine reported under two measures, not two machines.
+const hp = buildSupplementalRows({ property: PROPERTY, building: BUILDING, units: UNITS, equipmentLines: [HEAT_PUMP_LINE] })
+eq(hp.rows.length, 16, 'eight units x two Measure Types = sixteen rows')
+eq(hp.rows[0].measureType, 'Heating', 'unit 1 heating first')
+eq(hp.rows[1].measureType, 'Cooling', 'then unit 1 cooling — rows are unit-major')
+eq(hp.rows[0].unitNumber, '1', 'both rows are the same unit')
+eq(hp.rows[1].unitNumber, '1', 'both rows are the same unit')
+eq(hp.rows[0].modelNumber, 'Mitsubishi Electric MSZ-FH15NA', 'the heating row names the machine')
+eq(hp.rows[1].modelNumber, 'Mitsubishi Electric MSZ-FH15NA', 'and the cooling row names the SAME machine')
+eq(hp.rows[2].unitNumber, '2', 'unit 2 follows unit 1, not all the heating rows first')
+eq(hp.warnings, [], 'a fully configured heat pump produces no warnings')
+
+// Both measures on one opportunity: three rows per unit, in measure order.
+const both = buildSupplementalRows({ property: PROPERTY, building: BUILDING, units: UNITS, equipmentLines: [VENT_LINE, HEAT_PUMP_LINE] })
+eq(both.rows.length, 24, 'ventilation + heat pump on 8 units = 24 rows')
+eq(both.rows.slice(0, 3).map(r => r.measureType), ['Ventilation', 'Heating', 'Cooling'],
+  "one unit's three measures sit together")
+eq(both.rows[0].modelNumber, 'Panasonic FV-0511VF1', 'the ventilation row names the fan')
+eq(both.rows[1].modelNumber, 'Mitsubishi Electric MSZ-FH15NA', 'the heating row names the heat pump, not the fan')
+
+// A measure with no Measure Type configured is left off and REPORTED.
+const unconfigured = buildSupplementalRows({
   property: PROPERTY, building: BUILDING, units: UNITS,
-  equipmentLines: [VENT_LINE, { unitId: null, measureType: null, equipment: { manufacturer: 'Mitsubishi', modelNumber: 'MSZ-FH15NA' } }],
+  equipmentLines: [VENT_LINE, { unitId: null, measureTypes: [], equipment: MITSUBISHI }],
 })
-ok(withHeatPump.warnings.some(w => /does not cover yet/.test(w)),
-  'an unbuilt measure is left off and REPORTED, never emitted with a guessed measure type')
-eq(withHeatPump.rows[0].modelNumber, 'Panasonic FV-0511VF1', 'the built measure still fills normally')
+ok(unconfigured.warnings.some(w => /no Measure Type configured/.test(w)),
+  'an unconfigured measure is reported, never emitted with a guessed type')
+eq(unconfigured.rows.length, 8, 'and the configured measure still fills normally')
+
+// Every Measure Type this module can emit must be on the programme's list.
+for (const t of ['Ventilation', 'Heating', 'Cooling', 'Water Heating']) {
+  ok(PROGRAMME_MEASURE_TYPES.includes(t), `"${t}" is on the programme's Measure Type list`)
+}
 
 // ── 11. The file name ─────────────────────────────────────────────────────
 eq(supplementalSheetFileName({ building: BUILDING, enrollmentRecordNumber: 'ENR-00077' }),
@@ -185,8 +235,8 @@ for (let i = 0; i < built.rows.length; i++) {
   eq(cellValue(sheetXml, `A${r}`), 'GREEN VALLEY ESTATES', `A${r} building name`)
   eq(cellValue(sheetXml, `B${r}`), row.streetAddress, `B${r} street address`)
   eq(cellValue(sheetXml, `C${r}`), row.unitNumber, `C${r} unit number`)
-  eq(cellValue(sheetXml, `D${r}`), 'Ventilation', `D${r} measure type`)
-  eq(cellValue(sheetXml, `E${r}`), 'Panasonic FV-0511VF1', `E${r} model number`)
+  eq(cellValue(sheetXml, `D${r}`), row.measureType, `D${r} measure type`)
+  eq(cellValue(sheetXml, `E${r}`), row.modelNumber, `E${r} model number`)
   eq(cellValue(sheetXml, `F${r}`), 'N/A', `F${r} serial number`)
   eq(cellValue(sheetXml, `G${r}`), 'N/A', `G${r} AHRI number`)
   eq(cellValue(sheetXml, `H${r}`), 'Whitewater', `H${r} city`)
@@ -232,8 +282,8 @@ for (let i = 0; i < built.rows.length; i++) {
 
 // Every measure type this module can EVER emit must be on their list too — not
 // just the ones this run happened to write.
-for (const t of BUILT_MEASURE_TYPES) {
-  ok(sheet2Values.includes(t), `the built measure type "${t}" is on the administrator's validation list`)
+for (const t of PROGRAMME_MEASURE_TYPES) {
+  ok(sheet2Values.includes(t), `"${t}" really is on the shipped template's own validation list`)
 }
 
 // Zip codes are written as NUMBERS, matching the filled example.

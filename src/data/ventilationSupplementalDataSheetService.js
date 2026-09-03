@@ -29,7 +29,6 @@ import {
   SUPPLEMENTAL_SHEET_TEMPLATE_URL,
   SUPPLEMENTAL_SHEET_DOCUMENT_TYPE,
   SUPPLEMENTAL_SHEET_CATEGORY,
-  MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE,
   buildSupplementalRows,
   supplementalSheetFileName,
 } from '../lib/ventilationSupplementalDataSheet.js'
@@ -98,10 +97,10 @@ export async function resolveSupplementalSheetData(enrollmentId) {
       .from('opportunity_line_items')
       .select(`
         id, unit_id, oli_quantity, oli_is_equipment_line, oli_equipment_product_id,
+        measure:product_id ( product_supplemental_measure_types ),
         equipment:oli_equipment_product_id (
           id, product_name, product_manufacturer, product_model_number,
-          product_is_serialized, product_ahri_certificate_number,
-          product_record_type
+          product_is_serialized, product_ahri_certificate_number
         )
       `)
       .eq('opportunity_id', enr.opportunity_id)
@@ -109,37 +108,32 @@ export async function resolveSupplementalSheetData(enrollmentId) {
       .neq('oli_is_deleted', true)
     if (lineErr) throw new Error(`Could not load the opportunity's equipment: ${lineErr.message}`)
 
-    // The equipment product's RECORD TYPE decides the Measure Type, resolved
-    // through picklist_values by id. Done in one extra round trip rather than a
-    // nested embed because the embed alias collides with the units query above
-    // on the same FK name and PostgREST reports it as an ambiguous relationship.
-    const rtIds = [...new Set((lines || [])
-      .map(l => l.equipment?.product_record_type).filter(Boolean))]
-    let rtByID = {}
-    if (rtIds.length > 0) {
-      const { data: rts } = await supabase.from('picklist_values')
-        .select('id, picklist_value').in('id', rtIds)
-      rtByID = Object.fromEntries((rts || []).map(r => [r.id, r.picklist_value]))
-    }
-
+    // A line whose equipment is not chosen YET is kept, not dropped. The
+    // MEASURE is already known the moment the line exists, so the sheet can
+    // still lay out its rows and leave the Model Number blank — which is the
+    // state the sheet is in when it auto-generates on enrollment create, before
+    // anybody has picked a fan. Dropping them produced an empty sheet that said
+    // nothing about what the reservation covers.
     equipmentLines = (lines || [])
-      .filter(l => l.equipment)
-      .map(l => {
-        const rt = rtByID[l.equipment.product_record_type] ?? null
-        return {
-          lineItemId: l.id,
-          unitId: l.unit_id ?? null,
-          measureType: MEASURE_TYPE_BY_EQUIPMENT_RECORD_TYPE[rt] ?? null,
-          equipmentProductId: l.equipment.id,
-          equipment: {
-            name: l.equipment.product_name,
-            manufacturer: l.equipment.product_manufacturer,
-            modelNumber: l.equipment.product_model_number,
-            isSerialized: l.equipment.product_is_serialized,
-            ahriCertificateNumber: l.equipment.product_ahri_certificate_number,
-          },
-        }
-      })
+      .map(l => ({
+        lineItemId: l.id,
+        unitId: l.unit_id ?? null,
+        // Read off the MEASURE, not the equipment's record type. PRD-00002
+        // (Rheem ProTerra) is a heat pump WATER HEATER on the same record type
+        // as space-conditioning heat pumps; keyed by equipment type it would
+        // print as Heating and Cooling.
+        measureTypes: Array.isArray(l.measure?.product_supplemental_measure_types)
+          ? l.measure.product_supplemental_measure_types
+          : [],
+        equipmentProductId: l.equipment?.id ?? null,
+        equipment: l.equipment ? {
+          name: l.equipment.product_name,
+          manufacturer: l.equipment.product_manufacturer,
+          modelNumber: l.equipment.product_model_number,
+          isSerialized: l.equipment.product_is_serialized,
+          ahriCertificateNumber: l.equipment.product_ahri_certificate_number,
+        } : null,
+      }))
   }
 
   return {
