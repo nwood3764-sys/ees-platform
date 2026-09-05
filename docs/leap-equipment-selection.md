@@ -31,6 +31,11 @@ recreate. Its product list is 40,000+ systems across 100+ brands
 Handing an auditor a search box over 40,000 systems is the problem, not the
 solution. **The whole feature is a funnel that turns 40,000 into five.**
 
+**And it is two doors onto one engine (Nicholas, 2026-09-05):** *"It can be a
+standalone tool also, where the user can just put in the design loads, and
+you're searching for proper equipment."* So the engine takes **numbers, not a
+record** — see §4.
+
 ### The funnel — four filters, in this order
 
 | # | Filter | Question it answers | Status today |
@@ -140,32 +145,40 @@ incentives, services, and a ladder.
 > It is a *data acquisition* project plus a *sizing* project. Anyone starting
 > here should resist the urge to design new equipment tables — they exist.
 
-### 2c-bis. The ANSWER this feature produces is already written down three times, by hand
+### 2c-bis. The ANSWER already has a hand-typed home, and two dead tables beside it
 
-Before designing where a sizing result goes, note that three separate objects
-already carry a hand-typed heat-pump selection — the *output* of a calculation
-nobody can currently perform:
+**Correction to an earlier reading of this (2026-09-05).** I first wrote that the
+sizing result was "hand-typed in three objects that drift". It is not. Two of
+the three — `efr_reports` and `mechanical_equipment` — hold **zero rows**, as
+does `equipment_information`. They are empty Salesforce-import residue with no
+writer anywhere in the codebase, not competing copies of live data. **Nicholas,
+2026-09-05: "we should have deleted all that shit from our database a long time
+ago, so stop referencing that."** They are out of scope for this workstream — no
+part of the design reads or writes them — and retiring them is its own small,
+safe change (§9), with nothing to migrate.
 
-| Object | The block |
-|---|---|
-| `assessments` | `assessment_hp_model`, `_hp_heating_capacity_btuh`, `_hp_heating_capacity_at_17_f_if_available`, `_hp_cooling_capacity_ton`, `_hp_cooling_eer`, `_hp_cooling_seer_ieer`, `_hp_hspf`, `_hp_cop`, `_hp_cop_at_17_f_if_available`, `_hp_backup_heating_capacity_btuh`, `_estimated_changeover_temperature_f`, `_hp_option_with_necessary_capacity`, `_can_the_hp_connect_to_existing_ductwork`, `_does_the_hp_physically_fit_the_location`, `_do_existing_electric_systems_support_hp`, `_hpwh_model`, `_uef_for_the_specified_hpwh` |
-| `efr_reports` (Energize Denver) | `efr_hp_model`, `efr_hp_ahri_number`, `efr_hp_heating_capacity_btuh`, `efr_hp_heating_capacity_17f`, `efr_hp_cop_5f / _17f / _47f`, `efr_hp_cooling_capacity_ton`, `efr_hp_seer2 / _eer2 / _hspf2`, `efr_hp_backup_heating_capacity`, `efr_backup_heat_type`, `efr_estimated_changeover_temp_f`, `efr_ducted_or_ductless`, `efr_cold_climate_certified`, `efr_equipment_area_served_sqft`, `efr_hp_can_connect_ductwork`, `efr_hp_physically_fits`, `efr_electric_systems_support_hp`, `efr_hpwh_model`, `efr_hpwh_uef` |
-| `mechanical_equipment` | the fullest HVAC column set in the database — outdoor/indoor model numbers, capacity at 47/17/5 °F, COP at 47/17/5 °F, SEER2/EER2/HSPF2, `me_ducted_or_ductless`, `me_backup_heat_type`, `me_cold_climate_certified`, `me_ahri_reference_number`, `me_estimated_changeover_temp_f` |
+What is real is one block, on `assessments`:
+`assessment_hp_model`, `assessment_hp_heating_capacity_btuh`,
+`assessment_hp_heating_capacity_at_17_f_if_available`,
+`assessment_hp_cooling_capacity_ton`, `assessment_hp_backup_heating_capacity_btuh`,
+`assessment_estimated_changeover_temperature_f`,
+`assessment_hp_option_with_necessary_capacity` (free text),
+`assessment_can_the_hp_connect_to_existing_ductwork`,
+`assessment_does_the_hp_physically_fit_the_location`,
+`assessment_do_existing_electric_systems_support_hp`.
 
-**Three objects, one fact, and every one of them filled in by a person typing.**
-That is the strongest argument in this document for a single purpose-named
-selection record: these three are already drifting, and adding a fourth copy on
-the opportunity would make it four. The sizing engine should write **one**
-record, and these three should read it — or be retired into it.
+That is an auditor answering, by hand and from memory, the exact question this
+engine exists to answer — with no load to derive it from and no catalog to pick
+from. It is the *shape* of the output, which makes it a useful specification
+and a candidate to be filled by the engine rather than typed.
 
-The same disease afflicts the *existing* equipment survey, which lives in **five
-unreconciled homes**: `buildings.building_heating_equipment_*`,
-`assessments.assessment_heating_system_*`, `mechanical_equipment.me_*`,
-`efr_reports.efr_*`, and `work_step_field_values` keyed by `heating_*` /
-`mf_heating_*`. `docs/leap-multifamily-energy-assessment.md` names `buildings`
-as "the natural roll-up target" and **the roll-up is unbuilt**. Sizing needs to
-know what is there today; it currently has five places to ask and no rule for
-which one wins.
+**The existing-equipment survey is a genuine five-way split and does still
+matter**, because sizing wants to know what is installed today:
+`buildings.building_heating_equipment_*`, `assessments.assessment_heating_system_*`,
+`properties.property_heating_*`, `units.unit_heating_*`, and
+`work_step_field_values` keyed by `heating_*` / `mf_heating_*`.
+`docs/leap-multifamily-energy-assessment.md` names `buildings` as "the natural
+roll-up target" and **the roll-up is unbuilt**. Logged, not folded in (§7.8).
 
 ### 2d. Data-integrity problems that must be fixed BEFORE ingesting anything
 
@@ -181,10 +194,9 @@ which one wins.
    the same class of defect as `C.cardSecondary` and the two-facts-for-one-field
    page layout bug: one fact, two homes, nothing keeping them in agreement.
    Retire the text set before a single row is ingested.
-2. **`mechanical_equipment` has the identical doubling** —
-   `me_heating_capacity_47f integer` beside `me_heating_capacity_47_f numeric`,
-   and the same for 17f/5f/cop/cooling. 85 columns, 0 rows, so it is free to fix
-   now and expensive to fix later.
+2. **`mechanical_equipment` has the identical doubling — and should be dropped,
+   not cleaned.** 85 columns, **0 rows**, no writer anywhere. Do not spend a
+   migration tidying columns in a table that is being retired (§9).
 3. **The picklists that express "installation type" have no values.**
    `product_ducting_configuration`, `product_variable_capacity`,
    `product_refrigerant_type`, `product_equipment_category`, `product_type`,
@@ -327,6 +339,36 @@ no schema guarantee and no support. Say no once, and record why.
                              + the reasoning, stored  (BUILT column)
 ```
 
+### The workflow boundary — three things, three homes, no mixing
+
+Nicholas asked directly whether this mixes workflow. It does not, provided the
+three responsibilities stay separated:
+
+| Step | Where it lives | Owner |
+|---|---|---|
+| **Produce the loads** | the **assessment** record | a separate workstream, already in flight |
+| **Turn loads into candidates** | `size_equipment_candidates(...)` — a function over NUMBERS | this workstream |
+| **Record the choice** | `opportunity_line_items.oli_equipment_product_id` | already built, already enforced |
+
+**The engine never writes anything.** It takes design loads, design
+temperatures, an installation type and (optionally) a measure, and returns a
+ranked list with its reasoning. That is what makes both front doors possible off
+one definition:
+
+- **Door 1 — the standalone Equipment Sizing tool.** Type the design heating
+  load, the design cooling load and the winter design temperature; get the
+  ranked models. No opportunity, no assessment, no property, nothing saved. An
+  auditor sizing something on the phone, or checking a contractor's proposal.
+- **Door 2 — the opportunity line item.** The same call, with every argument
+  **pre-filled** from the assessment and the building, launched from the
+  equipment step that `OpportunityProductsWidget` already renders. The chosen
+  model lands in `oli_equipment_product_id`, which
+  `enforce_line_item_equipment_selection()` already validates against the
+  measure's approved list.
+
+Door 2 is Door 1 with the inputs filled in. If the engine ever needs a record id
+to do its job, that is the sign the two have been mixed.
+
 ### Design principles
 
 1. **The auditor answers questions about the BUILDING, never about equipment.**
@@ -355,15 +397,19 @@ no schema guarantee and no support. Say no once, and record why.
    filtered out and at which step. **Never fall back to an unsized list** —
    an unsized list is how an auditor who is not an HVAC expert installs a heat
    pump that cannot heat the building.
-5. **Do not rebuild the weather database.** Conduit Tech already uses ASHRAE
-   2021 design data and is ACCA-approved ("Powered by ACCA Manual J")
-   ([Conduit Tech](https://getconduit.com/)). LEAP should capture the design
+5. **Do not rebuild the weather database, and do not build a second home for
+   the load.** Conduit Tech already uses ASHRAE 2021 design data and is
+   ACCA-approved ("Powered by ACCA Manual J")
+   ([Conduit Tech](https://getconduit.com/)), so LEAP captures the design
    temperatures and the weather station **from the Manual J that computed
-   them** — that keeps the numbers on the proposal identical to the numbers on
-   the load calculation, which is what a programme reviewer checks.
-6. **One catalog.** Equipment is `products` on an equipment record type. Never
-   a second equipment table. `mechanical_equipment` is *existing* equipment
-   found in a building; `products` is the *catalog*. Do not blur them.
+   them** — keeping the numbers on the proposal identical to the numbers on the
+   load calculation, which is what a programme reviewer checks. **Those fields
+   go on the ASSESSMENT record** (Nicholas, 2026-09-05 — a separate session is
+   adding them). This workstream **reads** them and must not invent its own.
+6. **One catalog, and one place the choice is recorded.** Equipment is
+   `products` on an equipment record type — never a second equipment table. The
+   selection is `opportunity_line_items.oli_equipment_product_id` — never a
+   second selection record.
 
 ---
 
@@ -372,33 +418,33 @@ no schema guarantee and no support. Say no once, and record why.
 Each phase is additive and independently shippable.
 
 ### Phase 0 — clear the ground (small, do it first)
-- Retire the duplicate text columns on `products` and `mechanical_equipment`
-  (§2d.1–2). Verify each is empty first; migrate any value into the numeric
-  column; drop or mark deprecated in one migration with a fixture pinning that
-  nothing reads them.
+- Retire the duplicate legacy text columns on `products` (§2d.1). Verify each is
+  empty first; migrate any value into the numeric column; drop or mark
+  deprecated in one migration with a fixture pinning that nothing reads them.
+  **`mechanical_equipment` is not cleaned — it is retired** (§9), so its
+  duplicates cost nothing.
 - Seed the picklists for `product_ducting_configuration`,
   `product_variable_capacity`, `product_equipment_category`,
   `product_refrigerant_type` — **using NEEP's own vocabulary**, so an ingested
   value never needs translating.
 - **Decide §7.1 (data source) before writing any importer.**
 
-### Phase 1 — the load lands in LEAP  ⭐ *the blocker; nothing after this works without it*
-- A purpose-named object for the load calculation — recommended
-  **`load_calculations` (LOAD-)**, one per building or per unit or per system,
-  because a multifamily building has many and a whole-building number cannot be
-  divided by hand later.
-- Fields: design heating load Btu/h, design cooling load (sensible and latent)
-  Btu/h, winter 99 % design dry bulb, summer 1 % design dry bulb, indoor design
-  temps, weather station name, conditioned floor area, calculation method
-  (Manual J 8th ed.), software and version, calculated-by, calculation date,
-  and the source PDF as a document on the record — **the evidence artifact**,
-  per LEAP's rule that every task has one.
-- Entry is manual first (the auditor types six numbers off the Conduit report).
-  A PDF parse or a Conduit integration is Phase 5, not a prerequisite.
-- Decide, here, where the *result* lives (§7.7). The three hand-typed
-  heat-pump blocks in §2c-bis are the reason: LEAP should gain **one** selection
-  record that the assessment, the EFR application and the proposal all read,
-  rather than a fourth copy.
+### Phase 1 — read the load off the assessment  *(dependency, not this workstream's build)*
+**DECIDED 2026-09-05 (Nicholas): the design load goes on the ASSESSMENT record,
+and a separate session is adding it.** This workstream does not design a
+`load_calculations` object and must not add competing columns.
+- What this workstream owes Phase 1 is a **contract, not a table**: name the
+  fields the engine reads — design heating load Btu/h, design cooling load
+  Btu/h (sensible and latent), winter 99 % design dry bulb, summer 1 % design
+  dry bulb, weather station, conditioned floor area, and the source Manual J
+  PDF as the evidence artifact. Agree those column names with the other session
+  before either side writes code; a mismatch here is the one thing that makes
+  both efforts useless.
+- Today `assessments` carries **none** of them — verified 2026-09-05, every
+  column searched. The nearest things are `assessment_output_rated_heating_capacity_btuh`
+  (a nameplate rating, not a load) and `assessment_hp_backup_heating_capacity_btuh`.
+- The engine reads them and **never writes them**. The standalone tool takes the
+  same numbers by hand, which is what proves the engine is record-independent.
 
 ### Phase 2 — the catalog gets filled
 - Follow the HUD import pattern already proven in this repo (see
@@ -423,8 +469,20 @@ Each phase is additive and independently shippable.
 - Provenance columns on every ingested product, mirroring the HUD ones:
   which dataset, which batch, when refreshed. A capacity figure on a customer
   proposal must be traceable to a source and a date.
-- **Scope it.** 40,000 systems is not the goal. Start with the categories EES
-  actually installs — the three record types that already exist
+- **Scope by CATEGORY, and do not scope by manufacturer — limit the OFFER
+  instead.** Nicholas raised limiting the import by manufacturer if the full set
+  is a bottleneck. Volume is not the bottleneck: tens of thousands of rows is an
+  ordinary Postgres table and a paged Socrata pull, and it costs nothing to
+  hold. What an auditor must not face is a 40,000-row **list**, and that is
+  Filter 4's job, not the importer's. So ingest the categories broadly, and add
+  a **preferred manufacturer list as DATA an admin edits** (an `is_preferred`
+  flag or an `equipment_preferred_manufacturers` row set) that ranks and
+  optionally restricts what the picker offers. Cutting it at import time is
+  irreversible without a re-import and hides the model a contractor actually
+  proposed. **If the volume genuinely does bite** — a slow first pull, an API
+  page cap — then narrowing the import by manufacturer is the correct fallback,
+  and the preferred list is already the place that decision is recorded.
+- Categories in scope: the three equipment record types that already exist
   (`HEAT-PUMP-EQUIPMENT`, `VENTILATION-EQUIPMENT`, `FURNACE-EQUIPMENT`) plus
   **PTHP**, which multifamily needs and which PRD-00035 "High Efficiency PTAC
   Replacement" is already selling.
@@ -442,13 +500,15 @@ Each phase is additive and independently shippable.
 - Every filter step reports what it removed, so "no models found" is always
   explainable.
 
-### Phase 4 — the screen
-- **Select Equipment** action on the opportunity line item / the Products card,
-  auto-populated: building, load, design temps and programme all read from the
-  record. The auditor confirms and picks.
-- Reuse `list_qualifying_equipment_for_measure`'s contract so the existing
-  picker keeps working; the sized list is a *ranking and annotation* of the
-  eligible list, never a replacement for the eligibility rule.
+### Phase 4 — the two screens, off one engine
+- **The standalone Equipment Sizing tool** first, because it is the honest test
+  of the engine: three numbers in, ranked models out, nothing saved. If it needs
+  a record to work, the separation in §4 has already been broken.
+- **Then the opportunity line item.** The equipment step in
+  `OpportunityProductsWidget` already exists and already lists approved models;
+  this adds the loads, the sizing verdict per model and the ranking — the sized
+  list is an **annotation and ordering of the eligible list**, never a
+  replacement for `enforce_line_item_equipment_selection()`'s rule.
 - A help article in the same session, per the ship cycle.
 
 ### Phase 5 — downstream, once selection is real
@@ -489,63 +549,69 @@ Each phase is additive and independently shippable.
 
 ---
 
-## 7. Decisions — recommendation first, each a one-line yes/no
+## 7. Decisions — marked DECIDED with date and owner as they are confirmed
 
 **7.1 — Where does the equipment data come from?**
-*Recommendation:* **Ingest EPA ENERGY STAR open data (free, documented API,
-licensed for reuse), key on the AHRI reference number, deep-link to NEEP per
-model.** Revisit an AHRI Data Subscription only if the verification in §3c shows
-ENERGY STAR does not publish capacity/COP at 17 °F and 5 °F — those two numbers
-are the whole cold-climate sizing question. **Not** scraping ashp.neep.org.
-→ *Yes / no?*
+**DECIDED 2026-09-05, Nicholas: ENERGY STAR.** Ingest EPA ENERGY STAR open data
+(free, documented Socrata API, licensed for reuse), key on the AHRI Certified
+Reference Number, deep-link to NEEP per model for the human. **Not** scraping
+ashp.neep.org. An AHRI Data Subscription is revisited only if the verification
+in §3c shows ENERGY STAR does not publish capacity and COP at 17 °F and 5 °F —
+those two numbers are the whole cold-climate sizing question.
 
-**7.2 — What is the unit of a load calculation?**
-*Recommendation:* **per building for a central system, per unit for in-unit
-equipment** — a `load_calculations` record that points at either, because EES's
-multifamily work has both and a whole-building number cannot be split later.
-→ *Yes / no?*
+**7.2 — Where does the design load live?**
+**DECIDED 2026-09-05, Nicholas: on the ASSESSMENT record**, being added by a
+separate session. This workstream reads it and adds no competing columns
+(§Phase 1). Supersedes the earlier `load_calculations` proposal.
 
 **7.3 — Which equipment categories are in scope for round one?**
-*Recommendation:* the three record types that already exist — heat pump,
-ventilation, furnace — **plus PTHP**, since multifamily PTAC replacement is
-already a measure being sold. Water heaters, appliances and electrical get a
+*Recommendation:* the three equipment record types that already exist — heat
+pump, ventilation, furnace — **plus PTHP**, since multifamily PTAC replacement
+is already a measure being sold. Water heaters, appliances and electrical get a
 category when someone installs one.
 → *Yes / no?*
 
 **7.4 — Does the engine ever auto-select?**
-*Recommendation:* **no.** It ranks and explains; a person picks and the
-reasoning is stored. An auto-selected heat pump that cannot heat the building at
-design conditions is a callback, a warranty claim, and a failed programme
-inspection.
+*Recommendation:* **no.** It ranks and explains; a person picks. An
+auto-selected heat pump that cannot heat the building at design conditions is a
+callback, a warranty claim, and a failed programme inspection.
 → *Yes / no?*
 
 **7.5 — Where does the Manual J come from on day one?**
 *Recommendation:* **typed in from the Conduit Tech report, with the PDF attached
-as the evidence artifact.** A Conduit integration is real work and it should not
-gate the sizing engine, which is the part with the value.
+as the evidence artifact.** A Conduit integration is real work and should not
+gate the sizing engine, which is the part with the value. (The field names are
+the other session's; this is about the source, not the schema.)
 → *Yes / no?*
 
 **7.6 — Do Phase 0's duplicate-column cleanups ship first, on their own?**
-*Recommendation:* **yes.** They are small, they are free while the tables are
-empty, and ingesting 40,000 rows into a table that stores capacity twice makes
-them permanent.
+*Recommendation:* **yes.** Small, free while the tables are empty, and ingesting
+tens of thousands of rows into a table that stores capacity twice makes the
+ambiguity permanent.
 → *Yes / no?*
 
-**7.7 — Does the sizing result get one home, or does it fill the existing three?**
-*Recommendation:* **one purpose-named record — `equipment_selections` (EQS-) —
-written by the engine and READ by `assessments`, `efr_reports` and the
-proposal**, rather than the engine writing into three hand-typed blocks that
-already drift (§2c-bis). This is the platform's own "one definition" rule; the
-alternative is the four-copies-of-one-fact defect this repo has fixed repeatedly.
-→ *Yes / no?*
+**7.7 — Does the sizing result get its own record?**
+**DECIDED 2026-09-05, Nicholas: NO.** *"The equipment selection is going to go
+on the opportunity line item when we select the product."* The choice is
+`opportunity_line_items.oli_equipment_product_id` — the column that already
+exists and is already enforced. No `equipment_selections` object; the earlier
+proposal for one is withdrawn. Whether the engine also fills the assessment's
+`assessment_hp_*` block, or that block is retired once the line item is
+authoritative, is a smaller follow-up question.
 
 **7.8 — Is the existing-equipment roll-up in scope?**
-*Recommendation:* **not in this workstream, but it is a real dependency.**
-Sizing wants to know what is installed today, and that fact currently lives in
-five places with no rule for which wins (§2c-bis). Log it; do not fold it in.
+*Recommendation:* **no, but it is a real dependency.** Sizing wants to know what
+is installed today, and that fact lives in five places with no rule for which
+wins (§2c-bis). Log it; do not fold it in.
 → *Yes / no?*
 
----
+**7.9 — Manufacturer scope on the import.**
+*Recommendation:* **do not cut the import by manufacturer; cut the OFFER.**
+Ingest the categories broadly and add a preferred-manufacturer list as data an
+admin edits, so the auditor's list is short without the catalog being
+incomplete. Narrowing the import stays the fallback if the pull genuinely
+bottlenecks. See Phase 2.
+→ *Yes / no?*
 
 ## 8. File and DB-table index
 
@@ -559,7 +625,7 @@ five places with no rule for which wins (§2c-bis). Log it; do not fold it in.
 | `opportunity_line_items` | `oli_is_equipment_line`, `oli_equipment_product_id` |
 | `program_measure_products` (19) / `product_work_measure_map` (18) | Programme → measure → work measure |
 | `price_books` / `price_book_entries` (73) | Filter 4's raw material |
-| `mechanical_equipment` (85 cols, 0 rows) | **Existing** equipment in a building — not the catalog |
+| `mechanical_equipment` (85 cols, **0 rows**) | Dead Salesforce-import residue, no writer — to be retired, not used |
 | `assessments` (28 rows) | Existing-system survey + the hand-typed heat-pump proposal block |
 | `buildings` / `units` / `properties` | Square footage, fuel, existing system type |
 | `enforce_line_item_equipment_selection()` | The rule that makes Filter 1 real |
@@ -600,6 +666,12 @@ pattern to copy), `docs/leap-programs.md`.
   Phase 2 either brings them to life as the certified-combination model (which is
   what they are correctly shaped for) or retires them. **Do not leave them
   half-alive with an importer writing only the loose integer.**
+- **Three empty tables should be retired, and it is safe: `efr_reports`,
+  `mechanical_equipment` and `equipment_information` all hold ZERO rows** and
+  have no writer anywhere in the codebase (Salesforce-import residue). Nicholas
+  has said they should be gone. Nothing to migrate — but it is a schema deletion
+  and therefore its own small, deliberate change, not a side effect of this
+  workstream.
 - **`ENERGY STAR Electric Heat Pump for Space Heating and Cooling`
   (HEAR-HP-SPACE-HEAT-COOL) has no `product_work_measure_map` row** — already
   flagged in `docs/leap-project-record-types.md`. The single most important
