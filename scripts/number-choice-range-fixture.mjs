@@ -24,6 +24,7 @@
 import {
   isNumberChoiceRange, resolveRangeBounds, numberChoiceOptions,
   parseNumberChoice, formatChoiceNumber, MAX_CHOICE_OPTIONS,
+  relatedColumnTypeForChoiceRange, NUMBER_CHOICE_FIELD_TYPE,
 } from '../src/lib/numberChoiceRange.js'
 
 let failures = 0, checks = 0
@@ -121,6 +122,38 @@ check('bounds resolve against the injected clock',
   resolveRangeBounds(YEAR_BUILT, new Date('2040-01-01T00:00:00Z')), { min: 1800, max: 2041, step: 1 })
 check('bounds of a fixed range', resolveRangeBounds(STORIES), { min: 1, max: 50, step: 1 })
 check('bounds of nonsense', resolveRangeBounds({ min: 'x' }), null)
+
+// ── A cross-object (related) field pulled from a range column ──────────────
+// Nicholas, 2026-09-05: "Year built should be a dropdown everywhere." The
+// enrollment layouts carry the BUILDING's year built as a related field, which
+// froze as `number` when it was placed and therefore rendered "1,987". A
+// related field is display-only, so what changes is the format, not an editor.
+check('a number-typed related field pulled from a year column formats as a year',
+  relatedColumnTypeForChoiceRange('number', YEAR_BUILT), NUMBER_CHOICE_FIELD_TYPE)
+check('an untyped related field on a range column does too',
+  relatedColumnTypeForChoiceRange(null, YEAR_BUILT), NUMBER_CHOICE_FIELD_TYPE)
+check('an integer-typed one does too',
+  relatedColumnTypeForChoiceRange('integer', STORIES), NUMBER_CHOICE_FIELD_TYPE)
+// A range says nothing about a picklist's or a lookup's wiring; upgrading those
+// would throw away the display resolution the placement carries.
+check('a picklist related field is left exactly as placed',
+  relatedColumnTypeForChoiceRange('picklist', YEAR_BUILT), 'picklist')
+check('a lookup related field is left exactly as placed',
+  relatedColumnTypeForChoiceRange('lookup', YEAR_BUILT), 'lookup')
+check('a date related field is left exactly as placed',
+  relatedColumnTypeForChoiceRange('date', YEAR_BUILT), 'date')
+check('a currency related field keeps its thousands separators',
+  relatedColumnTypeForChoiceRange('currency', YEAR_BUILT), 'currency')
+// And a parent column with no range must never be touched — most number
+// related fields on the platform ARE quantities and must keep grouping.
+check('a number related field on a column with NO range stays a number',
+  relatedColumnTypeForChoiceRange('number', null), 'number')
+check('...or with a malformed range', relatedColumnTypeForChoiceRange('number', { min: 1 }), 'number')
+
+// The type string has ONE definition — it is set by the layout pass and read by
+// the record page's editor, its formatter and the related-field overlay.
+check('the field type is a shared constant, not four spellings',
+  NUMBER_CHOICE_FIELD_TYPE, 'number_select')
 
 console.log(`${checks - failures}/${checks} checks passed`)
 if (failures) process.exit(1)
