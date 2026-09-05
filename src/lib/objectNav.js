@@ -177,6 +177,14 @@ const OBJECT_HOME = {
   ahri_certificates:         ['qualification', null],
   ahri_equipment:            ['qualification', null],
   mechanical_equipment:      ['qualification', null],
+  // The Manual J and its parts. They are read through the card on the
+  // assessment rather than from a list of their own, but a record page still
+  // needs a URL that resolves — that is the whole point of registering an
+  // object here rather than leaving it to fall off an allowlist.
+  manual_j_reports:          ['qualification', null],
+  manual_j_load_blocks:      ['qualification', null],
+  manual_j_load_components:  ['qualification', null],
+  manual_j_building_materials: ['qualification', null],
 
   // ── Field ───────────────────────────────────────────────────────────────
   projects:                     ['field', 'projects'],

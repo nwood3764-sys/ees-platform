@@ -31,6 +31,10 @@ const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstall
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
 const SubmittedEnrollmentModal      = lazy(() => import('./SubmittedEnrollmentModal'))
 const GeneratedDocumentModal        = lazy(() => import('./GeneratedDocumentModal'))
+// The Manual J card is lazy: it pulls pdf.js from the CDN the moment a report
+// is dropped on it, and an assessment nobody drops a PDF on should never pay
+// for that.
+const ManualJReportCard             = lazy(() => import('./ManualJReportCard'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -47,7 +51,7 @@ import DeletedRecordBanner from './DeletedRecordBanner'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
 import { objectNavFor, humanizeObjectLabel } from '../lib/objectNav'
-import { shouldCondenseHeader, stickyHeaderBandStyle, stickyTabBarStyle } from '../lib/stickyRecordHeader'
+import { shouldCondenseHeader, condenseThreshold, stickyHeaderBandStyle, stickyTabBarStyle } from '../lib/stickyRecordHeader'
 import { useDataRefresh } from '../lib/dataRefresh'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
@@ -128,6 +132,7 @@ import { toDatetimeLocal, fromDatetimeLocal } from '../lib/datetimeField'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
+import { numberChoiceOptions, parseNumberChoice, formatChoiceNumber } from '../lib/numberChoiceRange'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
 import { CONVERSATION_ANCHORS } from '../lib/conversationAnchors'
@@ -283,6 +288,9 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
       const opt = (fieldDef.options || []).find(o => o.value === raw)
       return opt ? opt.label : String(raw)
     }
+    // A number chosen from a declared range (see src/lib/numberChoiceRange.js).
+    // Never thousand-separated: 1987 is a year, and `number` renders it "1,987".
+    case 'number_select': return formatChoiceNumber(raw)
     case 'phone':      return formatUsPhoneDisplay(raw)
     // Formula / rollup / inherited fields are computed at read; format by the
     // field's declared return type (falls back to a sensible numeric/text guess).
@@ -2622,6 +2630,29 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
         inputMode={field.type === 'phone' ? 'tel' : field.type === 'email' ? 'email' : field.type === 'url' ? 'url' : undefined}
         placeholder={field.type === 'url' ? 'https://' : undefined}
         style={inputBase} value={v} onChange={e => onChange(field.name, e.target.value)} />
+
+    // A numeric column whose choices are a declared range — Stories of
+    // Building, Year Built (Nicholas, 2026-09-05: "should the number of stories
+    // be a pick list?"). The column stays numeric and this stores a NUMBER, not
+    // the option's string, which is why it is not the `select` editor above.
+    case 'number_select': {
+      const opts = numberChoiceOptions(field.choice_range, value) || []
+      if (opts.length === 0) {
+        // A range that could not be resolved must not become an empty dropdown
+        // the user cannot get past — fall back to the number input.
+        return <input type="number" step="any" min={nonNegativeMin(false)} style={monoInput}
+          value={v} onKeyDown={blockNegativeKeys(false)}
+          onChange={e => onChange(field.name, e.target.value === '' ? null : Number(e.target.value))} />
+      }
+      return (
+        <select style={{ ...monoInput, cursor: 'pointer' }}
+          value={value === null || value === undefined || value === '' ? '' : String(Number(value))}
+          onChange={e => onChange(field.name, parseNumberChoice(e.target.value))}>
+          <option value="">— Select —</option>
+          {opts.map(o => <option key={o.value} value={String(o.value)}>{o.label}</option>)}
+        </select>
+      )
+    }
 
     case 'number': case 'currency': case 'percent': {
       // Business number fields are never negative (see lib/numberInput). Block
@@ -7003,20 +7034,35 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [headerCondensed, setHeaderCondensed] = useState(false)
   const [headerBandEl, setHeaderBandEl] = useState(null)
   const [headerBandHeight, setHeaderBandHeight] = useState(0)
+  // The band's height WHILE EXPANDED. Collapsing the band hands this much
+  // height back to the scroll region, and the browser takes the same amount off
+  // scrollTop to keep the view still — so it is the number that decides how far
+  // the record must scroll before collapsing is safe. Measured, never assumed:
+  // it changes with a wrapped breadcrumb trail and a long record name. A ref
+  // rather than state, so the scroll handler keeps one identity.
+  const expandedHeaderHeightRef = useRef(0)
 
   useLayoutEffect(() => {
     if (!headerBandEl) { setHeaderBandHeight(0); return }
-    const measure = () => setHeaderBandHeight(headerBandEl.getBoundingClientRect().height)
+    const measure = () => {
+      const h = headerBandEl.getBoundingClientRect().height
+      setHeaderBandHeight(h)
+      // Only record it while the band is open — capturing the condensed height
+      // here would set the threshold from the collapsed band and reopen the
+      // feedback loop this exists to close.
+      if (!headerCondensed && h > 0) expandedHeaderHeightRef.current = h
+    }
     measure()
     if (typeof ResizeObserver === 'undefined') return undefined
     const ro = new ResizeObserver(measure)
     ro.observe(headerBandEl)
     return () => ro.disconnect()
-  }, [headerBandEl])
+  }, [headerBandEl, headerCondensed])
 
   const handleContentScroll = useCallback((e) => {
     const top = e.currentTarget.scrollTop
-    setHeaderCondensed(prev => shouldCondenseHeader(top, prev))
+    const at = condenseThreshold(expandedHeaderHeightRef.current)
+    setHeaderCondensed(prev => shouldCondenseHeader(top, prev, at))
   }, [])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -9911,6 +9957,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
     if (w.widget_type === 'conversation_list') {
       return <ConversationListWidget key={w.id} widget={w} parentRecordId={recordId} />
+    }
+    if (w.widget_type === 'manual_j') {
+      return (
+        <Suspense key={w.id} fallback={null}>
+          <ManualJReportCard recordId={recordId} title={w.widget_title || 'Manual J Load Calculation'} />
+        </Suspense>
+      )
     }
     if (w.widget_type === 'prtsn_history') {
       return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />

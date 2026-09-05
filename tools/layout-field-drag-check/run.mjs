@@ -121,8 +121,11 @@ async function tileBox(testId, label) {
     if (!tile) return null
     const r = tile.getBoundingClientRect()
     const cell = tile.closest('[data-field-cell]')
-    const line = cell?.querySelector('[data-insert-line]')
+    const lines = cell ? [...cell.querySelectorAll('[data-insert-line]')] : []
+    const line = lines[0] || null
+    const trail = lines.find(l => l.getAttribute('data-insert-after') !== null) || null
     const lr = line ? line.getBoundingClientRect() : null
+    const tr = trail ? trail.getBoundingClientRect() : null
     // A tile is picked up by its ⠿ handle, exactly as an admin does it — the
     // drag listeners are on the handle so the label, the ↔ toggle and the ×
     // stay clickable.
@@ -131,6 +134,7 @@ async function tileBox(testId, label) {
       handle: [h.left + h.width / 2, h.top + h.height / 2],
       centre: [r.left + r.width / 2, r.top + r.height / 2],
       line: lr ? [lr.left + lr.width / 2, lr.top + lr.height / 2] : null,
+      after: tr ? [tr.left + tr.width / 2, tr.top + tr.height / 2] : null,
     }
   }, { testId, label })
 }
@@ -179,81 +183,91 @@ try {
     'the reported section renders exactly as the screenshot showed it',
     JSON.stringify(await page.evaluate(READ, 'live-information')))
 
-  // ── 1. THE REPORTED DRAG: Building, one cell to the right ────────────────
+  // ── 1. THE REPORTED DRAG: Building into the right-hand column ────────────
+  // Nicholas, 2026-09-05: "If I move something over, it goes in between the two
+  // existing fields." To put Building on the right he drops it between Project
+  // and Property Contact — the line at the start of row 3.
+  {
+    const src = await tileBox('live-information', 'Building')
+    const dst = await tileBox('live-information', 'Property Contact for IQ Assessment')
+    await drag(src.handle, dst.line)
+    const after = await page.evaluate(READ, 'live-information')
+    note(String(await page.evaluate(() => window.__lastOver)).startsWith('ins::'),
+      'a drop aimed at the gutter resolves to the insertion line, not the tile beside it',
+      String(await page.evaluate(() => window.__lastOver)))
+    note(eq(after[1], ['Project', 'Building']),
+      'the field lands between the two fields it was dropped between',
+      JSON.stringify(after[1]))
+    note(eq(after.slice(2), BEFORE.slice(2)),
+      'and nothing below the drop moves at all',
+      JSON.stringify(after))
+  }
+
+  // ── 1b. "I moved the building over to the right" ─────────────────────────
+  // Aimed at the RIGHT-HAND END of the row Building is on. There is a target
+  // there now: without one, the nearest thing to drop on was the row below,
+  // which is how a drag meant to move a field one place across a row ended up
+  // rearranging the section.
+  await reload()
   {
     const src = await tileBox('live-information', 'Building')
     const dst = await tileBox('live-information', 'Project')
-    await drag(src.handle, dst.centre)
+    note(dst.after != null, 'the last cell of a row carries an insertion line on its right edge')
+    await drag(src.handle, dst.after)
     const after = await page.evaluate(READ, 'live-information')
     note(eq(after[1], ['Project', 'Building']),
-      'dropping Building on the field to its right puts Building on the right',
+      'dropping Building off the right-hand end of its row puts it in the right-hand column',
       JSON.stringify(after[1]))
-    note(eq(after.filter((_, i) => i !== 1), BEFORE.filter((_, i) => i !== 1)),
-      'and every other row is untouched — nothing moved back to the left',
+    note(eq(after.slice(2), BEFORE.slice(2)),
+      'and every row below it is untouched',
       JSON.stringify(after))
+  }
+
+  // ── 2. NOTHING EVER TRADES PLACES ────────────────────────────────────────
+  // "I don't want fields to trade places ever. That's never, ever a good
+  // functionality." A drop on a tile puts the field in FRONT of that tile; the
+  // tile moves along one cell and is never thrown across the section.
+  await reload()
+  {
+    const src = await tileBox('live-information', 'Building')
+    const dst = await tileBox('live-information', 'Assessor Name')
+    await drag(src.handle, dst.centre)
+    const after = await page.evaluate(READ, 'live-information')
     note(String(await page.evaluate(() => window.__lastOver)).startsWith('fld::'),
       'the drop resolved to the tile, not to the insertion line overlaying its edge',
       String(await page.evaluate(() => window.__lastOver)))
+    note(eq(after[3], ['Building', 'Assessor Name']),
+      'the dragged field takes the cell and the tile moves along one place',
+      JSON.stringify(after[3]))
+    note(!after.some(r => r[0] === 'Assessor Name'),
+      'the displaced field is NOT thrown into the other column',
+      JSON.stringify(after))
   }
 
-  // ── 2. CONTROL — the same drag, the pre-fix resolution ───────────────────
+  // ── 3. CONTROL — the pre-fix resolution still does nothing ───────────────
   {
     const src = await tileBox('control-information', 'Building')
     const dst = await tileBox('control-information', 'Project')
     await drag(src.handle, dst.centre)
     const after = await page.evaluate(READ, 'control-information')
     note(eq(after, BEFORE),
-      'CONTROL: the same drag under the old rule still does nothing at all',
+      'CONTROL: a one-slot forward drag under the old rule still does nothing at all',
       JSON.stringify(after))
   }
 
-  // ── 3. The insertion line is reachable and does re-flow ──────────────────
+  // ── 4. An empty slot is the one target that pushes nothing ───────────────
   await reload()
   {
-    const dst = await tileBox('live-information', 'Assessor Name')
-    note(dst.line != null, 'each cell carries an insertion line on its leading edge')
-    const src = await tileBox('live-information', 'Building')
-    await drag(src.handle, dst.line)
-    const after = await page.evaluate(READ, 'live-information')
-    note(String(await page.evaluate(() => window.__lastOver)).startsWith('ins::'),
-      'a drop aimed at the gutter resolves to the insertion line, not the tile beside it',
-      String(await page.evaluate(() => window.__lastOver)))
-    note(eq(after[3], ['Building', 'Assessor Name']),
-      'and the field lands immediately before the line it was dropped on',
-      JSON.stringify(after[3]))
-  }
-
-  // ── 4. An empty slot is a real target ───────────────────────────────────
-  await reload()
-  {
-    const src = await tileBox('live-information', 'Building')
+    const src = await tileBox('live-information', 'Assessor Name')
     const slot = await tileBox('live-information', 'Empty slot')
     await drag(src.handle, slot.centre)
     const after = await page.evaluate(READ, 'live-information')
-    note(eq(after[4], ['Date Of Iq Assessment', 'Building']),
-      'a field dropped on an empty slot takes that slot',
-      JSON.stringify(after[4]))
-    note(eq(after[1], ['Empty slot', 'Project']),
-      'and the cell it came from is left empty rather than closing up',
-      JSON.stringify(after[1]))
-  }
-
-  // ── 4b. …and so is the blank the renderer draws to finish a short row ────
-  // This is the placement that could not be expressed at all before: put the
-  // field in the RIGHT-hand column of the last row. Under any insert-based
-  // rule it appends and lands on the left.
-  await reload()
-  {
-    const src = await tileBox('live-information', 'Building')
-    const blank = await blankBox('live-information')
-    await drag(src.handle, blank.centre)
-    const after = await page.evaluate(READ, 'live-information')
-    note(eq(after[6], ['End Time Of Iq Assessment', 'Building']),
-      'a field dropped on the blank half of the last row lands in that half',
-      JSON.stringify(after[6]))
-    note(eq(after[1], ['Empty slot', 'Project']),
-      'and again the cell it left is blank, not closed up',
-      JSON.stringify(after[1]))
+    note(eq(after[3], ['Gas Fuel Provider', 'Date Of Iq Assessment']),
+      'a field dropped on an empty slot fills it',
+      JSON.stringify(after))
+    note(after.every(r => r.length === 2),
+      'and every row is still whole',
+      JSON.stringify(after))
   }
 
   // ── 5. Across sections it is a move, and the source closes up ────────────

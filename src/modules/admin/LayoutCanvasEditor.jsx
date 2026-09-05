@@ -57,8 +57,10 @@ import { describeObject } from '../../data/adminService'
 import { consumeLayoutReturnRecord } from '../../lib/urlNav'
 import { packFieldGroupRows } from '../../lib/fieldGroupLayout'
 import {
-  FIELD_CELL_PREFIX, FIELD_INSERT_PREFIX, FIELD_BLANK_PREFIX, FIELD_ZONE_SUFFIX, SPACER,
-  fieldCellDragId, fieldInsertDropId, fieldBlankDropId, fieldZoneDropId, parseFieldDropId,
+  FIELD_CELL_PREFIX, FIELD_INSERT_PREFIX, FIELD_INSERT_AFTER_PREFIX, FIELD_BLANK_PREFIX,
+  FIELD_ZONE_SUFFIX, SPACER,
+  fieldCellDragId, fieldInsertDropId, fieldInsertAfterDropId, fieldBlankDropId,
+  fieldZoneDropId, parseFieldDropId,
   applyFieldDropWithinGroup, removeFieldAt, insertFieldIntoGroup,
 } from '../../lib/fieldGroupPlacement'
 import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
@@ -186,9 +188,9 @@ const nextCardKey = () => String(++_newKeySeq)
 // section card on a pill moves it to that tab.
 //
 // The field family carries three kinds of id and they mean different things on
-// drop — a cell ("fld::<section>::<index>") swaps, an insertion line
-// ("ins::<sectionKey>::<slot>") reorders, and the group itself
-// ("<sectionKey>::fields") appends. See src/lib/fieldGroupPlacement.js.
+// drop — a cell ("fld::<section>::<index>") and an insertion line
+// ("ins::<sectionKey>::<slot>") both insert at that position, and the group
+// itself ("<sectionKey>::fields") appends. See src/lib/fieldGroupPlacement.js.
 function dragFamily(id) {
   const s = String(id)
   if (s.startsWith('sec::') || s.startsWith('tabdrop::')) return 'section'
@@ -214,7 +216,7 @@ export function canvasCollisionDetection(args) {
   if (family === 'field') {
     const within = pointerWithin({ ...args, droppableContainers })
     for (const test of [
-      (c) => String(c.id).startsWith(FIELD_INSERT_PREFIX),
+      (c) => String(c.id).startsWith(FIELD_INSERT_PREFIX) || String(c.id).startsWith(FIELD_INSERT_AFTER_PREFIX),
       (c) => String(c.id).startsWith(FIELD_CELL_PREFIX) || String(c.id).startsWith(FIELD_BLANK_PREFIX),
       (c) => String(c.id).endsWith(FIELD_ZONE_SUFFIX),
     ]) {
@@ -230,15 +232,16 @@ export function canvasCollisionDetection(args) {
 // src/lib/fieldGroupPlacement.js — this resolves the ids to sections and hands
 // the section's field array over.
 //
-// Within one section, dropping ON A CELL SWAPS: the dragged field takes that
-// cell and its occupant takes the dragged field's. Nothing else in the section
-// moves. That is the gesture Nicholas could not perform on 2026-09-05 — the
-// editor only ever offered "insert before this tile", which in a reading-order
-// flow shifts every field after the drop and flips the column of each of them.
+// A drop INSERTS. Nicholas, 2026-09-05: "If I move something over, it goes in
+// between the two existing fields. That's it, and then you readjust to make
+// sure the rows are horizontally aligned" — and, on the swap an earlier cut of
+// this shipped with, "I don't want fields to trade places ever." So the field
+// lands where it was dropped and the fields after it move along one place; a
+// field the admin did not drag is never thrown across the section.
 //
-// Moving a field to ANOTHER section is a move, not a swap: it leaves the
-// section it came from (which closes up behind it) and lands in the one it was
-// dropped on, filling an empty slot if that is what it was dropped on.
+// Moving a field to ANOTHER section is the same insertion, one section over:
+// it leaves the section it came from (which closes up behind it) and lands
+// where it was dropped, filling an empty slot if that is what it landed on.
 //
 // Pure, and exported, so the fixture and the browser check both drive the real
 // thing rather than a re-typed copy of it.
@@ -570,16 +573,12 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
   // src/lib/fieldGroupPlacement.js — this resolves the ids to sections and
   // hands the section's field array over.
   //
-  // Within one section, dropping ON A CELL SWAPS: the dragged field takes that
-  // cell and its occupant takes the dragged field's. Nothing else in the
-  // section moves. That is the gesture Nicholas could not perform on
-  // 2026-09-05 — the editor only ever offered "insert before this tile", which
-  // in a reading-order flow shifts every field after the drop and flips the
-  // column of each of them.
+  // A drop INSERTS — the field goes between the two fields it was dropped
+  // between and the rest move along one place. Fields never trade places.
   //
-  // Moving a field to ANOTHER section is a move, not a swap: it leaves the
-  // section it came from (which closes up behind it) and lands in the one it
-  // was dropped on, filling an empty slot if that is what it was dropped on.
+  // Moving a field to ANOTHER section is the same insertion, one section over:
+  // it leaves the section it came from (which closes up behind it) and lands
+  // where it was dropped, filling an empty slot if that is what it landed on.
   const onFieldDragEnd = (activeId, overId) =>
     setSections(prev => applyFieldDropToSections(prev, activeId, overId))
 
@@ -1368,8 +1367,9 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenCa
 // could only mean "insert before this tile", so putting a field in a
 // particular CELL was impossible — the flow re-wrapped and every field after
 // the drop changed column. Every cell is now a drop target of its own and a
-// drop on one SWAPS; the insertion lines in the gutters are what still
-// re-flows. See src/lib/fieldGroupPlacement.js.
+// drop on one INSERTS there — the field goes between the two fields it was
+// dropped between, and the fields after it move along one place. See
+// src/lib/fieldGroupPlacement.js.
 //
 // No DndContext here: the whole canvas shares ONE context (in
 // LayoutCanvasEditor) so a field can be dragged across sections, not just
@@ -1409,12 +1409,17 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
   // at instead of appending it and landing a column away.
   const cellSeq = rows.flatMap((row, r) => row.cells.map((cell, c) => ({ ...cell, r, c })))
   const blankSlots = new Map()
+  // The slot that sits AFTER each cell — the index of the next real entry, or
+  // the end of the array. It is what the trailing insertion line on the last
+  // cell of a row points at, so "drop it to the right of this field" has
+  // somewhere to land instead of falling to the row below.
+  const slotAfter = new Map()
   let following = fields.length
   for (let i = cellSeq.length - 1; i >= 0; i--) {
+    slotAfter.set(`${cellSeq[i].r}:${cellSeq[i].c}`, following)
     if (cellSeq[i].blank) blankSlots.set(`${cellSeq[i].r}:${cellSeq[i].c}`, following)
     else following = cellSeq[i].index
   }
-  const lastCell = cellSeq.length ? cellSeq[cellSeq.length - 1] : null
 
   return (
     <div ref={setNodeRef} style={{
@@ -1431,7 +1436,7 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
         <div key={`row-${rowIndex}`} data-field-row={rowIndex}
           style={{ display: 'flex', alignItems: 'stretch', gap: 6, marginBottom: 6 }}>
           {row.cells.map((cell, cellIndex) => {
-            const isLast = lastCell && lastCell.r === rowIndex && lastCell.c === cellIndex
+            const isRowEnd = cellIndex === row.cells.length - 1
             const blankSlot = cell.blank ? (blankSlots.get(`${rowIndex}:${cellIndex}`) ?? fields.length) : null
             return (
               <div key={cell.blank ? `pad-${rowIndex}-${cellIndex}` : (cell.field.name || `spacer-${cell.index}`)}
@@ -1440,8 +1445,10 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
                 {!cell.blank && (
                   <InsertLine sectionKey={sectionKey} slot={cell.index} edge="start" visible={dragging} />
                 )}
-                {isLast && (
-                  <InsertLine sectionKey={sectionKey} slot={fields.length} edge="end" visible={dragging} />
+                {isRowEnd && (
+                  <InsertLine sectionKey={sectionKey} after
+                    slot={slotAfter.get(`${rowIndex}:${cellIndex}`) ?? fields.length}
+                    edge="end" visible={dragging} />
                 )}
                 {cell.blank ? (
                   // The padding at the end of a short row is drawn, not
@@ -1470,11 +1477,11 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
       ))}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2 }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: C.textMuted, lineHeight: 1.4 }}>
-          Drop a field <b>on another field</b> to swap the two — nothing else moves.
-          Drop it <b>on the line between fields</b> to move it there and re-flow the rest.
+          Drop a field <b>between two fields</b> and it goes there — the fields after it move along one place
+          and the rows re-fill. Drop it <b>on an empty slot</b> to fill that slot without moving anything else.
         </span>
         <button onClick={addSpacer}
-          title="Add an empty slot at the end. Drag it where you want the gap — a field swapped into it takes its place."
+          title="Add an empty slot at the end, then drag it where you want the gap. A field dropped on an empty slot fills it without moving anything else."
           style={{ padding: '4px 9px', fontSize: 11, fontWeight: 500, background: 'transparent',
             color: C.textSecondary, border: `1px dashed ${C.border}`, borderRadius: 5, cursor: 'pointer', flexShrink: 0 }}>
           + Empty slot
@@ -1490,10 +1497,13 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
 // narrow never wins a corner-distance contest against the tile beside it.
 // pointerEvents stays off so it can never swallow a click on a tile's buttons —
 // dnd-kit measures rectangles, it does not hit-test the DOM.
-function InsertLine({ sectionKey, slot, edge, visible }) {
-  const { setNodeRef, isOver } = useDroppable({ id: fieldInsertDropId(sectionKey, slot) })
+function InsertLine({ sectionKey, slot, edge, visible, after = false }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: after ? fieldInsertAfterDropId(sectionKey, slot) : fieldInsertDropId(sectionKey, slot),
+  })
   return (
-    <div ref={setNodeRef} aria-hidden="true" data-insert-line={slot} style={{
+    <div ref={setNodeRef} aria-hidden="true" data-insert-line={slot}
+      data-insert-after={after ? '' : undefined} style={{
       position: 'absolute', top: -2, bottom: -2, width: 14, zIndex: 3,
       pointerEvents: 'none',
       ...(edge === 'end' ? { right: -8 } : { left: -8 }),
@@ -1511,7 +1521,7 @@ function InsertLine({ sectionKey, slot, edge, visible }) {
 
 // The blank at the end of a short row. Not stored in the array — its position
 // is — so it carries its own id kind ("fldpad::"), and a drop on it
-// materialises it into a real empty slot and swaps the field in.
+// materialises it into a real empty slot and drops the field into it.
 function BlankCell({ sectionKey, slot }) {
   const { setNodeRef, isOver } = useDroppable({ id: fieldBlankDropId(sectionKey, slot) })
   return (
@@ -1551,12 +1561,13 @@ function SpacerTile({ sectionKey, index, onRemove }) {
 }
 
 // One cell is both the thing you pick up and the thing you can drop onto —
-// dropping a field on a field swaps the two. Draggable and droppable share the
-// id; dnd-kit keeps the two registries apart, which is what useSortable does
-// internally. useSortable itself is deliberately NOT used here: its strategy
-// animates the tiles as though the drop were an insertion, and after
-// 2026-09-05 a drop on a tile is a SWAP. A preview that shows the wrong
-// outcome is worse than no preview.
+// dropping a field on a tile puts it in front of that tile. Draggable and
+// droppable share the id; dnd-kit keeps the two registries apart, which is what
+// useSortable does internally. useSortable itself is deliberately NOT used
+// here: its strategy animates a preview from the tile rectangles it measured at
+// drag start, and a section that re-wraps into rows is not the list that
+// strategy assumes — the tiles slid to the wrong cells. The insertion line and
+// the tile's own highlight say where the field will land instead.
 function useFieldCell(sectionKey, index) {
   const id = fieldCellDragId(sectionKey, index)
   const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({ id })
@@ -1588,7 +1599,7 @@ function FieldTile({ field, object, sectionKey, index, fullWidth, canSpan, onTog
       border: `1px solid ${isOver ? C.emerald : C.border}`, borderRadius: 6,
       boxShadow: isOver ? `0 0 0 1px ${C.emerald}` : 'none',
     }}>
-      <span {...handleProps} data-drag-handle="" title="Drag onto another field to swap places, or onto the line between two fields to move it there"
+      <span {...handleProps} data-drag-handle="" title="Drag it between two fields to drop it there — the fields after it move along one place"
         style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
       <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {field.type === 'related_field' && field.related?.fk_column && (
@@ -1597,7 +1608,7 @@ function FieldTile({ field, object, sectionKey, index, fullWidth, canSpan, onTog
         {label}
       </span>
       {isOver && (
-        <span style={{ fontSize: 10, fontWeight: 600, color: C.emeraldMid, letterSpacing: 0.3, flexShrink: 0 }}>SWAP</span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: C.emeraldMid, letterSpacing: 0.3, flexShrink: 0 }}>INSERT HERE</span>
       )}
       {canSpan && (
         <button

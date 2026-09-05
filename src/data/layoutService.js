@@ -1,3 +1,4 @@
+import { isNumberChoiceRange } from '../lib/numberChoiceRange'
 import { supabase } from '../lib/supabase'
 import { applyRecordInsertDefaults } from '../lib/recordInsertDefaults'
 import { parentsFromColumns } from '../lib/parentRelationships'
@@ -976,7 +977,10 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
     layout,
     sections: applyConventionalReadOnly(
       objectName,
-      await applyLookupFilters(objectName, await applyChoiceColumnOptions(objectName, await applyColumnTypeFallbacks(objectName, sectionList))),
+      await applyLookupFilters(objectName,
+        await applyNumberChoiceRanges(objectName,
+          await applyChoiceColumnOptions(objectName,
+            await applyColumnTypeFallbacks(objectName, sectionList)))),
     ),
     actionOverrides,
   }
@@ -1036,6 +1040,64 @@ async function applyChoiceColumnOptions(objectName, sectionList) {
       return { ...f, type: 'select', options: opts }
     })
     w.widget_config = { ...w.widget_config, fields }
+  }
+  return sectionList
+}
+
+/**
+ * Turn a numeric column declared with a RANGE into a real dropdown.
+ *
+ * Nicholas, 2026-09-05: "should the number of stories be a pick list? Not just
+ * a free-form text field also, the year built should also be a pick list."
+ *
+ * The column stays numeric — a year sorts, subtracts and filters as a number,
+ * and half the platform reads building_year_built as one. Only the CONTROL
+ * changes. The range lives in field_metadata.fm_choice_range, so one row
+ * governs the field on every layout that carries it and on any layout built
+ * later, and the year list is derived from today rather than enumerated (see
+ * src/lib/numberChoiceRange.js).
+ *
+ * This runs inside fetchPageLayout, so the record page AND the New-record
+ * pop-up both get the dropdown with no per-screen wiring — the same reason
+ * applyChoiceColumnOptions lives here.
+ *
+ * A failure leaves the field exactly as the layout authored it (a number
+ * input), never an empty dropdown the user cannot get past.
+ */
+async function applyNumberChoiceRanges(objectName, sectionList) {
+  let rows
+  try {
+    const { data, error } = await supabase
+      .from('field_metadata')
+      .select('fm_column, fm_choice_range')
+      .eq('fm_object', objectName)
+      .eq('fm_is_deleted', false)
+      .not('fm_choice_range', 'is', null)
+    if (error) return sectionList
+    rows = data || []
+  } catch { return sectionList }
+  if (!rows.length) return sectionList
+
+  const byCol = new Map(
+    rows.filter(r => isNumberChoiceRange(r.fm_choice_range)).map(r => [r.fm_column, r.fm_choice_range]),
+  )
+  if (byCol.size === 0) return sectionList
+
+  for (const sec of sectionList) {
+    for (const w of sec.widgets || []) {
+      if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
+      let touched = false
+      const fields = w.widget_config.fields.map(f => {
+        // A cross-object (related) field is display-only and reads the parent's
+        // value; it has no editor to replace.
+        if (!f?.name || f.type === 'related_field') return f
+        const range = byCol.get(f.name)
+        if (!range) return f
+        touched = true
+        return { ...f, type: 'number_select', choice_range: range }
+      })
+      if (touched) w.widget_config = { ...w.widget_config, fields }
+    }
   }
   return sectionList
 }
