@@ -228,6 +228,12 @@ column horizontally (Nicholas, PR #549) — the harness records that so nobody
 "fixes" it back.
 
 
+**Shipped 2026-09-05 — A card goes anywhere, as many times as an admin wants: no card is limited to one place on a layout (branch `claude/communication-placement-layouts-a7zgyf`; no schema change):**
+Nicholas, adding Communications to an enrollment layout: *"Why can't I have my communication on the right sidebar of a page layout and in the related list? We went over this before. I should be able to set this up anywhere. This shouldn't be limited just to one area,"* then *"it should go for any objects."*
+- **The palette refused a second Communications, Work Plan or Publish History card** — `onePerLayout` in `src/lib/layoutCards.js`, written 2026-08-27 on the theory that "a record shows one". **The palette alone said so**: the record page draws every widget row it is handed, in the main flow and the rail alike, and the **Copy to…** menu on a placed card never had the gate. The same rule had two answers depending on which button was pressed.
+- **The flag is gone from all three cards, and `availableCards` is decided by the OBJECT alone** — what is already on the canvas never disables a card. A card already placed still shows its *"already on Related, Right sidebar"* badge (`cardPlacements`), so a second placement is a choice made with the facts on screen, never a refusal. The object rules are untouched: Photos still only where a bucket exists, Work Plan only on work orders, Communications only where `conversations` carries a foreign key.
+- Nothing in the database counts cards per layout (`validate_page_layout_widget_config` checks config, not multiplicity; the 2026-09-03 migration's "more than one" assertion was a one-time check of that migration's own seeding). `scripts/layout-cards-fixture.mjs` 64 → 69 checks, pinning that a third Communications card on an enrollment is offered and that no catalog entry carries the flag. **Never reintroduce a one-per-layout rule on a card; if a card genuinely cannot render twice, fix the card.**
+
 **A HOMES payment request invoice reads TOTAL DUE $0.00 BY DESIGN — never "fix" it (Nicholas, 2026-09-03).**
 *"There is no cost. Customers don't pay us anything. The program pays us. This
 invoice is just fake so the customer can see that there's no out-of-pocket cost.
