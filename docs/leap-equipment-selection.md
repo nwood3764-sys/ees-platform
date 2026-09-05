@@ -284,19 +284,103 @@ and `product_ahri_link` already exist for exactly that. If NEEP or AHRI
 subscription data is later licensed, it lands in the *same* columns through the
 *same* importer; the source becomes a field, not a rewrite.
 
-> ⚠️ **Unverified and must be checked first.** This sandbox's network policy
-> blocks `ashp.neep.org`, `neep.org`, `ahridirectory.org` and
-> `data.energystar.gov` outright, so the exact ENERGY STAR column list could
-> **not** be read from the live dataset — only from secondary sources. Before
-> any mapping is designed, one session with network access must pull
-> `GET https://data.energystar.gov/resource/w7cv-9xjt.json?$limit=5` and write
-> the real field names down. Specifically confirm whether it publishes
-> **capacity and COP at 17 °F and 5 °F**, or only 47 °F plus SEER2/HSPF2 — if
-> it is the latter, ENERGY STAR alone cannot answer a cold-climate sizing
-> question and the AHRI subscription becomes necessary rather than optional.
-> **Do not design the importer against remembered field names.** (The repo has
-> already paid for that once: the assistant's pricing table was written from
-> memory and every number in it was wrong.)
+### 3c-bis. VERIFIED against the live dataset, 2026-09-05
+
+The first cut of this plan flagged the ENERGY STAR field list as unverified,
+because this sandbox's network policy blocks `data.energystar.gov`. **It was
+verified anyway — the sandbox is blocked, Postgres is not.** The `http`
+extension on prod calls the Socrata API server-side, the same route the
+assistant self-test uses. Set `http_set_curlopt('CURLOPT_TIMEOUT','30')` in the
+same statement batch; the default 5 s is too short.
+
+**`GET data.energystar.gov/resource/w7cv-9xjt.json` returns 200 and carries
+everything the sizing engine needs.** Real row, verbatim keys:
+
+```
+ahri_reference_number            214602071        <- the join key to AHRI and NEEP
+outdoor_unit_brand_name          1HVAC            energy_star_partner   1HVAC Energy, LLC
+model_number                     ACIQ-12-EHPB     series_name           ACIQ Series
+indoor_unit_model_number         ACIQ-12-AHB      indoor_unit_brand_name
+product_type                     HP - Split System | HP - Mini or Multi Split | HP - Single Package
+cold_climate                     Yes | No         meets_peak_cooling_requirements  Yes
+compressor_staging               Continuously variable
+seer2_btu_wh  17.50   eer2_btu_wh  11.70   hspf2_btu_wh  9.00
+cooling_capacity_btu_h           12000
+heating_capacity_at_47_f_btu_h   13000
+heating_capacity_at_17_f_btu_h   12000
+heating_capacity_at_5_f_btu_h    11000
+cop_at_5_f                       2.60
+refrigerant_with_gwp             R-410A (GWP:2088)
+date_certified  date_available_on_market  markets  meets_most_efficient_criteria
+pd_id  manufacturer_type  energy_star_model_identifier  connected_capability
+```
+
+**Capacity and COP at 17 °F and 5 °F are published.** That was the one finding
+that could have invalidated the phasing and forced a paid AHRI subscription. It
+does not. **§7.1 stands, verified rather than assumed.**
+
+**Mapping onto `products` is close to 1:1** — `heating_capacity_at_47_f_btu_h` →
+`product_heating_capacity_47f`, and so on through `_17f`, `_5f`, `cop_at_5_f` →
+`product_heating_cop_5f`, `cooling_capacity_btu_h` → `product_cooling_capacity_95f`,
+`seer2_btu_wh`/`eer2_btu_wh` → `product_seer2`/`product_eer2`,
+`ahri_reference_number` → `product_ahri_certificate_number`,
+`model_number` → `product_model_number`, `series_name` → `product_series_name`,
+`cold_climate` → `product_energy_star_v6_1_cold_climate`,
+`compressor_staging` → `product_variable_capacity`,
+`product_type` → `product_ducting_configuration`.
+
+**Five real gaps, each of which must be a deliberate decision, not a silent NULL:**
+1. **One `hspf2_btu_wh`, not the Region IV / Region V pair.** LEAP has both
+   columns; this source fills one. Decide which (Region IV is the standard
+   rating) and leave the other explicitly empty rather than duplicating.
+2. **One capacity per temperature, not NEEP's min / rated / max grid.** On the
+   first mini-split sampled, 5 °F capacity (8,000) *exceeds* 47 °F (7,100) —
+   that is a boosted **maximum**, not a rated figure. For sizing this is the
+   right number to check a design heating load against, but it must be **stored
+   and labelled as maximum**, or someone will later average it with a rated
+   value and get a smaller machine than the building needs.
+3. **`refrigerant_with_gwp` is one string** — `R-410A (GWP:2088)`. Parse into
+   refrigerant and GWP; do not store the composite in a picklist.
+4. **`product_ducting_configuration` has no direct field**; `product_type`
+   carries it at three values. LEAP's picklist should be seeded to those three
+   plus whatever the PTHP dataset uses — not invented.
+5. **No PTHP / PTAC in this dataset.** That is a separate ENERGY STAR product
+   list and has not yet been located; multifamily needs it (PRD-00035 "High
+   Efficiency PTAC Replacement" is already a measure). **Find it before Phase 2
+   is scoped as complete.**
+
+### 3c-ter. The row count is 281,975 — and 22 of every 23 rows are the same machine
+
+**This is the single most important number in the plan, and it changes the
+scoping answer.** Measured live:
+
+| Slice | Rows | Distinct outdoor models |
+|---|---|---|
+| Everything | **281,975** | — (279 brands, 281,539 distinct AHRI refs) |
+| `cold_climate = Yes` | **146,238** | **6,662** (+ 8,691 indoor models) |
+| `cold_climate = Yes`, mini/multi split + single package | **15,479** | **5,116** |
+
+**An AHRI reference number is a certified COMBINATION, so a ducted outdoor unit
+appears once per matched indoor coil.** 146,238 cold-climate rows resolve to
+6,662 real outdoor units — **a 22:1 explosion**, and it is almost entirely
+ducted split systems. Ductless barely explodes at all (15,479 rows over 5,116
+models, ~3:1) because a mini-split head has few permutations.
+
+The brand list makes it concrete: the seven largest cold-climate "brands" are
+**Airquest, Tempstar, Arcoaire, Heil, Comfortmaker, Day & Night and Keeprite —
+about 9,030 rows each, ~63,000 rows of rebadges of one manufacturer's line.**
+An auditor choosing between Airquest and Tempstar is choosing between two
+stickers on the same box.
+
+**Which is why the dormant `ahri_certificates` + `ahri_equipment` pair is not
+optional — it is the whole answer to "how do we not drown."**
+- `ahri_certificates` = one row per certified combination.
+- `products` = one row per distinct MODEL — 6,662 outdoor, 8,691 indoor, not 146,238.
+- `ahri_equipment` = the junction, with `ae_equipment_role`.
+
+Writing one product per AHRI row would put 146,000 rows in the catalogue an
+auditor picks from, most of them duplicates. **Do not flatten the combination
+into the product.**
 
 ### 3d. Scraping the NEEP site is not the plan
 
@@ -469,19 +553,24 @@ and a separate session is adding it.** This workstream does not design a
 - Provenance columns on every ingested product, mirroring the HUD ones:
   which dataset, which batch, when refreshed. A capacity figure on a customer
   proposal must be traceable to a source and a date.
-- **Scope by CATEGORY, and do not scope by manufacturer — limit the OFFER
-  instead.** Nicholas raised limiting the import by manufacturer if the full set
-  is a bottleneck. Volume is not the bottleneck: tens of thousands of rows is an
-  ordinary Postgres table and a paged Socrata pull, and it costs nothing to
-  hold. What an auditor must not face is a 40,000-row **list**, and that is
-  Filter 4's job, not the importer's. So ingest the categories broadly, and add
-  a **preferred manufacturer list as DATA an admin edits** (an `is_preferred`
-  flag or an `equipment_preferred_manufacturers` row set) that ranks and
-  optionally restricts what the picker offers. Cutting it at import time is
-  irreversible without a re-import and hides the model a contractor actually
-  proposed. **If the volume genuinely does bite** — a slow first pull, an API
-  page cap — then narrowing the import by manufacturer is the correct fallback,
-  and the preferred list is already the place that decision is recorded.
+- **Scope by CATEGORY first — it does almost all the work.** Cold-climate mini
+  or multi split + single package is **15,479 rows over 5,116 models** (§3c-ter),
+  which is nothing. That one filter takes the multifamily catalogue from 282,000
+  to 15,000 without naming a single brand, and it is principled rather than
+  arbitrary: cold-climate certification is a programme requirement for this work
+  anyway.
+- **A manufacturer list is a legitimate second cut, and it is the right one for
+  DUCTED split systems** — 130,759 cold-climate rows, seven rebadged brands of
+  one manufacturer's line accounting for ~63,000 of them. If EES starts doing
+  ducted retrofits, name the manufacturers; do not ingest 130,000 rows of
+  stickers. **Correcting the first cut of this plan, which argued against
+  manufacturer limiting on the grounds that volume is cheap:** the objection was
+  never storage, and the first cut had the row count wrong by 7x. 22 rows per
+  real machine is noise whatever it costs to store.
+- **Wherever the line is drawn, record it as DATA an admin edits** (an
+  `is_preferred` flag or an `equipment_preferred_manufacturers` row set), not as
+  a constant in an importer — so widening it later is a row, not a deploy, and
+  so the reason a model is absent is answerable.
 - Categories in scope: the three equipment record types that already exist
   (`HEAT-PUMP-EQUIPMENT`, `VENTILATION-EQUIPMENT`, `FURNACE-EQUIPMENT`) plus
   **PTHP**, which multifamily needs and which PRD-00035 "High Efficiency PTAC
@@ -552,12 +641,13 @@ and a separate session is adding it.** This workstream does not design a
 ## 7. Decisions — marked DECIDED with date and owner as they are confirmed
 
 **7.1 — Where does the equipment data come from?**
-**DECIDED 2026-09-05, Nicholas: ENERGY STAR.** Ingest EPA ENERGY STAR open data
+**DECIDED 2026-09-05, Nicholas: ENERGY STAR — and VERIFIED the same day against
+the live dataset (§3c-bis), not assumed.** Ingest EPA ENERGY STAR open data
 (free, documented Socrata API, licensed for reuse), key on the AHRI Certified
 Reference Number, deep-link to NEEP per model for the human. **Not** scraping
-ashp.neep.org. An AHRI Data Subscription is revisited only if the verification
-in §3c shows ENERGY STAR does not publish capacity and COP at 17 °F and 5 °F —
-those two numbers are the whole cold-climate sizing question.
+ashp.neep.org. It **does** publish capacity at 47/17/5 °F and COP at
+5 °F, which was the one finding that could have forced a paid AHRI subscription.
+No subscription is needed.
 
 **7.2 — Where does the design load live?**
 **DECIDED 2026-09-05, Nicholas: on the ASSESSMENT record**, being added by a
@@ -606,11 +696,14 @@ wins (§2c-bis). Log it; do not fold it in.
 → *Yes / no?*
 
 **7.9 — Manufacturer scope on the import.**
-*Recommendation:* **do not cut the import by manufacturer; cut the OFFER.**
-Ingest the categories broadly and add a preferred-manufacturer list as data an
-admin edits, so the auditor's list is short without the catalog being
-incomplete. Narrowing the import stays the fallback if the pull genuinely
-bottlenecks. See Phase 2.
+*Recommendation, revised after measuring the real dataset (§3c-ter):* **cut by
+CATEGORY first, and yes, cut ducted split systems by manufacturer.** Cold-climate
+ductless + single package is 15,479 rows over 5,116 models and needs no brand
+filter at all. Ducted split is 130,759 rows in which seven rebadged brands of one
+manufacturer's line account for ~63,000 — there, Nicholas's instinct to limit by
+manufacturer is correct and this plan's first cut was wrong to push back on it.
+Either way the list is stored as data an admin edits, never as a constant in the
+importer.
 → *Yes / no?*
 
 ## 8. File and DB-table index
