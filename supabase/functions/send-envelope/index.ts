@@ -62,6 +62,10 @@ interface ReqBody {
   message?: string
   env_name?: string
   signing_base_url?: string
+  // Inert since the send moved to send-email-v1 (2026-09-05). No caller has
+  // ever set it, and the recipient reads the document in the signing portal
+  // the link opens, so an attached copy of the unsigned PDF adds nothing.
+  // Kept so an existing caller cannot fail on an unknown key.
   attach_unsigned_pdf?: boolean
 }
 
@@ -204,7 +208,7 @@ Deno.serve(async (req) => {
   const { data: insertedRecips, error: recipErr } = await supabase
     .from("envelope_recipients")
     .insert(recipientRows)
-    .select("id, recipient_order, recipient_signing_token, recipient_name, recipient_email")
+    .select("id, recipient_order, recipient_signing_token, recipient_name, recipient_email, recipient_contact_id")
   if (recipErr || !insertedRecips) {
     await markEnvelopeFailed(supabase, envelopeId, failedStatusId!, callerUserId, `Recipient insert failed: ${recipErr?.message}`)
     return json({ error: `Recipient insert failed: ${recipErr?.message}` }, 500)
@@ -374,7 +378,25 @@ Deno.serve(async (req) => {
     updated_by: callerUserId,
   }).eq("id", envelopeId)
 
-  // ── Send email to recipient #1 via Outlook ────────────────────
+  // ── Email recipient #1 ────────────────────────────────────────
+  //
+  // Through send-email-v1, NOT the per-user Outlook connection this used to
+  // call. Two reasons, both found on 2026-09-05 when a real signing request to
+  // a real address silently went nowhere (ENV-00014):
+  //
+  //   1. send-email-via-graph sends as the CALLER, out of their personal
+  //      user_outlook_connections token. The only connection on this platform
+  //      was four months expired and bound to a retired domain, so the send
+  //      died and the signing request never left the building. A customer
+  //      email must not depend on whether the person who pressed the button
+  //      ever linked their own Outlook.
+  //   2. That path writes email_sends and nothing else. A signature request is
+  //      a message to a customer, so it belongs on the record's Communications
+  //      feed like every other message — which is what send-email-v1 does,
+  //      anchoring the thread through conversation_anchor_columns().
+  //
+  // The mailbox is resolved from the anchor record (the programme's shared,
+  // DKIM-signed box), so the From address is the programme's, not a person's.
   const emailSendResults: any[] = []
   if (firstRecip) {
     const senderName = await getCallerDisplayName(supabase) || "Energy Efficiency Services"
@@ -386,7 +408,11 @@ Deno.serve(async (req) => {
       customMessage: body.message || null,
       signingUrl:    firstRecipUrl,
     })
-    const emailText = renderEmailText({
+    // The plain-text alternative is composed but not sent: send-email-v1 takes
+    // body_html only, as it does for every other customer email on the
+    // platform. Kept and still exercised so the text part is ready the day
+    // send-email-v1 accepts one, rather than being rewritten from scratch.
+    void renderEmailText({
       recipientName: firstRecip.recipient_name,
       senderName,
       templateName:  docName,
@@ -395,36 +421,78 @@ Deno.serve(async (req) => {
     })
 
     try {
-      const sendResp = await fetch(`${supabaseUrl}/functions/v1/send-email-via-graph`, {
+      const sendResp = await fetch(`${supabaseUrl}/functions/v1/send-email-v1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": authHeader },
         body: JSON.stringify({
-          parent_object:    body.parent_object,
-          parent_record_id: body.parent_record_id,
-          recipients_to:    [{ name: firstRecip.recipient_name, email: firstRecip.recipient_email }],
+          // The envelope's own parent IS the thread's Related To record, so the
+          // signing request lands on the same Communications feed as every
+          // other message about that enrollment / project / account.
+          anchor_object:    body.parent_object,
+          anchor_record_id: body.parent_record_id,
+          to: { name: firstRecip.recipient_name, email: firstRecip.recipient_email },
           subject,
           body_html: emailHtml,
-          body_text: emailText,
-          attachment_paths: body.attach_unsigned_pdf
-            ? [{ storage_bucket: SIGNATURES_BUCKET, storage_path: unsignedPath, name: `${docName}.pdf`, content_type: "application/pdf" }]
-            : [],
-          related_envelope_id:  envelopeId,
-          related_recipient_id: firstRecip.id,
+          contact_id: firstRecip.recipient_contact_id || undefined,
         }),
       })
-      const j = await sendResp.json()
+      const j = await sendResp.json().catch(() => ({}))
+      // send-email-v1 answers 200 with {status:"failed", failure_reason} when
+      // Graph rejects the message — the send failed but the REQUEST did not.
+      // Reading only sendResp.ok here would call that a success and reproduce
+      // the exact silent failure this change exists to remove, so the body's
+      // own status is what decides.
+      const ok = sendResp.ok && j.error == null && j.status !== "failed"
       emailSendResults.push({
         recipient_id: firstRecip.id,
         order: 1,
-        status: j.ok ? "sent" : (j.code === "not_connected" ? "not_connected" : "failed"),
-        email_send_id: j.email_send_id || null,
-        failure_reason: j.failure_reason || j.error || null,
+        status: ok ? "sent" : "failed",
+        conversation_id: j.conversation_id || null,
+        message_id: j.message_id || null,
+        failure_reason: ok
+          ? null
+          : (j.failure_reason || j.error || `send-email-v1 returned ${sendResp.status}`),
       })
     } catch (e) {
       emailSendResults.push({
         recipient_id: firstRecip.id, order: 1,
         status: "failed",
         failure_reason: (e as Error).message,
+      })
+    }
+
+    // A signing request that did not reach its recipient must leave a trace.
+    // ENV-00014 failed on 2026-09-05 and the only record of it anywhere was
+    // the absence of an email_sends row: the envelope read "Sent", the Sent
+    // event carried nothing but signing URLs, and the enrollment moved to
+    // "Proposal Signature Requested" on a message that never went out.
+    //
+    // The status deliberately stays Sent — the envelope IS dispatched and its
+    // signing link is live, and resend-envelope-email only accepts Sent or
+    // Delivered, so marking this Failed would strand the one recovery path.
+    // What changes is that the failure is now written down.
+    const emailOutcome = emailSendResults[0]
+    if (emailOutcome && emailOutcome.status !== "sent") {
+      await supabase.from("envelopes").update({
+        env_failure_reason: `Signing email to ${firstRecip.recipient_email} was not sent: ${emailOutcome.failure_reason || "unknown error"}`,
+        updated_by: callerUserId,
+      }).eq("id", envelopeId)
+    }
+    if (eventSentId) {
+      await supabase.from("envelope_events").insert({
+        event_record_number: "",
+        envelope_id: envelopeId,
+        event_record_type: standardEventRtId,
+        event_type: eventSentId,
+        event_metadata: {
+          email_delivery: {
+            recipient_email: firstRecip.recipient_email,
+            status:          emailOutcome?.status || "not_attempted",
+            failure_reason:  emailOutcome?.failure_reason || null,
+            conversation_id: emailOutcome?.conversation_id || null,
+          },
+        },
+        created_by: callerUserId,
       })
     }
   }
