@@ -39,7 +39,6 @@ import { Icon } from './UI'
 import { backdropDismissProps } from '../lib/modalDismiss'
 import { describeOpenRequests } from '../lib/openSignatureRequests'
 import { fetchOpenSignatureRequests, resendSignatureRequest } from '../data/signatureRequestsService'
-import { backdropDismissProps } from '../lib/modalDismiss'
 /**
  * The documents that can be sent for signature, and where each one lives.
  *
