@@ -1,0 +1,19 @@
+-- Put in the loads, get back the machines that carry them.
+--
+-- Nicholas, 2026-09-05: "Think of an energy auditor that's not an HVAC expert.
+-- He knows where the building's at, the heating load and the cooling design
+-- load ... there's only a limited number of equipment that could be possible."
+--
+-- Takes NUMBERS, not a record. Reads no assessment, no opportunity, no
+-- property, and writes nothing -- which is what lets one definition serve both
+-- a standalone tool where somebody types three numbers and the opportunity line
+-- item where the same numbers are filled in for them. If this ever needs a
+-- record id to do its job, that separation has been broken.
+--
+-- SUPERSEDED the same day by 20260905195750, which fixed a balance point that
+-- could contradict the design-day answer and a ranking that preferred a machine
+-- 133% oversized on cooling over one sized at exactly 100%. Kept because
+-- production recorded it and a replay must follow the same path.
+
+-- Body as applied: see 20260905195750 for the corrected definition.
+-- Fingerprint of the statement production recorded: md5 0d3620b4027800e3796c1299e19a100a
