@@ -42,6 +42,24 @@ const INFORMATION = [
   f('assessment_end_time_of_iq_assessment', 'End Time Of Iq Assessment'),
 ]
 
+// A THREE-column section. Two columns is the shape that was reported, but the
+// column model has to hold at every width the platform offers, and a 3-column
+// section is where a flow scatters fields furthest.
+const THREE = [
+  f('t_a', 'Alpha'), f('t_b', 'Bravo'), f('t_c', 'Charlie'),
+  f('t_d', 'Delta'), f('t_e', 'Echo'), f('t_f', 'Foxtrot'),
+  f('t_g', 'Golf'),
+]
+
+// A section carrying a FULL-WIDTH field. That field belongs to no column: it is
+// a row of its own and it splits the section into BANDS, so this is the one
+// shape where "cols independent stacks" would be the wrong answer.
+const BANDS = [
+  f('b_p', 'Papa'), f('b_q', 'Quebec'),
+  { ...f('b_r', 'Romeo'), full_width: true },
+  f('b_s', 'Sierra'), f('b_t', 'Tango'), f('b_u', 'Uniform'),
+]
+
 const OCCUPANCY = [
   f('assessment_building_sq_ft', 'Building Sq Ft'),
   f('assessment_number_of_units', 'Number Of Units'),
@@ -55,6 +73,8 @@ const section = (key, label, columns, fields) => ({
 const INITIAL = [
   section('information', 'Information', 2, INFORMATION),
   section('occupancy', 'Occupancy', 2, OCCUPANCY),
+  section('threecol', 'Three Columns', 3, THREE),
+  section('bands', 'Full Width Band', 2, BANDS),
 ]
 
 function Grid({ testId, section: sec }) {
