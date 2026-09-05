@@ -18,6 +18,13 @@
 // change. The reported drag must still come back a NO-OP there — a check that
 // cannot reproduce the bug is measuring nothing.
 //
+// The reported layout is 2 columns with no full-width field, which is the easy
+// half, so two more shapes are on the page: a THREE-column section (where a
+// flow scatters fields furthest) and a section carrying a FULL-WIDTH field
+// (which belongs to no column — it is a row of its own and splits the section
+// into bands, the one shape where "cols independent stacks" is the wrong
+// answer). Both must move exactly one field too.
+//
 // Run with:  node tools/layout-field-drag-check/run.mjs
 //
 // Not part of `npm run build:safe`: it needs a browser binary, and a deploy
@@ -92,7 +99,7 @@ const note = (ok, label, detail) => {
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
 const browser = await chromium.launch({ executablePath })
-const page = await browser.newPage({ viewport: { width: 1200, height: 1400 } })
+const page = await browser.newPage({ viewport: { width: 1200, height: 2400 } })
 page.on('pageerror', e => console.log('PAGE ERROR', e.message))
 
 // The rendered grid, read off the editor's own markers: one array per row, one
@@ -318,6 +325,74 @@ try {
     note(eq(info.map(r => r[0]).slice(0, 2), ['Name', 'Property Contact for IQ Assessment']),
       'and the column it left closes up behind it',
       JSON.stringify(info.map(r => r[0])))
+  }
+
+  // ── 8. THREE columns — the model is not a two-column special case ───────
+  // A flow scatters a 3-column section further than a 2-column one, so the
+  // shape that was reported is the easy half.
+  await reload()
+  {
+    const before = await page.evaluate(READ, 'live-threecol')
+    note(eq(before.slice(0, 2), [
+      ['Alpha', 'Bravo', 'Charlie'],
+      ['Delta', 'Echo', 'Foxtrot'],
+    ]) && before[2][0] === 'Golf',
+      'a 3-column section renders as three columns', JSON.stringify(before))
+
+    const src = await tileBox('live-threecol', 'Foxtrot')
+    const dst = await tileBox('live-threecol', 'Bravo')
+    await drag(src.handle, dst.centre)
+    const after = await page.evaluate(READ, 'live-threecol')
+    note(eq(after.map(r => r[1]), ['Foxtrot', 'Bravo', 'Echo']),
+      '3 columns: the dragged field takes the position it was dropped on, in that column',
+      JSON.stringify(after))
+    const REAL = (rows, c) => rows.map(r => r[c]).filter(x => x && x !== '—' && x !== 'Empty slot')
+    note(eq(REAL(after, 0), ['Alpha', 'Delta', 'Golf']) && eq(REAL(after, 2), ['Charlie']),
+      '3 columns: the untouched columns hold exactly the fields they held',
+      JSON.stringify(after))
+    note(await page.evaluate(COLUMN_CHANGES, { before, after }) === 1,
+      '3 columns: EXACTLY ONE field changed column',
+      JSON.stringify(await page.evaluate(COLUMN_CHANGES, { before, after })))
+  }
+
+  // ── 9. A FULL-WIDTH field is a row of its own and splits the section ────
+  await reload()
+  {
+    const before = await page.evaluate(READ, 'live-bands')
+    note(eq(before, [
+      ['Papa', 'Quebec'],
+      ['Romeo'],
+      ['Sierra', 'Tango'],
+      ['Uniform', '—'],
+    ]), 'a full-width field renders as a row of its own', JSON.stringify(before))
+
+    const src = await tileBox('live-bands', 'Uniform')
+    const dst = await tileBox('live-bands', 'Tango')
+    await drag(src.handle, dst.centre)
+    const after = await page.evaluate(READ, 'live-bands')
+    note(eq(after[0], ['Papa', 'Quebec']) && eq(after[1], ['Romeo']),
+      'a drag below the full-width row leaves everything above it untouched',
+      JSON.stringify(after))
+    note(await page.evaluate(COLUMN_CHANGES, { before, after }) === 1,
+      'full-width band: EXACTLY ONE field changed column',
+      JSON.stringify(after))
+  }
+
+  // ── 10. The full-width field itself moves as a whole row ────────────────
+  await reload()
+  {
+    const before = await page.evaluate(READ, 'live-bands')
+    const src = await tileBox('live-bands', 'Romeo')
+    const dst = await tileBox('live-bands', 'Papa')
+    await drag(src.handle, dst.centre)
+    const after = await page.evaluate(READ, 'live-bands')
+    const romeoRow = after.findIndex(r => r.includes('Romeo'))
+    note(romeoRow >= 0 && after[romeoRow].length === 1,
+      'the full-width field stays a row of its own after being dragged',
+      JSON.stringify(after))
+    note(await page.evaluate(COLUMN_CHANGES, { before, after }) === 0,
+      'and dragging it changes no other field\'s column',
+      JSON.stringify(after))
   }
 
   await page.screenshot({ path: join(here, 'layout-field-drag.png'), fullPage: true })
