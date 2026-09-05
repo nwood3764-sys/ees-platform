@@ -397,7 +397,10 @@ function guessNameColumn(tableName) {
     products: 'product_name',
     mechanical_equipment: 'me_name',
     efr_reports: 'efr_name',
-    tasks: 'task_name',
+    // A task's name is its subject. There has never been a task_name column;
+    // this mapped to one, so every lookup picker and breadcrumb that resolved a
+    // task through guessNameColumn rendered blank.
+    tasks: 'subject',
     users: 'user_name',
     picklist_values: 'picklist_label',
     service_territories: 'service_territory_name',

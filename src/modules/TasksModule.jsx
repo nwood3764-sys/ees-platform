@@ -6,7 +6,8 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import HelpIcon from '../components/help/HelpIcon'
 import { useToast } from '../components/Toast'
-import { fetchTasks, markTaskComplete, reopenTask } from '../data/tasksService'
+import { fetchTasks, markTaskComplete, reopenTask, fetchTaskPicklists } from '../data/tasksService'
+import NewTaskModal from '../components/NewTaskModal'
 
 // ---------------------------------------------------------------------------
 // TasksModule — global to-do queue surface.
@@ -28,11 +29,14 @@ const CODE_SECTIONS = [
   { id: 'overdue',   label: 'Overdue'    },
 ]
 
-const COLS = [
+// Built from the vocabulary the database holds, not from a literal. The old
+// hardcoded list here disagreed with both the column default ('Task Open') and
+// every writer ('Open'), so a task could carry a status no filter would match.
+const buildCols = (statusOptions) => [
   { field: 'id',              label: 'Task #',          type: 'text',   sortable: true,  filterable: false },
   { field: 'subjectDisplay',  label: 'Subject',         type: 'text',   sortable: true,  filterable: true  },
   { field: 'status',          label: 'Status',          type: 'select', sortable: true,  filterable: true,
-    options: ['Open', 'In Progress', 'Completed', 'Cancelled'] },
+    options: statusOptions },
   { field: 'priorityDisplay', label: 'Priority',        type: 'text',   sortable: true,  filterable: true  },
   { field: 'dueDateDisplay',  label: 'Due',             type: 'text',   sortable: true,  filterable: false },
   { field: 'ownerDisplay',    label: 'Owner',           type: 'text',   sortable: true,  filterable: true  },
@@ -71,6 +75,19 @@ export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigate
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [openedTaskIdLocal, setOpenedTaskIdLocal] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const [statusOptions, setStatusOptions] = useState([])
+
+  // The status vocabulary is read once and shared by the filter and the chips.
+  // An empty list simply means the filter offers no options yet; it never means
+  // a task is hidden, because the rows are not filtered by it client-side.
+  useEffect(() => {
+    let alive = true
+    fetchTaskPicklists()
+      .then(p => { if (alive) setStatusOptions(p.status.map(o => o.value)) })
+      .catch(() => { if (alive) setStatusOptions([]) })
+    return () => { alive = false }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -185,6 +202,14 @@ export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigate
         <div style={{ fontSize: 12, color: C.textMuted }}>
           {rows.length} {rows.length === 1 ? 'task' : 'tasks'}
         </div>
+        <button
+          onClick={() => setCreating(true)}
+          style={{
+            background: C.emerald, color: '#ffffff', border: 'none',
+            borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >New Task</button>
       </div>
 
       <SectionTabs sections={SECTIONS} moduleId="tasks" active={section} onChange={setSection} />
@@ -213,7 +238,7 @@ export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigate
            // (reading 'find')" out of the systemViews.find() line.
            <ListView
              data={shaped}
-             columns={COLS}
+             columns={buildCols(statusOptions)}
              systemViews={systemViews}
              defaultViewId="AV"
              onRefresh={load}
@@ -221,6 +246,17 @@ export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigate
            />
          )}
       </div>
+
+      {creating && (
+        <NewTaskModal
+          onClose={() => setCreating(false)}
+          onCreated={(task) => {
+            setCreating(false)
+            toast.success(`${task.task_record_number || 'Task'} created`)
+            load()
+          }}
+        />
+      )}
     </div>
   )
 }
