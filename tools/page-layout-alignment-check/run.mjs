@@ -120,16 +120,18 @@ const READ_GROUPS = () => {
     if (id.startsWith('editor-')) {
       // The editor draws rows of tiles; read the order and the row breaks off
       // the tiles' own text so the runner can compare it to the record page.
-      const container = group.querySelector('[id], div > div > div') && group.lastElementChild.firstElementChild
-      const rowEls = container ? [...container.children].filter(el => el.style.display === 'flex') : []
+      // Rows and cells are marked, so this reads the editor's OWN structure
+      // rather than guessing at nesting — the grid gained absolutely
+      // positioned insertion lines on 2026-09-05 and a positional reader
+      // silently started reporting every cell as blank.
       out[id] = {
         editor: true,
-        rows: rowEls.map(r => [...r.children].map(cell => {
-          const tile = cell.firstElementChild
-          if (!tile) return '—'
-          if (tile.getAttribute('aria-hidden') === 'true') return '—'
-          return (tile.querySelector('span:nth-child(2)') || tile.querySelector('span')).textContent.trim()
-        })),
+        rows: [...group.querySelectorAll('[data-field-row]')].map(r =>
+          [...r.children].map(cell => {
+            const tile = cell.querySelector('[data-cell-kind]')
+            if (!tile || tile.getAttribute('data-cell-kind') === 'blank') return '—'
+            return tile.getAttribute('data-cell-label') || ''
+          })),
       }
       continue
     }

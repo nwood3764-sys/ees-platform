@@ -97,3 +97,22 @@ export async function removeJunctionRow() { return true }
 export function applyInsertDefaults(_t, draft) { return draft }
 export function getRecordTypeColumn() { return 'ia_record_type' }
 export function getRecordTypeValue(record) { return record?.ia_record_type || null }
+
+// Exports added to layoutService after this stub was first written. A stub that
+// is missing ONE export does not fail loudly — the module simply refuses to
+// load and the harness times out waiting for a heading, which reads like the
+// record page being slow. Keep this list complete; the tool proves nothing
+// otherwise.
+export function getTableColumnPrefix() { return 'ia' }
+export async function fetchPicklistLabelsByIds() { return new Map() }
+export async function fetchDerivationParentForCreate() { return null }
+export async function fetchDerivedChildRecordType() { return null }
+export async function deriveParentsFromForeignKeys() { return [] }
+export async function prefetchTriggerWrittenColumns() { return new Set() }
+export function columnsFilledByTrigger() { return new Set() }
+export async function fetchAccessibleModules() { return null }
+export function moduleAllowed() { return true }
+export async function fetchCanUseViewAs() { return false }
+export async function fetchAllRoles() { return [] }
+export async function fetchModuleAccessForRole() { return [] }
+export function clearUserCache() {}
