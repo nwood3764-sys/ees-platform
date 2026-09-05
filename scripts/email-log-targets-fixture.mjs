@@ -20,7 +20,7 @@
 //
 // Run with:  node scripts/email-log-targets-fixture.mjs
 
-import { CONVERSATION_ANCHORS } from '../src/lib/conversationAnchors.js'
+import { CONVERSATION_ANCHORS, objectCanHoldConversations } from '../src/lib/conversationAnchors.js'
 import { objectLabel, objectLabelPlural } from '../src/lib/objectNav.js'
 
 let checks = 0, failures = 0
@@ -48,9 +48,16 @@ const FROM_THE_DATABASE = [
   ['work_orders',            'Work Order',          'Work Orders'],
 ]
 
-// ─── Every object, not six ───────────────────────────────────────────────────
+// ─── Every object, not six — and since 2026-09-05, not twelve ────────────────
+//
+// list_email_log_objects() now returns every object a thread can be Related
+// To (72 on prod: every record-carrying table with a page layout). The twelve
+// below are the ones with their own column on conversations; the picker
+// offers them AND the sixty-odd others. The client keeps no list of the
+// others at all, so what is pinned here is that the twelve are a subset and
+// that the labels agree.
 
-eq('the add-in can file onto every object a thread can be anchored to',
+eq('the twelve foreign-key-backed objects are exactly the twelve the picker had',
   CONVERSATION_ANCHORS.map(a => a.object).sort(),
   FROM_THE_DATABASE.map(([o]) => o).sort())
 
@@ -82,12 +89,14 @@ eq('an object with no override is humanized from its table name',
   objectLabel('service_appointments'), 'Service Appointment')
 eq('and pluralised from it', objectLabelPlural('work_orders'), 'Work Orders')
 
-// CONTROL — an object no thread can be anchored to must not be in the picker.
-// The database refuses it by name; this pins that the client agrees.
-for (const o of ['work_steps', 'users', 'documents']) {
-  eq(`${o} is not offered as a place to file an email`,
-    CONVERSATION_ANCHORS.some(a => a.object === o), false)
+// CONTROL — the two objects the database refuses by name are refused here
+// too; a work step, refused before 2026-09-05, is offered now.
+for (const o of ['users', 'conversations']) {
+  eq(`${o} is not offered as a place to file an email`, objectCanHoldConversations(o), false)
 }
+eq('a work step is offered as a place to file an email', objectCanHoldConversations('work_steps'), true)
+eq('a work step has no column of its own on conversations',
+  CONVERSATION_ANCHORS.some(a => a.object === 'work_steps'), false)
 
 console.log(failures === 0
   ? `email-log-targets fixture: ${checks} checks passed`

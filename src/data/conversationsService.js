@@ -38,6 +38,9 @@ const CONV_COLUMNS = [
   'conv_last_message_direction',
   'conv_last_message_preview',
   'conv_inbound_unread_count',
+  // Related To — the record the thread belongs to, whatever object it is.
+  'conv_related_object',
+  'conv_related_id',
   ...CONVERSATION_ANCHORS.map(a => a.fk),
 ].join(', ')
 
@@ -71,22 +74,32 @@ const SUPPORTED_FK = new Set(CONVERSATION_ANCHORS.map(a => a.fk))
 
 /**
  * Threads for the parent record, newest activity first.
- * @param {string} fk             FK column on conversations (one of the four)
+ * @param {string|null} fk        The object's own column on conversations, when it has one
  * @param {string} parentId       UUID of the parent record
  * @param {string|null} channelFilter   Optional 'sms' | 'email' to narrow the
  *                                      list to one channel. Null/undefined
  *                                      returns all channels.
+ * @param {string|null} relatedObject   The object the card sits on (Related To);
+ *                                      required when fk is null.
  */
-export async function fetchConversationsForParent(fk, parentId, channelFilter = null) {
-  if (!fk || !parentId) return []
-  if (!SUPPORTED_FK.has(fk)) {
+export async function fetchConversationsForParent(fk, parentId, channelFilter = null, relatedObject = null) {
+  if (!parentId || (!fk && !relatedObject)) return []
+  if (fk && !SUPPORTED_FK.has(fk)) {
     throw new Error(`ConversationPanel: unsupported FK '${fk}'. Expected one of ${[...SUPPORTED_FK].join(', ')}.`)
   }
   let q = supabase
     .from('conversations')
     .select(CONV_COLUMNS)
-    .eq(fk, parentId)
     .eq('conv_is_deleted', false)
+  // A thread belongs to the record when its Related To names it, or — for the
+  // twelve objects with their own column — when that column carries it.
+  if (fk && relatedObject) {
+    q = q.or(`${fk}.eq.${parentId},and(conv_related_object.eq.${relatedObject},conv_related_id.eq.${parentId})`)
+  } else if (fk) {
+    q = q.eq(fk, parentId)
+  } else {
+    q = q.eq('conv_related_object', relatedObject).eq('conv_related_id', parentId)
+  }
   if (channelFilter) {
     q = q.eq('conv_channel', channelFilter)
   }
@@ -166,6 +179,8 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       account_id: conversation.account_id || undefined,
       project_id: conversation.project_id || undefined,
       service_appointment_id: conversation.service_appointment_id || undefined,
+      anchor_object: conversation.conv_related_object || undefined,
+      anchor_record_id: conversation.conv_related_id || undefined,
     }
     requireOutboundApproval({
       channel: 'sms', to: customerPhone,
@@ -287,6 +302,7 @@ export function normalizePhoneE164(raw) {
 export async function sendNewSms({
   toPhone, bodyText,
   accountId = null, contactId = null, projectId = null, serviceAppointmentId = null,
+  anchorObject = null, anchorRecordId = null,
   triggerEvent = 'staff_outbound_sms',
 }) {
   const phone = normalizePhoneE164(toPhone)
@@ -304,6 +320,9 @@ export async function sendNewSms({
       contact_id: contactId || undefined,
       project_id: projectId || undefined,
       service_appointment_id: serviceAppointmentId || undefined,
+      // Related To: the record the text is sent from, whatever object it is.
+      anchor_object: anchorObject || undefined,
+      anchor_record_id: anchorRecordId || undefined,
     },
   })
   if (error) throw new Error(error.message || 'Text failed at the network layer')

@@ -18,6 +18,7 @@ export default function ComposeSmsModal({
   open, onClose, onSent,
   defaultToPhone = null, recipientName = null,
   accountId = null, contactId = null, projectId = null, serviceAppointmentId = null,
+  anchorObject = null, anchorRecordId = null,
 }) {
   const toast = useToast()
   const [toPhone, setToPhone] = useState('')
@@ -48,6 +49,7 @@ export default function ComposeSmsModal({
       const res = await sendNewSms({
         toPhone, bodyText: body,
         accountId, contactId, projectId, serviceAppointmentId,
+        anchorObject, anchorRecordId,
       })
       toast.success(res?.mode === 'mock'
         ? 'Text queued (mock mode — Twilio not configured)'
