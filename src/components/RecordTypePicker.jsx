@@ -18,6 +18,7 @@ import { scopedToState, statesInRecordTypes, needsStateChoice as recordOwesState
   from '../lib/programStateScope'
 import { parentChoiceOutstanding, describeParentOption }
   from '../lib/constrainingParentChoice'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 export default function RecordTypePicker({
   tableName, objectLabel, state = null,
@@ -180,7 +181,7 @@ export default function RecordTypePicker({
 
   return (
     <div
-      onClick={onCancel}
+      {...backdropDismissProps(onCancel)}
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(7, 17, 31, 0.5)',

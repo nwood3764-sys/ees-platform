@@ -29,6 +29,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { useToast, ToastProvider } from '../components/Toast'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -121,9 +122,14 @@ function SigningPortal() {
     if (!consent) { toast.error('Please review and accept the consent statement before signing.'); return }
 
     // Validate every required tab has a value. Treat all tabs as required for now.
+    // Name what is missing rather than counting it: "Please fill all 2 fields"
+    // tells a signer nothing about WHICH box is still empty, and the one they
+    // could not fill was the one they could not see.
     const missing = (data.tabs || []).filter(t => !tabValues[t.id])
     if (missing.length > 0) {
-      toast.error(`Please fill all ${data.tabs.length} field${data.tabs.length === 1 ? '' : 's'} before submitting (${missing.length} remaining).`)
+      const names = [...new Set(missing.map(t => tabLabel(t.type)))].join(', ')
+      toast.error(`Still to complete: ${names}. Click the highlighted box on the document to fill it in.`)
+      setActiveTabId(missing[0].id)
       return
     }
 
@@ -475,60 +481,88 @@ function PdfViewer({ pdfUrl, tabs, tabValues, canFill, activeTabId, onTabClick, 
 // left; CSS positioning has origin at top-left. Conversion:
 //   css.left = pdf.x * scale
 //   css.top  = (pageHeight - pdf.y - pdf.height) * scale
-function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, activeTabId, onTabClick }) {
+export function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, activeTabId, onTabClick }) {
   const [, forceTick] = useState(0)
   // Re-render on layout changes (pages mounting)
   useEffect(() => {
     const t = setTimeout(() => forceTick(n => n + 1), 50)
     return () => clearTimeout(t)
-  }, [pages])
+  }, [pages, tabs])
 
   if (!containerRef.current) return null
   const pageWraps = Array.from(containerRef.current.querySelectorAll('[data-page-number]'))
+
+  // ONE overlay layer per PAGE, holding every marker on that page.
+  //
+  // This used to be one layer per TAB, and that is what made a document
+  // unsignable. Each layer spanned the whole page (`inset: 0`) and turned
+  // pointer events back ON, so the last tab appended sat on top of the entire
+  // page and swallowed every click meant for the tabs beneath it. On a
+  // proposal that is a signature tab and a date tab: the date's layer covered
+  // the signature marker, so clicking Sign hit a transparent div with no
+  // handler and did nothing at all, while the date — the topmost layer's own
+  // child — worked fine. Nicholas, 2026-09-05: "I can't click Sign. I can't do
+  // anything." Two tabs was the minimum to expose it, which is why it survived
+  // single-tab testing.
+  //
+  // The rule now: the LAYER never takes pointer events, only the markers do.
+  // Adding a third tab cannot reintroduce this.
   return (
     <>
-      {(tabs || []).map(t => {
-        const wrap = pageWraps.find(w => Number(w.dataset.pageNumber) === t.page)
+      {pages.map(page => {
+        const wrap = pageWraps.find(w => Number(w.dataset.pageNumber) === page.pageNumber)
         if (!wrap) return null
-        const page = pages.find(p => p.pageNumber === t.page)
-        if (!page) return null
-        const left = t.x * page.scale
-        const top  = (page.pdfHeight - t.y - t.height) * page.scale
-        const w    = t.width * page.scale
-        const h    = t.height * page.scale
-        const filled = !!tabValues[t.id]
-        const active = activeTabId === t.id
-        // Render each marker as a portal-style absolutely-positioned div inside its page wrap
+        const pageTabs = (tabs || []).filter(t => t.page === page.pageNumber)
+        if (pageTabs.length === 0) return null
         return (
-          <Portal key={t.id} target={wrap}>
-            <div
-              onClick={() => canFill && onTabClick(t.id)}
-              style={{
-                position: 'absolute', left, top, width: w, height: h,
-                background: filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(126,179,232,0.30)',
-                border: `2px solid ${active ? C.emerald : (filled ? C.emerald : '#7eb3e8')}`,
-                borderRadius: 4,
-                cursor: canFill ? 'pointer' : 'not-allowed',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: Math.max(10, Math.min(14, h * 0.4)),
-                color: filled ? C.textPrimary : '#1e466b',
-                fontWeight: 600,
-                overflow: 'hidden',
-                userSelect: 'none',
-              }}
-              title={`${tabLabel(t.type)} — ${t.anchor_string}`}
-            >
-              <TabPreview tab={t} value={tabValues[t.id]} />
-            </div>
-          </Portal>
+          <PageOverlay key={page.pageNumber} target={wrap}>
+            {pageTabs.map(t => {
+              const left = t.x * page.scale
+              const top  = (page.pdfHeight - t.y - t.height) * page.scale
+              const w    = t.width * page.scale
+              const h    = t.height * page.scale
+              const filled = !!tabValues[t.id]
+              const active = activeTabId === t.id
+              return (
+                <div
+                  key={t.id}
+                  data-signing-tab={t.id}
+                  data-signing-tab-type={t.type}
+                  onClick={() => canFill && onTabClick(t.id)}
+                  style={{
+                    position: 'absolute', left, top, width: w, height: h,
+                    // The marker is the only thing on this layer that is
+                    // clickable. Never move this onto a wrapper.
+                    pointerEvents: 'auto',
+                    background: filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(126,179,232,0.30)',
+                    border: `2px solid ${active ? C.emerald : (filled ? C.emerald : '#7eb3e8')}`,
+                    borderRadius: 4,
+                    cursor: canFill ? 'pointer' : 'not-allowed',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: Math.max(10, Math.min(14, h * 0.4)),
+                    color: filled ? C.textPrimary : '#1e466b',
+                    fontWeight: 600,
+                    overflow: 'hidden',
+                    userSelect: 'none',
+                  }}
+                  title={`${tabLabel(t.type)} — ${t.anchor_string}`}
+                >
+                  <TabPreview tab={t} value={tabValues[t.id]} />
+                </div>
+              )
+            })}
+          </PageOverlay>
         )
       })}
     </>
   )
 }
 
-// Inline portal helper — places children inside a non-react DOM target
-function Portal({ target, children }) {
+// Places the markers for one page inside that page's (non-React) wrap div.
+// The layer itself is inert — `pointerEvents: 'none'` — so it can cover the
+// whole page without stealing clicks from the canvas or from the markers on
+// any other layer. Only the markers inside turn pointer events back on.
+function PageOverlay({ target, children }) {
   const [container] = useState(() => {
     const div = document.createElement('div')
     div.style.position = 'absolute'
@@ -541,8 +575,7 @@ function Portal({ target, children }) {
     target.appendChild(container)
     return () => { try { target.removeChild(container) } catch {} }
   }, [target, container])
-  // Children inside need pointer events back on
-  return createPortal(<div style={{ position: 'absolute', inset: 0, pointerEvents: 'auto' }}>{children}</div>, container)
+  return createPortal(children, container)
 }
 
 function tabLabel(type) {
@@ -572,7 +605,7 @@ function TabPreview({ tab, value }) {
 function TabEditor({ tab, value, recipientName, onSave, onCancel }) {
   if (!tab) return null
   return (
-    <div onClick={onCancel} style={{
+    <div {...backdropDismissProps(onCancel)} style={{
       position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1000, padding: 12,
@@ -766,7 +799,7 @@ function DeclineConfirm({ open, recipientName, envelopeName, submitting, onCance
 
   if (!open) return null
   return (
-    <div onClick={submitting ? undefined : onCancel} style={{
+    <div {...backdropDismissProps(onCancel, { disabled: submitting })} style={{
       position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1100, padding: 12,

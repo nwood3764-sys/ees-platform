@@ -20,6 +20,7 @@ import {
   fetchTriggerObjects, fetchStatusValues, fetchObjectColumns, fetchObjectDateColumns,
   fetchRoles, fetchEmailTemplates, fetchWorkTypes,
 } from '../../data/flowBuilderService'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 // ───────────────────────────────────────────────────────────────────────────
 // FlowBuilderPane — Setup → Process Automation → Flow Builder
@@ -958,7 +959,7 @@ function Modal({ title, onClose, children }) {
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(13,26,46,0.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-    }} onClick={onClose}>
+    }} {...backdropDismissProps(onClose)}>
       <div style={{
         background: '#fff', borderRadius: 10, padding: 22, width: 'min(560px, 92vw)',
         maxHeight: '88vh', overflowY: 'auto',

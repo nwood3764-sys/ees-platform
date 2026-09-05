@@ -132,7 +132,8 @@ import { toDatetimeLocal, fromDatetimeLocal } from '../lib/datetimeField'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
-import { numberChoiceOptions, parseNumberChoice, formatChoiceNumber } from '../lib/numberChoiceRange'
+import { numberChoiceOptions, parseNumberChoice, formatChoiceNumber, NUMBER_CHOICE_FIELD_TYPE }
+  from '../lib/numberChoiceRange'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
 import { CONVERSATION_ANCHORS } from '../lib/conversationAnchors'
@@ -290,7 +291,7 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     }
     // A number chosen from a declared range (see src/lib/numberChoiceRange.js).
     // Never thousand-separated: 1987 is a year, and `number` renders it "1,987".
-    case 'number_select': return formatChoiceNumber(raw)
+    case NUMBER_CHOICE_FIELD_TYPE: return formatChoiceNumber(raw)
     case 'phone':      return formatUsPhoneDisplay(raw)
     // Formula / rollup / inherited fields are computed at read; format by the
     // field's declared return type (falls back to a sensible numeric/text guess).
@@ -2635,7 +2636,7 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
     // Building, Year Built (Nicholas, 2026-09-05: "should the number of stories
     // be a pick list?"). The column stays numeric and this stores a NUMBER, not
     // the option's string, which is why it is not the `select` editor above.
-    case 'number_select': {
+    case NUMBER_CHOICE_FIELD_TYPE: {
       const opts = numberChoiceOptions(field.choice_range, value) || []
       if (opts.length === 0) {
         // A range that could not be resolved must not become an empty dropdown
@@ -7372,6 +7373,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [signatureSend, setSignatureSend] = useState(null)
   const [hasActiveTemplate, setHasActiveTemplate] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
+  // Which record the data on screen belongs to. A REFRESH of the record you
+  // are already looking at must not blank the page: the full-page "Loading
+  // record…" early-return unmounts everything below it, including any open
+  // modal, and React then remounts that modal with fresh state. That is why
+  // pressing Send on the signature dialog showed the success toast and then
+  // put the compose form back up — the send bumped reloadTick, the page went
+  // to Loading, and the dialog came back not knowing it had already sent.
+  // (Nicholas, 2026-09-05: "I just sent it again, and now I get a 'Send
+  // Proposal' pop-up again... The workflow is not to ask the user to resend
+  // it.") Keyed on identity, not merely on `data` being non-null, so opening a
+  // DIFFERENT record still shows the loader instead of the previous record.
+  const [loadedKey, setLoadedKey] = useState(null)
   // Re-fetch the open record when a background action (today: the LEAP
   // Assistant) commits a change, so an edited field or a newly added related
   // record shows without a manual reload. Skipped while the user is creating or
@@ -7832,7 +7845,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // View mode: fetch everything
       setEditing(false)
       loadRecordDetailData(tableName, recordId)
-        .then(d => { if (!cancelled) setData(d) })
+        .then(d => { if (!cancelled) { setData(d); setLoadedKey(`${tableName}:${recordId}`) } })
         .catch(err => { if (!cancelled) setError(err) })
         .finally(() => { if (!cancelled) setLoading(false) })
     }
@@ -9428,7 +9441,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     )
   }
 
-  if (loading) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading record…</div>
+  if (loading && (isCreate || loadedKey !== `${tableName}:${recordId}`)) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading record…</div>
   if (error) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 24 }}>
       <div style={{ color: '#1a5a8a', fontSize: 14, fontWeight: 600 }}>Error loading record</div>
@@ -10903,7 +10916,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               kind={signatureSend}
               recordId={recordId}
               onClose={() => setSignatureSend(null)}
-              onSent={() => setReloadTick(t => t + 1)}
+              // A send that reached the recipient is finished, so the dialog
+              // closes on it. A send with no email (no Outlook connection)
+              // leaves the dialog open, because the signing URL it shows is
+              // the only copy of the link and closing would throw it away.
+              onSent={(r) => { setReloadTick(t => t + 1); if (r?.emailed) setSignatureSend(null) }}
             />
           </Suspense>
         )}

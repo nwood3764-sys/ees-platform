@@ -30,7 +30,8 @@
     "verify:hear-equipment-signature": "node tools/hear-equipment-signature-check/run.mjs",
     "verify:signing-portal-scroll": "node scripts/verify-signing-portal-scroll.mjs",
     "verify:record-header-flicker": "node tools/record-header-flicker-check/run.mjs",
-    "verify:manual-j-drop": "node tools/manual-j-drop-check/run.mjs"
+    "verify:manual-j-drop": "node tools/manual-j-drop-check/run.mjs",
+    "verify:signing-tab-click": "node tools/signing-tab-click-check/run.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { C } from '../data/constants'
 import { fetchPropertyDetail } from '../data/outreachPropertiesService'
 import RecordLink from './RecordLink'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // ---------------------------------------------------------------------------
 // OutreachPropertyCard.jsx
@@ -134,7 +135,7 @@ export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccoun
   return (
     <>
       {/* backdrop */}
-      <div onClick={onClose} style={{
+      <div {...backdropDismissProps(onClose)} style={{
         position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.42)', zIndex: 1200,
         animation: 'leapFade 180ms ease',
       }} />

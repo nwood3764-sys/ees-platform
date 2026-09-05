@@ -16,6 +16,7 @@ import {
   buttonPrimaryStyle, buttonSecondaryStyle, buttonSmSecondaryStyle, buttonSmDangerStyle,
   hintBoxStyle, dangerBoxStyle,
 } from './adminStyles'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 // ---------------------------------------------------------------------------
 // LayoutsPane — Object Manager > Page Layouts tab.
@@ -421,7 +422,7 @@ function NewLayoutModal({
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
@@ -648,7 +649,7 @@ function RenameLayoutModal({ layout, existingLayouts, onClose, onConfirm }) {
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
@@ -726,7 +727,7 @@ function DeleteLayoutModal({ layout, onClose, onConfirm }) {
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',

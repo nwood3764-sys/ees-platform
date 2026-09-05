@@ -22,6 +22,7 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import { generatedDocumentSpec } from '../data/generatedDocuments'
 import { objectLabel as objectLabelFor } from '../lib/objectNav'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const CARD_SECONDARY = '#f7f9fc'
 
@@ -87,7 +88,7 @@ export default function GeneratedDocumentModal({ recordObject = 'enrollments', r
   const m = result?.model
 
   return (
-    <div style={backdrop} onClick={onClose}>
+    <div style={backdrop} {...backdropDismissProps(onClose)}>
       <div style={panel} onClick={e => e.stopPropagation()}>
         <div style={header}>
           <div style={{ minWidth: 0 }}>

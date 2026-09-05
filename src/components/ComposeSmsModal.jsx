@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
 import { sendNewSms, normalizePhoneE164 } from '../data/conversationsService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const SMS_MAX = 1600
 
@@ -67,7 +68,7 @@ export default function ComposeSmsModal({
   const inp = { width: '100%', padding: '9px 11px', border: `1px solid ${C.borderDark}`, borderRadius: 7, fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', background: '#fff', color: C.textPrimary }
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div {...backdropDismissProps(onClose)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 10, width: 480, maxWidth: '94vw', boxShadow: '0 20px 50px -12px rgba(0,0,0,0.28)', overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>New Text{recipientName ? ` · ${recipientName}` : ''}</div>

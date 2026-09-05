@@ -3,6 +3,7 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useIsMobile } from '../lib/useMediaQuery'
 import OutlookConnectionCard from './OutlookConnectionCard'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // ---------------------------------------------------------------------------
 // IntegrationsModal — user-level integrations management.
@@ -29,7 +30,7 @@ export default function IntegrationsModal({ onClose }) {
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      {...backdropDismissProps(onClose)}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',

@@ -17,6 +17,7 @@ import {
   searchShareableRecords, fetchRecordGrants, grantRecord, revokeRecordGrant,
 } from '../data/programPortalService'
 import { getCurrentUserId } from '../data/layoutService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const OBJECTS = [
   { id: 'assessments', label: 'Assessments' },
@@ -75,7 +76,7 @@ export default function ManageSharedRecordsModal({ portalUserId, portalUserName,
   const tab = (active) => ({ padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', borderRadius: 6, border: `1px solid ${active ? C.emerald : C.border}`, background: active ? '#e8f8f2' : C.card, color: active ? C.emeraldMid : C.textSecondary })
 
   return (
-    <div style={overlay} onClick={onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose)}>
       <div style={panel} onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>Manage Shared Records</div>
