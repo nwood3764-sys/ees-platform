@@ -14,6 +14,7 @@ import {
   fetchEquipment,
 } from '../data/stockService'
 import ModuleHomeByline from '../components/ModuleHomeByline'
+import EquipmentSizingTool from '../components/EquipmentSizingTool'
 
 // ---------------------------------------------------------------------------
 // Section & column definitions
@@ -25,6 +26,7 @@ const CODE_SECTIONS = [
   { id: 'products',  label: 'Product Catalog'   },
   { id: 'requests',  label: 'Materials Requests'},
   { id: 'equipment', label: 'Equipment'         },
+  { id: 'sizing',    label: 'Equipment Sizing'  },
 ]
 
 const INV_COLS = [
@@ -345,7 +347,8 @@ export default function StockModule({ selectedRecord: navSelectedRecord, section
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'      && <StockHome setSec={setSec} products={products} inventory={inventory} requests={requests} equipment={equipment} />}
-        {sec!=='home' && (SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec)?.objectTable) && (
+        {sec==='sizing'    && <EquipmentSizingTool />}
+        {sec!=='home' && sec!=='sizing' && (SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec)?.objectTable) && (
           <ObjectListSection
             key={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
             objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
