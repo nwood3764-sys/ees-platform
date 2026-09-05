@@ -648,15 +648,21 @@ export async function fetchUnmatchedInbox({ status = 'awaiting_triage', limit = 
 }
 
 /**
- * Recent email conversations for the link-picker. Returns the threads on
- * (and immediately around) the same mailbox so coordinators can pick the
- * right target without scrolling 1000 rows.
+ * Recent conversations for the link-picker, on the SAME CHANNEL as the row
+ * being triaged. Returns the threads on (and immediately around) the same
+ * mailbox or number so coordinators can pick the right target without
+ * scrolling 1000 rows.
+ *
+ * The channel is a parameter because `unmatched_inbox` carries text messages
+ * too: an inbound text from a number LEAP does not recognise lands in the
+ * same queue (twilio-inbound, 2026-09-05), and offering it a list of EMAIL
+ * threads to link to would be offering the wrong answer with no way to say so.
  */
-export async function fetchRecentEmailConversations({ ourAddress = null, limit = 50 } = {}) {
+export async function fetchRecentConversationsForTriage({ channel = 'email', ourAddress = null, limit = 50 } = {}) {
   let q = supabase
     .from('conversations')
     .select('id, conv_record_number, conv_subject, conv_customer_address, conv_our_address, conv_last_message_at')
-    .eq('conv_channel', 'email')
+    .eq('conv_channel', channel === 'sms' ? 'sms' : 'email')
     .eq('conv_is_deleted', false)
   if (ourAddress) {
     // strip plus-addressing — the unmatched row's to_address may carry +c_xxx
@@ -674,6 +680,11 @@ export async function fetchRecentEmailConversations({ ourAddress = null, limit =
   const { data, error } = await q
   if (error) throw error
   return data || []
+}
+
+/** Back-compatible alias for the email-only caller this replaced. */
+export async function fetchRecentEmailConversations(opts = {}) {
+  return fetchRecentConversationsForTriage({ ...opts, channel: 'email' })
 }
 
 /**
@@ -1260,4 +1271,20 @@ export function formatBytes(n) {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+// ── Inbound email health ─────────────────────────────────────────────────
+// Whether each shared mailbox is actually receiving into LEAP.
+//
+// The verdict is computed in the database on every call, from evidence — when
+// Microsoft last confirmed the subscription, when it expires, and what mail
+// has actually landed. It is deliberately NOT read out of a stored status
+// column: graph_subscriptions carried gs_status = 'active' with an expiry two
+// months in the past for two months, because the renewal job renewed at
+// Microsoft and never wrote the answer back. A row that cannot change is not
+// a status, and a value like that is what a screen would have shown.
+export async function fetchInboundEmailHealth() {
+  const { data, error } = await supabase.rpc('graph_subscription_health')
+  if (error) throw error
+  return data || []
 }

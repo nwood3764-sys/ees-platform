@@ -36,6 +36,7 @@ import {
   fetchOutboundMailboxesForListView,
 } from '../../data/adminService'
 import UnmatchedInboxPane from './UnmatchedInboxPane'
+import InboundEmailHealthPane from './InboundEmailHealthPane'
 import SeedDataPurgePane from './SeedDataPurgePane'
 import BulkPropertyImportPane from './BulkPropertyImportPane'
 import ClientErrorsPane from './ClientErrorsPane'
@@ -490,6 +491,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager, initialModuleI
     case 'envelopes':         return <NodePage title="Envelopes"               table="envelopes"         fetcher={fetchEnvelopes}         columns={ENV_COLS}            newLabel={null}             onOpenRecord={onOpenRecord} />
     case 'outbound_mailboxes':return <NodePage title="Outbound Mailboxes"      table="outbound_mailboxes" fetcher={fetchOutboundMailboxesForListView} columns={OBM_COLS} newLabel="Outbound Mailbox" onOpenRecord={onOpenRecord} />
     case 'unmatched_inbox':   return <UnmatchedInboxPane />
+    case 'inbound_email_health': return <InboundEmailHealthPane />
     case 'programs':          return <NodePage title="Programs"                table="programs"          fetcher={fetchPrograms}          columns={PROG_COLS}           newLabel="Program"          onOpenRecord={onOpenRecord} />
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />

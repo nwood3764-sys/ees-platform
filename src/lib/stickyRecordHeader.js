@@ -23,26 +23,81 @@
 //      scripts/pinned-header-fixture.mjs fails the build on a sticky style whose
 //      background is not an opaque colour.
 //
-//   2. Condensing is HYSTERETIC. Collapsing the header makes the content below
-//      it shorter, and a single threshold sitting where the collapse happens
-//      leaves the band flipping between its two heights on one scroll gesture.
-//      Condense at CONDENSE_AT, expand again only back at EXPAND_AT, which is
-//      lower — so there is no scroll position at which both are true.
+//   2. Condensing is HYSTERETIC, and the hysteresis has to be WIDER THAN THE
+//      HEIGHT THE BAND GIVES BACK. This is the part that was wrong from
+//      2026-08-29 until 2026-09-05, and it is worth stating precisely because
+//      the original constants read as if they had it covered.
+//
+//      The band is in the flow at the top of the scroll region, so collapsing
+//      it removes its lost height from the content ABOVE the viewport. The
+//      browser's scroll anchoring then keeps what you are looking at still by
+//      SUBTRACTING that same height from scrollTop. So the band's own collapse
+//      moves the very number that decided to collapse it.
+//
+//      Measured in Chromium on the real record page (tools/record-header-flicker-check):
+//      the band is 226px expanded and 91px condensed, so collapsing it hands
+//      back 135px — while the old window between condensing (56) and expanding
+//      (16) was 40px. One wheel-click down from the top read:
+//
+//          0/226  ->  70/226  ->  0/91  ->  0/226  ->  70/226  ->  ...
+//
+//      condense at 70, anchoring drags scrollTop to 0, 0 is below the expand
+//      threshold so it re-expands, which puts scrollTop back over the condense
+//      threshold. Each state is the other's trigger, the record cannot be
+//      scrolled past its own header, and the band strobes (Nicholas,
+//      2026-09-05: "the whole header is just flickering like crazy").
+//
+//      So the condense threshold is DERIVED from the band's measured expanded
+//      height rather than being a constant somebody picked. Condense only once
+//      the record has scrolled further than the header's whole height: collapse
+//      then leaves scrollTop at (condensed height + margin), which is still
+//      above the expand threshold, and re-expanding leaves it below the
+//      condense threshold. There is no fixed point, at any band height, so the
+//      loop is not merely unlikely — it cannot be constructed.
 
 import { C } from '../data/constants.js'
 
-// Scroll depth (px, in the record's own scroll region) at which the header
-// collapses to its one-line form, and the shallower depth at which it opens
-// back up. EXPAND_AT < CONDENSE_AT is the hysteresis — never make them equal.
-export const HEADER_CONDENSE_AT = 56
+// The shallow depth at which the header opens back up. Deliberately small: at
+// the top of a record the masthead is the point.
 export const HEADER_EXPAND_AT = 16
 
-// Should the header be condensed at this scroll depth, given what it is doing
-// right now? Pure — the component holds the boolean, this decides the next one.
-export function shouldCondenseHeader(scrollTop, wasCondensed) {
+// Slack either side of the derived threshold, so a sub-pixel measurement or a
+// fractional scroll offset cannot land exactly on a boundary.
+export const HEADER_CONDENSE_MARGIN = 24
+
+// The floor for the derived threshold — used until the band has been measured,
+// and for a band so short that collapsing it costs nothing.
+export const HEADER_CONDENSE_FLOOR = 56
+
+/**
+ * How far the record must scroll before the header collapses, given the band's
+ * MEASURED expanded height.
+ *
+ * The band gives back at most its whole expanded height when it condenses (it
+ * cannot give back more, since the condensed band is never shorter than
+ * nothing). Setting the threshold above that height guarantees the scroll
+ * position left behind by the collapse is still deeper than HEADER_EXPAND_AT —
+ * which is the whole safety property. Never replace this with a constant.
+ */
+export function condenseThreshold(expandedBandHeight) {
+  const h = Number.isFinite(expandedBandHeight) && expandedBandHeight > 0 ? expandedBandHeight : 0
+  return Math.max(HEADER_CONDENSE_FLOOR, HEADER_EXPAND_AT + h + HEADER_CONDENSE_MARGIN)
+}
+
+/**
+ * Should the header be condensed at this scroll depth, given what it is doing
+ * right now? Pure — the component holds the boolean, this decides the next one.
+ *
+ * `condenseAt` comes from condenseThreshold() with the band's measured height.
+ * It defaults to the floor so an unmeasured band still behaves.
+ */
+export function shouldCondenseHeader(scrollTop, wasCondensed, condenseAt = HEADER_CONDENSE_FLOOR) {
   const top = Number.isFinite(scrollTop) ? scrollTop : 0
+  const at = Number.isFinite(condenseAt)
+    ? Math.max(condenseAt, HEADER_EXPAND_AT + 1)
+    : HEADER_CONDENSE_FLOOR
   if (wasCondensed) return top > HEADER_EXPAND_AT
-  return top >= HEADER_CONDENSE_AT
+  return top >= at
 }
 
 // The pinned band itself. It sits inside the scroll region, so it has to bleed

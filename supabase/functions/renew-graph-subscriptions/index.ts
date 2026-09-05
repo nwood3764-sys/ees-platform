@@ -33,8 +33,18 @@
 //      expirationDateTime set to RENEWAL_TARGET_MINUTES from now.
 //      (Graph caps mail subscriptions at 4230 minutes ≈ 70 hours;
 //      we request 4200 minutes to stay just under.)
-//   4. Returns a summary {mode, total_subscriptions, renewal_window_h,
-//      attempted, succeeded, failed[]} for observability via cron logs.
+//   4. RECONCILES graph_subscriptions against what Graph just returned, by
+//      calling reconcile_graph_subscriptions() with the live list. Until
+//      2026-09-05 this step did not exist: the job renewed at Microsoft and
+//      never wrote the result back, so all three rows sat at gs_status
+//      'active' with an expiry of 2026-07-08 for two months and would have
+//      read exactly the same had the subscription been deleted in July.
+//      The absences matter as much as the presences — a stored subscription
+//      Graph no longer returns is marked 'missing' by name, which is the
+//      state the old code could never reach.
+//   5. Returns a summary {mode, total_subscriptions, renewal_window_h,
+//      attempted, succeeded, failed[], reconciled} for observability via
+//      cron logs and graph_subscription_renewal_runs.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
 
@@ -141,6 +151,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const newExpiration = new Date(now + RENEWAL_TARGET_MINUTES * 60 * 1000).toISOString()
   const failed: Array<{ id: string, resource: string, error: string }> = []
+  const renewedIds = new Set<string>()
   let succeeded = 0
 
   for (const sub of dueForRenewal) {
@@ -159,9 +170,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
         continue
       }
       succeeded++
+      renewedIds.add(sub.id)
     } catch (e) {
       failed.push({ id: sub.id, resource: sub.resource, error: (e as Error).message })
     }
+  }
+
+  // Write down what Graph actually holds, including what it does not. Only a
+  // subscription this run RENEWED gets the new expiry; one that was not due,
+  // or whose PATCH failed, keeps the expiry Graph itself reported. Stamping
+  // the optimistic date on a failed renewal would report health that was
+  // never confirmed, which is the whole defect being fixed here.
+  let reconciled: unknown = null
+  try {
+    const live = subscriptions.map(s => ({
+      id:                 s.id,
+      resource:           s.resource,
+      expirationDateTime: renewedIds.has(s.id) ? newExpiration : s.expirationDateTime,
+      notificationUrl:    s.notificationUrl ?? null,
+    }))
+    const { data, error } = await admin.rpc("reconcile_graph_subscriptions", { p_live: live })
+    if (error) {
+      reconciled = { error: error.message }
+      console.error("renew-graph-subscriptions: reconcile failed", error)
+    } else {
+      reconciled = data
+    }
+  } catch (e) {
+    reconciled = { error: (e as Error).message }
+    console.error("renew-graph-subscriptions: reconcile threw", e)
   }
 
   const summary = {
@@ -172,6 +209,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     attempted: dueForRenewal.length,
     succeeded,
     failed,
+    reconciled,
   }
   await logRun(admin, summary)
   return json(summary, 200)

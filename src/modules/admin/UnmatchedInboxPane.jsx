@@ -1,14 +1,17 @@
 // =============================================================================
 // UnmatchedInboxPane — Communications Module v1 Slice 4
 //
-// Triage queue for inbound emails that fell through all three resolution rules
-// in the inbound-email-webhook (plus-address, In-Reply-To/References, sender→
-// contact→thread). A coordinator works the queue by selecting a row from the
-// left pane, reading the body preview + headers on the right, and either:
+// Triage queue for inbound messages that fell through the automatic
+// resolution rules. For EMAIL that is the inbound-email-webhook's three rules
+// (plus-address token, In-Reply-To/References, sender→contact→thread); for a
+// TEXT it is a message from a number LEAP does not recognise, on no open
+// thread (twilio-inbound, 2026-09-05). A coordinator works the queue by
+// selecting a row from the left pane, reading the body preview + headers on
+// the right, and either:
 //
-//   • Linking to an existing conversation (search the email threads on the
-//     same shared mailbox, pick one, click Link — the message is inserted
-//     onto the thread and the unmatched row is stamped 'linked').
+//   • Linking to an existing conversation (search the threads ON THE SAME
+//     CHANNEL and the same mailbox or number, pick one, click Link — the
+//     message is inserted onto the thread and the row is stamped 'linked').
 //
 //   • Dismissing the row with a reason (spam, internal forward, vendor
 //     correspondence not customer-facing, etc.).
@@ -25,7 +28,7 @@ import HelpIcon from '../../components/help/HelpIcon'
 import { useToast } from '../../components/Toast'
 import {
   fetchUnmatchedInbox,
-  fetchRecentEmailConversations,
+  fetchRecentConversationsForTriage,
   linkUnmatchedToConversation,
   dismissUnmatchedRow,
 } from '../../data/conversationsService'
@@ -118,7 +121,7 @@ export default function UnmatchedInboxPane() {
         </div>
         <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
           {loading ? 'Loading…' :
-            `${rows.length} ${statusFilter ? STATUS_STYLES[statusFilter]?.label?.toLowerCase() : 'total'} row${rows.length === 1 ? '' : 's'} — inbound email that fell through the threading resolution chain. Link to an existing conversation or dismiss.`
+            `${rows.length} ${statusFilter ? STATUS_STYLES[statusFilter]?.label?.toLowerCase() : 'total'} row${rows.length === 1 ? '' : 's'} — inbound email and text that fell through the automatic threading rules. Link to an existing conversation or dismiss.`
           }
         </div>
 
@@ -178,7 +181,7 @@ export default function UnmatchedInboxPane() {
             </div>
             <div>
               {statusFilter === 'awaiting_triage'
-                ? "Every inbound email has been threaded automatically. Nice."
+                ? "Every inbound message has been threaded automatically. Nice."
                 : 'Nothing to show under this filter.'}
             </div>
           </div>
@@ -260,7 +263,7 @@ function UnmatchedRow({ row, selected, onSelect }) {
         fontSize: 12, color: C.textSecondary, marginTop: 2,
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       }}>
-        {row.ui_subject || '(no subject)'}
+        {row.ui_subject || (row.ui_channel === 'sms' ? 'Text message' : '(no subject)')}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
         <span style={{
@@ -292,7 +295,10 @@ function UnmatchedDetail({ row, onActionComplete }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
-            {row.ui_subject || '(no subject)'}
+            {row.ui_subject
+              || (row.ui_channel === 'sms'
+                ? `Text from ${row.ui_from_address || 'an unknown number'}`
+                : '(no subject)')}
           </div>
           <div style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
             {row.ui_record_number}
@@ -441,6 +447,7 @@ function TriageActions({ row, onComplete, toast }) {
 
 // ── Link panel ───────────────────────────────────────────────────────────
 function LinkPanel({ row, toast, onCancel, onLinked }) {
+  const isSms = row.ui_channel === 'sms'
   const [convs, setConvs] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [query, setQuery] = useState('')
@@ -449,11 +456,15 @@ function LinkPanel({ row, toast, onCancel, onLinked }) {
 
   useEffect(() => {
     let alive = true
-    fetchRecentEmailConversations({ ourAddress: row.ui_to_address || null, limit: 50 })
+    fetchRecentConversationsForTriage({
+      channel: row.ui_channel === 'sms' ? 'sms' : 'email',
+      ourAddress: row.ui_to_address || null,
+      limit: 50,
+    })
       .then(d => { if (alive) setConvs(d) })
       .catch(e => { if (alive) setLoadErr(e.message || String(e)) })
     return () => { alive = false }
-  }, [row.ui_to_address])
+  }, [row.ui_to_address, row.ui_channel])
 
   const filtered = useMemo(() => {
     if (!convs) return []
@@ -497,13 +508,14 @@ function LinkPanel({ row, toast, onCancel, onLinked }) {
         Link to an existing conversation
       </div>
       <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
-        Showing email threads on the same shared mailbox, newest activity first.
-        Picking a thread inserts this email onto it as an inbound message.
+        {isSms
+          ? 'Showing text threads on the same number, newest activity first. Picking a thread inserts this text onto it as an inbound message.'
+          : 'Showing email threads on the same shared mailbox, newest activity first. Picking a thread inserts this email onto it as an inbound message.'}
       </div>
 
       <input
         type="text"
-        placeholder="Filter by subject, customer email, or conversation #…"
+        placeholder={isSms ? 'Filter by number or conversation #…' : 'Filter by subject, customer email, or conversation #…'}
         value={query}
         onChange={e => setQuery(e.target.value)}
         disabled={submitting}
@@ -526,7 +538,7 @@ function LinkPanel({ row, toast, onCancel, onLinked }) {
       )}
       {!loadErr && Array.isArray(convs) && convs.length === 0 && (
         <div style={{ fontSize: 12.5, color: C.textMuted, padding: 12, textAlign: 'center' }}>
-          No email conversations on this mailbox yet.
+          {isSms ? 'No text conversations on this number yet.' : 'No email conversations on this mailbox yet.'}
         </div>
       )}
       {!loadErr && filtered.length > 0 && (

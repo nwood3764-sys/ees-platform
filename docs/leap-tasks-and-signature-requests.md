@@ -473,16 +473,28 @@ independent of everything else here.
 
 ## 7. Decisions
 
-**D1 — Is this the Task object, or a new purpose-built Signature Request object?**
-**Recommendation: the Task object, with record types.** LEAP's build discipline
-forbids reusing an artifact built for another purpose — but a task's purpose *is*
-"work assigned to a person," and chasing a signature is work assigned to a
-person. CLAUDE.md already states that every task carries an evidence artifact and
-a verifier; the signed form is that artifact. A separate object would duplicate
-assignment, due dates, ownership, notifications and the communications anchor.
-The specialisation belongs in a **record type** (`Document Signature Request`)
-with its own status set, which is how LEAP expresses exactly this.
-**Status: OPEN — recommendation stated, awaiting confirmation.**
+**D1 — Is this the Task object, or a separate signature capability?**
+**DECIDED 2026-09-05, Nicholas: they are two separate things and must not be
+mixed.** *"I really don't want to mix up two things. When we're talking about
+e-signatures, that's one task: documents that need to be sent for signature, and
+make sure that email is logged in the communications side… Also, the tasks are
+something separate, like someone creates a task, just like Salesforce."*
+
+This **overrides the recommendation this document originally carried**, which was
+to fold the signature request into the Task object as a `Document Signature
+Request` record type. Do not re-derive it. The two workstreams are:
+
+- **E-signature** — a document goes out for signature, and the email carrying it
+  is logged on the record's Communications feed like any other message. It
+  stands on the envelope pipeline and needs no task to exist.
+- **Tasks** — Salesforce-parity assigned work: a person creates a task, assigns
+  it to a user, gives it a due date, and works it. It needs no envelope to
+  exist.
+
+They may later meet — a task whose subject is "chase this signature" can link to
+an envelope — but neither is built out of the other and neither is blocked on the
+other. Read §5 with this split in mind: **Phases 0, 3 and 4 are e-signature;
+Phases 1, 2 and 5 are tasks.**
 
 **D2 — Does an unsatisfied document requirement BLOCK the enrollment, or just
 show as outstanding?** **Recommendation: show it, do not block it — at first.**
