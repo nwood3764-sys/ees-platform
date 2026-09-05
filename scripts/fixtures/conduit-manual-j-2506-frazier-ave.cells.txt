@@ -1,0 +1,680 @@
+1|49~Manual J Report
+1|49~Created by	313~nicholas.wood@energyeciencyservices.org
+1|49~Created	313~July 29, 2026, 9:23 a.m. Eastern Time
+1|49~Last Updated	313~Aug. 6, 2026, 3:11 p.m. Eastern Time
+1|49~Manual J Version	313~8th Edition
+1|49~Name	313~1 Story Handicap End Unit With Basement
+1|49~Address	313~2506 Frazier Ave, Madison, WI 53713, USA
+1|68~Design Conditions
+1|68~Whole Home Load
+1|68~Gas Furnace
+1|87~Zone 1
+1|107~Rooms
+1|68~Cold Climate Heat Pump
+1|87~Zone 1
+1|107~Rooms
+1|68~Unassigned Rooms
+1|68~Building Materials Breakdown
+1|68~Floorplans
+1|49~Design Conditions
+1|73~ASHRAE Weather Station	255~DANE COUNTY REGIONAL AP, WI
+1|73~Elevation	255~878ft
+1|73~Latitude	255~43.047
+1|73~Altitude Correction Factor	255~0.9737
+2|115~Outdoor Dry-	193~Indoor Dry-	264~Temperature	367~Indoor	424~Daily	489~Grains
+2|115~bulb	193~bulb	264~Dierence	367~RH	424~Range	489~Dierence
+2|59~Heating	115~-1F	193~70F	264~71F	367~N/A	424~N/A	489~N/A
+2|59~Cooling	115~87F	193~75F	264~12F	367~50%	424~Medium	489~32
+2|49~WHOLE HOME
+2|49~Load Summary
+2|157~2
+2|73~Total Floor Area (ft )	255~1,881
+2|144~3
+2|73~Total Volume (ft )	255~14,853
+2|73~Ceiling height(s) (ft)	255~8
+2|73~Running length of exposed wall (ft)	255~118
+2|165~2
+2|73~Total glazing area (ft )	255~69
+2|73~Sensible Heat Ratio (SHR)	255~0.872
+2|168~2
+2|73~Exposed wall area (ft ) (gross) - Total	255~1,670
+2|88~N	256~477
+2|88~E	256~467
+2|88~W	256~259
+2|88~S	256~467
+2|168~2
+2|73~Exposed wall area (ft ) (net)	255~1,636
+2|73~Envelope tightness	255~Semi-Loose
+2|73~Appliance Scenario	255~Default Appliance Load
+2|73~Number of occupants	255~3
+3|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+3|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+3|59~Total	231~10,468	337~1,534	426~12,002	521~46,735
+3|59~Walls	238~1,239	357~0	433~1,239	524~15,796
+3|59~Glazing	238~2,470	357~0	433~2,470	529~2,792
+3|59~Doors	257~0	357~0	452~0	548~0
+3|59~Ceilings	238~2,092	357~0	433~2,092	528~6,532
+3|59~Floors	247~471	357~0	442~471	528~8,338
+3|59~Ventilation	257~0	357~0	452~0	548~0
+3|59~Ducts	246~862	338~1,004	433~1,866	528~5,233
+3|59~Infiltration Loss and	246~198	346~331	441~529	529~8,044
+3|59~Gain
+3|59~Blower Heat	239~1,706	357~0	434~1,706	548~0
+3|59~Occupants	246~230	346~200	441~430	548~0
+3|59~Appliances	238~1,200	357~0	433~1,200	548~0
+3|59~Plants	257~0	357~0	452~0	548~0
+3|59~Hot Water Piping	257~0	357~0	452~0	548~0
+3|59~Moisture Migration	257~0	357~0	452~0	548~0
+3|59~Winter Humidification	257~0	357~0	452~0	548~0
+3|49~GAS FURNACE
+3|49~Load Summary
+3|157~2
+3|73~Total Floor Area (ft )	255~908
+3|73~System Type	255~Heating
+3|73~Distribution Type	255~Ducted
+3|73~Ducts	255~Ducts 1
+3|88~Supply Run Location	256~Unconditioned basement or closed crawl
+3|256~space
+3|88~Leakage Class	256~Poor (24 CFM/100 sq ft of supply duct
+3|256~surface area, 47 CFM/100 sq ft for returns)
+3|88~Duct Wall Insulation	256~R-4 (typical of Flexduct)
+3|88~Airway Configuration	256~Trunk and Branch
+4|88~EHLF	256~0.18
+4|88~ESGF	256~0.11
+4|88~ELG	256~1004
+5|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+5|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+5|59~Total	257~0	357~0	452~0	521~16,853
+5|59~Walls	257~0	357~0	452~0	529~4,170
+5|59~Glazing	257~0	357~0	452~0	529~1,396
+5|59~Doors	257~0	357~0	452~0	548~0
+5|59~Ceilings	257~0	357~0	452~0	529~3,160
+5|59~Floors	257~0	357~0	452~0	528~3,282
+5|59~Ventilation	257~0	357~0	452~0	548~0
+5|59~Ducts	257~0	357~0	452~0	529~2,617
+5|59~Infiltration Loss and	257~0	357~0	452~0	529~2,229
+5|59~Gain
+5|59~Blower Heat	257~0	357~0	452~0	548~0
+5|59~Occupants	257~0	357~0	452~0	548~0
+5|59~Appliances	257~0	357~0	452~0	548~0
+5|59~Plants	257~0	357~0	452~0	548~0
+5|59~Hot Water Piping	257~0	357~0	452~0	548~0
+5|59~Moisture Migration	257~0	357~0	452~0	548~0
+5|59~Winter Humidification	257~0	357~0	452~0	548~0
+6|49~GAS FURNACE
+6|49~Zone 1 Load Summary
+6|157~2
+6|73~Total Floor Area (ft )	255~908
+6|366~2
+6|73~Rooms	255~First story - Kitchen (235 ft )
+6|381~2
+6|255~First story - Bedroom 2 (169 ft )
+6|371~2
+6|255~First story - Bathroom (68 ft )
+6|380~2
+6|255~First story - Bedroom 1 (165 ft )
+6|386~2
+6|255~First story - Living Room (271 ft )
+7|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+7|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+7|59~Total	257~0	357~0	452~0	521~16,853
+7|59~Walls	257~0	357~0	452~0	529~4,170
+7|59~Glazing	257~0	357~0	452~0	529~1,396
+7|59~Doors	257~0	357~0	452~0	548~0
+7|59~Ceilings	257~0	357~0	452~0	529~3,160
+7|59~Floors	257~0	357~0	452~0	528~3,282
+7|59~Ventilation	257~0	357~0	452~0	548~0
+7|59~Ducts	257~0	357~0	452~0	529~2,617
+7|59~Infiltration Loss and	257~0	357~0	452~0	529~2,229
+7|59~Gain
+7|59~Blower Heat	257~0	357~0	452~0	548~0
+7|59~Occupants	257~0	357~0	452~0	548~0
+7|59~Appliances	257~0	357~0	452~0	548~0
+7|59~Plants	257~0	357~0	452~0	548~0
+7|59~Hot Water Piping	257~0	357~0	452~0	548~0
+7|59~Moisture Migration	257~0	357~0	452~0	548~0
+7|59~Winter Humidification	257~0	357~0	452~0	548~0
+8|49~GAS FURNACE	127~ZONE 1
+8|121~·
+8|49~Kitchen Load
+8|49~First story
+8|157~2
+8|73~Total Floor Area (ft )	255~235
+8|144~3
+8|73~Total Volume (ft )	255~1,886
+8|73~Ceiling height(s) (ft)	255~8.0
+8|168~2
+8|73~Exposed wall area (ft ) (gross)	255~226
+8|168~2
+8|73~Exposed wall area (ft ) (net)	255~207
+8|165~2
+8|73~Total glazing area (ft )	255~19
+8|73~Design CFM
+8|73~Occupants	255~0
+9|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+9|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+9|59~Total	257~0	357~0	452~0	527~5,484
+9|59~Walls	257~0	357~0	452~0	529~1,428
+9|59~Glazing	257~0	357~0	452~0	537~751
+9|59~Doors	257~0	357~0	452~0	548~0
+9|59~Ceilings	257~0	357~0	452~0	537~818
+9|59~Floors	257~0	357~0	452~0	537~849
+9|59~Ventilation	257~0	357~0	452~0	548~0
+9|59~Ducts	257~0	357~0	452~0	537~852
+9|59~Infiltration Loss and	257~0	357~0	452~0	537~787
+9|59~Gain
+9|59~Blower Heat	257~0	357~0	452~0	548~0
+9|59~Occupants	257~0	357~0	452~0	548~0
+9|59~Appliances	257~0	357~0	452~0	548~0
+9|59~Plants	257~0	357~0	452~0	548~0
+9|59~Hot Water Piping	257~0	357~0	452~0	548~0
+9|59~Moisture Migration	257~0	357~0	452~0	548~0
+9|59~Winter Humidification	257~0	357~0	452~0	548~0
+10|49~GAS FURNACE	127~ZONE 1
+10|121~·
+10|49~Bedroom 2 Load
+10|49~First story
+10|157~2
+10|73~Total Floor Area (ft )	255~169
+10|144~3
+10|73~Total Volume (ft )	255~1,356
+10|73~Ceiling height(s) (ft)	255~8.0
+10|168~2
+10|73~Exposed wall area (ft ) (gross)	255~102
+10|168~2
+10|73~Exposed wall area (ft ) (net)	255~102
+10|165~2
+10|73~Total glazing area (ft )	255~0
+10|73~Design CFM
+10|73~Occupants	255~0
+11|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+11|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+11|59~Total	257~0	357~0	452~0	527~2,676
+11|59~Walls	257~0	357~0	452~0	537~706
+11|59~Glazing	257~0	357~0	452~0	548~0
+11|59~Doors	257~0	357~0	452~0	548~0
+11|59~Ceilings	257~0	357~0	452~0	537~588
+11|59~Floors	257~0	357~0	452~0	537~610
+11|59~Ventilation	257~0	357~0	452~0	548~0
+11|59~Ducts	257~0	357~0	452~0	537~416
+11|59~Infiltration Loss and	257~0	357~0	452~0	537~357
+11|59~Gain
+11|59~Blower Heat	257~0	357~0	452~0	548~0
+11|59~Occupants	257~0	357~0	452~0	548~0
+11|59~Appliances	257~0	357~0	452~0	548~0
+11|59~Plants	257~0	357~0	452~0	548~0
+11|59~Hot Water Piping	257~0	357~0	452~0	548~0
+11|59~Moisture Migration	257~0	357~0	452~0	548~0
+11|59~Winter Humidification	257~0	357~0	452~0	548~0
+12|49~GAS FURNACE	127~ZONE 1
+12|121~·
+12|49~Bathroom Load
+12|49~First story
+12|157~2
+12|73~Total Floor Area (ft )	255~68
+12|144~3
+12|73~Total Volume (ft )	255~544
+12|73~Ceiling height(s) (ft)	255~8.0
+12|168~2
+12|73~Exposed wall area (ft ) (gross)	255~39
+12|168~2
+12|73~Exposed wall area (ft ) (net)	255~39
+12|165~2
+12|73~Total glazing area (ft )	255~0
+12|73~Design CFM
+12|73~Occupants	255~0
+13|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+13|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+13|59~Total	257~0	357~0	452~0	527~1,046
+13|59~Walls	257~0	357~0	452~0	537~268
+13|59~Glazing	257~0	357~0	452~0	548~0
+13|59~Doors	257~0	357~0	452~0	548~0
+13|59~Ceilings	257~0	357~0	452~0	537~236
+13|59~Floors	257~0	357~0	452~0	537~245
+13|59~Ventilation	257~0	357~0	452~0	548~0
+13|59~Ducts	257~0	357~0	452~0	537~162
+13|59~Infiltration Loss and	257~0	357~0	452~0	537~135
+13|59~Gain
+13|59~Blower Heat	257~0	357~0	452~0	548~0
+13|59~Occupants	257~0	357~0	452~0	548~0
+13|59~Appliances	257~0	357~0	452~0	548~0
+13|59~Plants	257~0	357~0	452~0	548~0
+13|59~Hot Water Piping	257~0	357~0	452~0	548~0
+13|59~Moisture Migration	257~0	357~0	452~0	548~0
+13|59~Winter Humidification	257~0	357~0	452~0	548~0
+14|49~GAS FURNACE	127~ZONE 1
+14|121~·
+14|49~Bedroom 1 Load
+14|49~First story
+14|157~2
+14|73~Total Floor Area (ft )	255~165
+14|144~3
+14|73~Total Volume (ft )	255~1,325
+14|73~Ceiling height(s) (ft)	255~8.0
+14|168~2
+14|73~Exposed wall area (ft ) (gross)	255~210
+14|168~2
+14|73~Exposed wall area (ft ) (net)	255~194
+14|165~2
+14|73~Total glazing area (ft )	255~16
+14|73~Design CFM
+14|73~Occupants	255~0
+15|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+15|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+15|59~Total	257~0	357~0	452~0	527~4,601
+15|59~Walls	257~0	357~0	452~0	529~1,338
+15|59~Glazing	257~0	357~0	452~0	537~645
+15|59~Doors	257~0	357~0	452~0	548~0
+15|59~Ceilings	257~0	357~0	452~0	537~574
+15|59~Floors	257~0	357~0	452~0	537~597
+15|59~Ventilation	257~0	357~0	452~0	548~0
+15|59~Ducts	257~0	357~0	452~0	537~714
+15|59~Infiltration Loss and	257~0	357~0	452~0	537~732
+15|59~Gain
+15|59~Blower Heat	257~0	357~0	452~0	548~0
+15|59~Occupants	257~0	357~0	452~0	548~0
+15|59~Appliances	257~0	357~0	452~0	548~0
+15|59~Plants	257~0	357~0	452~0	548~0
+15|59~Hot Water Piping	257~0	357~0	452~0	548~0
+15|59~Moisture Migration	257~0	357~0	452~0	548~0
+15|59~Winter Humidification	257~0	357~0	452~0	548~0
+16|49~GAS FURNACE	127~ZONE 1
+16|121~·
+16|49~Living Room Load
+16|49~First story
+16|157~2
+16|73~Total Floor Area (ft )	255~271
+16|144~3
+16|73~Total Volume (ft )	255~2,177
+16|73~Ceiling height(s) (ft)	255~8.0
+16|168~2
+16|73~Exposed wall area (ft ) (gross)	255~63
+16|168~2
+16|73~Exposed wall area (ft ) (net)	255~63
+16|165~2
+16|73~Total glazing area (ft )	255~0
+16|73~Design CFM
+16|73~Occupants	255~1
+17|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+17|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+17|59~Total	257~0	357~0	452~0	527~3,046
+17|59~Walls	257~0	357~0	452~0	537~431
+17|59~Glazing	257~0	357~0	452~0	548~0
+17|59~Doors	257~0	357~0	452~0	548~0
+17|59~Ceilings	257~0	357~0	452~0	537~944
+17|59~Floors	257~0	357~0	452~0	537~980
+17|59~Ventilation	257~0	357~0	452~0	548~0
+17|59~Ducts	257~0	357~0	452~0	537~473
+17|59~Infiltration Loss and	257~0	357~0	452~0	537~218
+17|59~Gain
+17|59~Blower Heat	257~0	357~0	452~0	548~0
+17|59~Occupants	257~0	357~0	452~0	548~0
+17|59~Appliances	257~0	357~0	452~0	548~0
+17|59~Plants	257~0	357~0	452~0	548~0
+17|59~Hot Water Piping	257~0	357~0	452~0	548~0
+17|59~Moisture Migration	257~0	357~0	452~0	548~0
+17|59~Winter Humidification	257~0	357~0	452~0	548~0
+18|49~COLD CLIMATE HEAT PUMP
+18|49~Load Summary
+18|157~2
+18|73~Total Floor Area (ft )	255~908
+18|73~System Type	255~Heating and Cooling
+18|73~Distribution Type	255~Ducted
+18|73~Ducts	255~Ducts 1
+18|88~Supply Run Location	256~Unconditioned basement or closed crawl
+18|256~space
+18|88~Leakage Class	256~Poor (24 CFM/100 sq ft of supply duct
+18|256~surface area, 47 CFM/100 sq ft for returns)
+18|88~Duct Wall Insulation	256~R-4 (typical of Flexduct)
+18|88~Airway Configuration	256~Trunk and Branch
+18|88~EHLF	256~0.18
+18|88~ESGF	256~0.11
+18|88~ELG	256~1004
+19|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+19|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+19|59~Total	231~10,468	337~1,534	426~12,002	521~16,853
+19|59~Walls	238~1,239	357~0	433~1,239	529~4,170
+19|59~Glazing	238~2,470	357~0	433~2,470	529~1,396
+19|59~Doors	257~0	357~0	452~0	548~0
+19|59~Ceilings	238~2,092	357~0	433~2,092	529~3,160
+19|59~Floors	247~471	357~0	442~471	528~3,282
+19|59~Ventilation	257~0	357~0	452~0	548~0
+19|59~Ducts	246~862	338~1,004	433~1,866	529~2,617
+19|59~Infiltration Loss and	246~198	346~331	441~529	529~2,229
+19|59~Gain
+19|59~Blower Heat	239~1,706	357~0	434~1,706	548~0
+19|59~Occupants	246~230	346~200	441~430	548~0
+19|59~Appliances	238~1,200	357~0	433~1,200	548~0
+19|59~Plants	257~0	357~0	452~0	548~0
+19|59~Hot Water Piping	257~0	357~0	452~0	548~0
+19|59~Moisture Migration	257~0	357~0	452~0	548~0
+19|59~Winter Humidification	257~0	357~0	452~0	548~0
+20|49~COLD CLIMATE HEAT PUMP
+20|49~Zone 1 Load Summary
+20|157~2
+20|73~Total Floor Area (ft )	255~908
+20|381~2
+20|73~Rooms	255~First story - Bedroom 2 (169 ft )
+20|371~2
+20|255~First story - Bathroom (68 ft )
+20|380~2
+20|255~First story - Bedroom 1 (165 ft )
+20|386~2
+20|255~First story - Living Room (271 ft )
+20|366~2
+20|255~First story - Kitchen (235 ft )
+21|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+21|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+21|59~Total	237~8,762	337~1,534	426~10,296	521~16,853
+21|59~Walls	238~1,239	357~0	433~1,239	529~4,170
+21|59~Glazing	238~2,470	357~0	433~2,470	529~1,396
+21|59~Doors	257~0	357~0	452~0	548~0
+21|59~Ceilings	238~2,092	357~0	433~2,092	529~3,160
+21|59~Floors	247~471	357~0	442~471	528~3,282
+21|59~Ventilation	257~0	357~0	452~0	548~0
+21|59~Ducts	246~862	338~1,004	433~1,866	529~2,617
+21|59~Infiltration Loss and	246~198	346~331	441~529	529~2,229
+21|59~Gain
+21|59~Blower Heat	257~0	357~0	452~0	548~0
+21|59~Occupants	246~230	346~200	441~430	548~0
+21|59~Appliances	238~1,200	357~0	433~1,200	548~0
+21|59~Plants	257~0	357~0	452~0	548~0
+21|59~Hot Water Piping	257~0	357~0	452~0	548~0
+21|59~Moisture Migration	257~0	357~0	452~0	548~0
+21|59~Winter Humidification	257~0	357~0	452~0	548~0
+22|49~COLD CLIMATE HEAT PUMP	185~ZONE 1
+22|178~·
+22|49~Bedroom 2 Load
+22|49~First story
+22|157~2
+22|73~Total Floor Area (ft )	255~169
+22|144~3
+22|73~Total Volume (ft )	255~1,356
+22|73~Ceiling height(s) (ft)	255~8.0
+22|168~2
+22|73~Exposed wall area (ft ) (gross)	255~102
+22|168~2
+22|73~Exposed wall area (ft ) (net)	255~102
+22|165~2
+22|73~Total glazing area (ft )	255~0
+22|73~Design CFM
+22|73~Occupants	255~0
+23|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+23|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+23|59~Total	245~796	345~144	440~941	527~2,676
+23|59~Walls	247~210	357~0	442~210	537~706
+23|59~Glazing	257~0	357~0	452~0	548~0
+23|59~Doors	257~0	357~0	452~0	548~0
+23|59~Ceilings	246~389	357~0	441~389	537~588
+23|59~Floors	251~88	357~0	447~88	537~610
+23|59~Ventilation	257~0	357~0	452~0	548~0
+23|59~Ducts	252~78	352~91	442~170	537~416
+23|59~Infiltration Loss and	252~32	351~53	447~85	537~357
+23|59~Gain
+23|59~Blower Heat	257~0	357~0	452~0	548~0
+23|59~Occupants	257~0	357~0	452~0	548~0
+23|59~Appliances	257~0	357~0	452~0	548~0
+23|59~Plants	257~0	357~0	452~0	548~0
+23|59~Hot Water Piping	257~0	357~0	452~0	548~0
+23|59~Moisture Migration	257~0	357~0	452~0	548~0
+23|59~Winter Humidification	257~0	357~0	452~0	548~0
+24|49~COLD CLIMATE HEAT PUMP	185~ZONE 1
+24|178~·
+24|49~Bathroom Load
+24|49~First story
+24|157~2
+24|73~Total Floor Area (ft )	255~68
+24|144~3
+24|73~Total Volume (ft )	255~544
+24|73~Ceiling height(s) (ft)	255~8.0
+24|168~2
+24|73~Exposed wall area (ft ) (gross)	255~39
+24|168~2
+24|73~Exposed wall area (ft ) (net)	255~39
+24|165~2
+24|73~Total glazing area (ft )	255~0
+24|73~Design CFM
+24|73~Occupants	255~0
+25|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+25|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+25|59~Total	245~314	351~56	440~370	527~1,046
+25|59~Walls	251~80	357~0	447~80	537~268
+25|59~Glazing	257~0	357~0	452~0	548~0
+25|59~Doors	257~0	357~0	452~0	548~0
+25|59~Ceilings	246~156	357~0	442~156	537~236
+25|59~Floors	252~35	357~0	447~35	537~245
+25|59~Ventilation	257~0	357~0	452~0	548~0
+25|59~Ducts	252~31	351~36	447~67	537~162
+25|59~Infiltration Loss and	252~12	352~20	447~32	537~135
+25|59~Gain
+25|59~Blower Heat	257~0	357~0	452~0	548~0
+25|59~Occupants	257~0	357~0	452~0	548~0
+25|59~Appliances	257~0	357~0	452~0	548~0
+25|59~Plants	257~0	357~0	452~0	548~0
+25|59~Hot Water Piping	257~0	357~0	452~0	548~0
+25|59~Moisture Migration	257~0	357~0	452~0	548~0
+25|59~Winter Humidification	257~0	357~0	452~0	548~0
+26|49~COLD CLIMATE HEAT PUMP	185~ZONE 1
+26|178~·
+26|49~Bedroom 1 Load
+26|49~First story
+26|157~2
+26|73~Total Floor Area (ft )	255~165
+26|144~3
+26|73~Total Volume (ft )	255~1,325
+26|73~Ceiling height(s) (ft)	255~8.0
+26|168~2
+26|73~Exposed wall area (ft ) (gross)	255~210
+26|168~2
+26|73~Exposed wall area (ft ) (net)	255~194
+26|165~2
+26|73~Total glazing area (ft )	255~16
+26|73~Design CFM
+26|73~Occupants	255~0
+27|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+27|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+27|59~Total	237~2,296	345~372	432~2,667	527~4,601
+27|59~Walls	246~398	357~0	441~398	529~1,338
+27|59~Glazing	239~1,141	357~0	435~1,141	537~645
+27|59~Doors	257~0	357~0	452~0	548~0
+27|59~Ceilings	246~380	357~0	441~380	537~574
+27|59~Floors	251~86	357~0	447~86	537~597
+27|59~Ventilation	257~0	357~0	452~0	548~0
+27|59~Ducts	246~226	346~263	441~489	537~714
+27|59~Infiltration Loss and	252~65	346~109	442~174	537~732
+27|59~Gain
+27|59~Blower Heat	257~0	357~0	452~0	548~0
+27|59~Occupants	257~0	357~0	452~0	548~0
+27|59~Appliances	257~0	357~0	452~0	548~0
+27|59~Plants	257~0	357~0	452~0	548~0
+27|59~Hot Water Piping	257~0	357~0	452~0	548~0
+27|59~Moisture Migration	257~0	357~0	452~0	548~0
+27|59~Winter Humidification	257~0	357~0	452~0	548~0
+28|49~COLD CLIMATE HEAT PUMP	185~ZONE 1
+28|178~·
+28|49~Living Room Load
+28|49~First story
+28|157~2
+28|73~Total Floor Area (ft )	255~271
+28|144~3
+28|73~Total Volume (ft )	255~2,177
+28|73~Ceiling height(s) (ft)	255~8.0
+28|168~2
+28|73~Exposed wall area (ft ) (gross)	255~63
+28|168~2
+28|73~Exposed wall area (ft ) (net)	255~63
+28|165~2
+28|73~Total glazing area (ft )	255~0
+28|73~Design CFM
+28|73~Occupants	255~1
+29|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+29|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+29|59~Total	237~1,268	345~378	432~1,645	527~3,046
+29|59~Walls	247~128	357~0	442~128	537~431
+29|59~Glazing	257~0	357~0	452~0	548~0
+29|59~Doors	257~0	357~0	452~0	548~0
+29|59~Ceilings	246~625	357~0	441~625	537~944
+29|59~Floors	247~141	357~0	442~141	537~980
+29|59~Ventilation	257~0	357~0	452~0	548~0
+29|59~Ducts	247~125	347~145	441~270	537~473
+29|59~Infiltration Loss and	252~19	352~32	447~52	537~218
+29|59~Gain
+29|59~Blower Heat	257~0	357~0	452~0	548~0
+29|59~Occupants	246~230	346~200	441~430	548~0
+29|59~Appliances	257~0	357~0	452~0	548~0
+29|59~Plants	257~0	357~0	452~0	548~0
+29|59~Hot Water Piping	257~0	357~0	452~0	548~0
+29|59~Moisture Migration	257~0	357~0	452~0	548~0
+29|59~Winter Humidification	257~0	357~0	452~0	548~0
+30|49~COLD CLIMATE HEAT PUMP	185~ZONE 1
+30|178~·
+30|49~Kitchen Load
+30|49~First story
+30|157~2
+30|73~Total Floor Area (ft )	255~235
+30|144~3
+30|73~Total Volume (ft )	255~1,886
+30|73~Ceiling height(s) (ft)	255~8.0
+30|168~2
+30|73~Exposed wall area (ft ) (gross)	255~226
+30|168~2
+30|73~Exposed wall area (ft ) (net)	255~207
+30|165~2
+30|73~Total glazing area (ft )	255~19
+30|73~Design CFM
+30|73~Occupants	255~0
+31|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+31|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+31|59~Total	237~4,088	345~585	432~4,673	527~5,484
+31|59~Walls	246~424	357~0	441~424	529~1,428
+31|59~Glazing	238~1,328	357~0	433~1,328	537~751
+31|59~Doors	257~0	357~0	452~0	548~0
+31|59~Ceilings	247~541	357~0	442~541	537~818
+31|59~Floors	247~122	357~0	442~122	537~849
+31|59~Ventilation	257~0	357~0	452~0	548~0
+31|59~Ducts	246~402	346~468	442~871	537~852
+31|59~Infiltration Loss and	252~70	347~117	442~187	537~787
+31|59~Gain
+31|59~Blower Heat	257~0	357~0	452~0	548~0
+31|59~Occupants	257~0	357~0	452~0	548~0
+31|59~Appliances	238~1,200	357~0	433~1,200	548~0
+31|59~Plants	257~0	357~0	452~0	548~0
+31|59~Hot Water Piping	257~0	357~0	452~0	548~0
+31|59~Moisture Migration	257~0	357~0	452~0	548~0
+31|59~Winter Humidification	257~0	357~0	452~0	548~0
+32|49~UNASSIGNED
+32|49~Stairwell To Basement Load
+32|49~First story
+32|157~2
+32|73~Total Floor Area (ft )	255~61
+32|144~3
+32|73~Total Volume (ft )	255~489
+32|73~Ceiling height(s) (ft)	255~8.0
+32|168~2
+32|73~Exposed wall area (ft ) (gross)	255~111
+32|168~2
+32|73~Exposed wall area (ft ) (net)	255~111
+32|165~2
+32|73~Total glazing area (ft )	255~0
+32|73~Design CFM
+32|73~Occupants	255~0
+33|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+33|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+33|59~Total	257~0	357~0	452~0	527~1,581
+33|59~Walls	257~0	357~0	452~0	537~763
+33|59~Glazing	257~0	357~0	452~0	548~0
+33|59~Doors	257~0	357~0	452~0	548~0
+33|59~Ceilings	257~0	357~0	452~0	537~212
+33|59~Floors	257~0	357~0	452~0	537~220
+33|59~Ventilation	257~0	357~0	452~0	548~0
+33|59~Ducts	257~0	357~0	452~0	548~0
+33|59~Infiltration Loss and	257~0	357~0	452~0	537~386
+33|59~Gain
+33|59~Blower Heat	257~0	357~0	452~0	548~0
+33|59~Occupants	257~0	357~0	452~0	548~0
+33|59~Appliances	257~0	357~0	452~0	548~0
+33|59~Plants	257~0	357~0	452~0	548~0
+33|59~Hot Water Piping	257~0	357~0	452~0	548~0
+33|59~Moisture Migration	257~0	357~0	452~0	548~0
+33|59~Winter Humidification	257~0	357~0	452~0	548~0
+34|49~UNASSIGNED
+34|49~Basement Load
+34|49~Basement
+34|157~2
+34|73~Total Floor Area (ft )	255~912
+34|144~3
+34|73~Total Volume (ft )	255~7,076
+34|73~Ceiling height(s) (ft)	255~7.8
+34|168~2
+34|73~Exposed wall area (ft ) (gross)	255~919
+34|168~2
+34|73~Exposed wall area (ft ) (net)	255~919
+34|165~2
+34|73~Total glazing area (ft )	255~0
+34|73~Design CFM
+34|73~Occupants	255~2
+35|185~Sensible Cooling	296~Latent Cooling	397~Total Cooling	493~Total Heating
+35|235~BTUH	335~BTUH	430~BTUH	526~BTUH
+35|59~Total	257~0	357~0	452~0	521~11,447
+35|59~Walls	257~0	357~0	452~0	528~6,693
+35|59~Glazing	257~0	357~0	452~0	548~0
+35|59~Doors	257~0	357~0	452~0	548~0
+35|59~Ceilings	257~0	357~0	452~0	548~0
+35|59~Floors	257~0	357~0	452~0	529~1,554
+35|59~Ventilation	257~0	357~0	452~0	548~0
+35|59~Ducts	257~0	357~0	452~0	548~0
+35|59~Infiltration Loss and	257~0	357~0	452~0	529~3,201
+35|59~Gain
+35|59~Blower Heat	257~0	357~0	452~0	548~0
+35|59~Occupants	257~0	357~0	452~0	548~0
+35|59~Appliances	257~0	357~0	452~0	548~0
+35|59~Plants	257~0	357~0	452~0	548~0
+35|59~Hot Water Piping	257~0	357~0	452~0	548~0
+35|59~Moisture Migration	257~0	357~0	452~0	548~0
+35|59~Winter Humidification	257~0	357~0	452~0	548~0
+36|49~Building Materials Breakdown
+36|59~Construction	151~Construction	246~Orientation (if	347~Area	400~Cooling	466~Heating	543~U-
+36|361~2
+36|59~Type	151~Number	246~applicable)	351~(ft )	408~BTUH	475~BTUH	527~Value
+36|59~Above-Grade	151~12B-0s w	353~716	411~1,466	478~4,933	529~0.097
+36|59~Wall
+36|70~↳ Wall configuration: Exterior, Wall Type: Above-Grade, Primary Structure: Frame Walls, Framing Material: Wood,
+36|70~Frame Construction: 2x4, Cavity Insulation: R-11, Exterior Finish: Stucco or Siding
+36|59~Above-Grade	151~15B0-0-x	363~0	430~0	497~0	529~0.488
+36|59~Wall
+36|70~↳ Wall configuration: Exterior, Wall Type: Basement, Primary Structure: 8" Brick, Stone, or Concrete
+36|59~Above-Grade	151~15B0-4sf-x	353~157	419~251	478~1,834	529~0.165
+36|59~Wall
+36|70~↳ Wall configuration: Exterior, Wall Type: Basement, Primary Structure: 8" Brick, Stone, or Concrete, Board
+36|70~Insulation: R-4, Insulation Depth: Sill to Floor
+36|59~Below-Grade	151~15B0-0-x	352~229	478~1,904	530~0.117
+36|59~Wall
+36|70~↳ Wall configuration: Exterior, Wall Type: Basement, Primary Structure: 8" Brick, Stone, or Concrete
+36|59~Below-Grade	151~15B0-4sf-x	352~533	478~2,954	529~0.078
+36|59~Wall
+36|70~↳ Wall configuration: Exterior, Wall Type: Basement, Primary Structure: 8" Brick, Stone, or Concrete, Board
+36|70~Insulation: R-4, Insulation Depth: Sill to Floor
+36|59~Door	151~11D	363~0	530~None
+36|70~↳ None
+36|59~Floor	151~19A-11p	352~969	419~502	478~3,502	529~0.073
+36|70~↳ Floor type: Floor over enclosed unconditioned crawl space or basement, Radiant floor heat: No, Floor insulation:
+36|70~R-11 blanket
+36|59~Floor	151~21A	353~912	430~0	478~1,554	529~0.024
+36|70~↳ Floor type: Basement floor, Width of Shortest Side of Floor Slab (Ft): Unknown
+36|59~Ceiling	151~16B-19 ad	352~969	411~2,232	478~3,372	529~0.049
+36|70~↳ Ceiling type: Ceiling under attic or attic knee wall, Attic ventilation: FHA vented, Attic fan: No, Radiant barrier: No,
+36|70~Roofing material: Asphalt shingles, Roof color: Dark, R-value: R-19
+36|59~Window	151~1D-c	246~N	363~0	530~None
+36|59~Window	151~1D-c	246~E	358~34	411~1,204	478~1,396	534~0.57
+36|59~Window	151~1D-c	246~W	363~0	530~None
+37|59~Construction	151~Construction	246~Orientation (if	347~Area	400~Cooling	466~Heating	543~U-
+37|361~2
+37|59~Type	151~Number	246~applicable)	351~(ft )	408~BTUH	475~BTUH	527~Value
+37|59~Window	151~1D-c	246~S	363~0	530~None
+37|59~Window	151~1D-c	246~total	358~34	411~1,204	478~1,396	534~0.57
+37|70~↳ Window type: Standard Window, Frame construction: Wood, Wood with Metal Clad or Vinyl, Glass type: Clear,
+37|70~Operability: Operable, Number of panes: Double
+37|49~Basement story floor plan
+37|49~First story floor plan
+38|159~Terms and Conditions	266~Privacy Policy	340~Homeowner Privacy Policy
+38|180~Copyright © 2022 - 2026 Conduit Tech®. All rights reserved.

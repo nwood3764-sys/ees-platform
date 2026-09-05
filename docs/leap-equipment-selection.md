@@ -37,12 +37,14 @@ solution. **The whole feature is a funnel that turns 40,000 into five.**
 |---|---|---|---|
 | 1 | **Programme eligibility** | Will this programme pay for this model? | ✅ **BUILT** (2026-09-03) |
 | 2 | **Installation type** | Can this physically go in this building? | ❌ columns exist, vocabulary empty |
-| 3 | **Sizing** | Does it carry the load at design conditions? | ❌ nothing — and no load field exists |
+| 3 | **Sizing** | Does it carry the load at design conditions? | 🟡 the load now lands in LEAP (2026-09-05); the sizing engine is unbuilt |
 | 4 | **EES preference** | Do we install and stock this? | 🟡 price books exist, not linked to equipment |
 
 Filter 1 already works and is enforced in the database. Filters 2–4 are the
-build. **Filter 3 is the hard one, and it is blocked on something smaller than
-it looks: LEAP has nowhere to put a design load.**
+build. **Filter 3 was blocked on something smaller than it looked — LEAP had
+nowhere to put a design load — and that blocker was cleared on 2026-09-05:
+see Phase 1 below.** What remains of Filter 3 is the sizing arithmetic itself:
+capacity at the winter design temperature against the stored design load.
 
 ---
 
@@ -382,23 +384,56 @@ Each phase is additive and independently shippable.
   value never needs translating.
 - **Decide §7.1 (data source) before writing any importer.**
 
-### Phase 1 — the load lands in LEAP  ⭐ *the blocker; nothing after this works without it*
-- A purpose-named object for the load calculation — recommended
-  **`load_calculations` (LOAD-)**, one per building or per unit or per system,
-  because a multifamily building has many and a whole-building number cannot be
-  divided by hand later.
-- Fields: design heating load Btu/h, design cooling load (sensible and latent)
-  Btu/h, winter 99 % design dry bulb, summer 1 % design dry bulb, indoor design
-  temps, weather station name, conditioned floor area, calculation method
-  (Manual J 8th ed.), software and version, calculated-by, calculation date,
-  and the source PDF as a document on the record — **the evidence artifact**,
-  per LEAP's rule that every task has one.
-- Entry is manual first (the auditor types six numbers off the Conduit report).
-  A PDF parse or a Conduit integration is Phase 5, not a prerequisite.
-- Decide, here, where the *result* lives (§7.7). The three hand-typed
-  heat-pump blocks in §2c-bis are the reason: LEAP should gain **one** selection
-  record that the assessment, the EFR application and the proposal all read,
-  rather than a fourth copy.
+### Phase 1 — the load lands in LEAP  ✅ **SHIPPED 2026-09-05**
+
+Built as **`manual_j_reports` (MJR-)** rather than the `load_calculations`
+(LOAD-) proposed here, and hung off the **assessment** rather than the building
+or unit — Nicholas, 2026-09-05: *"I think it belongs on the assessment record…
+The user, probably the project coordinator, will drag it on top of this widget
+you're making, and then you'll scrape the information from it and then save the
+PDF to the assessment object."*
+
+Three departures from the plan above, each for a reason worth keeping:
+
+- **It is scraped, not typed.** §7.5 recommended typing six numbers off the
+  report with a PDF parse deferred to Phase 5. The parse turned out to be the
+  cheaper half: the report is regular, and typing six numbers is where a
+  transposed digit becomes a mis-sized heat pump. `src/lib/conduitManualJ.js`
+  reads the whole report — 17 load blocks, 15 components each, 14 assemblies —
+  and a person reviews it before anything is written.
+- **Four tables, not one.** A Manual J is a shape, not a field set: whole home,
+  each proposed system, each zone, each room, plus the component breakdown and
+  the envelope assemblies. `manual_j_reports` / `manual_j_load_blocks` /
+  `manual_j_load_components` / `manual_j_building_materials`.
+- **The design load is stored as a DECISION, with its basis.** This is the part
+  the plan did not anticipate and the one that matters most to §3's sizing
+  filter. See below.
+
+**The trap this uncovered, which any sizing engine has to know about.** A report
+that models more than one proposed system prints a Whole Home total that counts
+every shared room ONCE PER SYSTEM. On the real 2506 Frazier Ave report the
+printed whole-home heating load is **46,735 Btu/h** and the building needs
+**29,882** — the difference is Zone 1 over again, because its five rooms are
+served by both the gas furnace and the cold-climate heat pump being compared.
+**Reading `mjr_design_heating_load_btuh` is safe; reading the whole-home block
+is not.** The cooling side of the same report does not diverge, so the check is
+per measure. `mjr_design_load_basis` records which load a person chose and why.
+
+**What Filter 3 can now read**, per assessment: design heating and cooling load
+(sensible and latent), the basis they were chosen on, winter and summer design
+dry bulb, indoor design conditions, weather station, elevation, altitude
+correction factor, conditioned floor area, duct configuration and leakage class,
+every room's load, and every assembly's U-value. The NEEP advanced search is
+fully populated except the construction year, which no Manual J carries — LEAP
+takes it from the assessment, then the building, then the property, and asks
+when none of them holds one.
+
+**Still open from this phase:** §7.7 is undecided — the sizing RESULT still has
+no home, so `equipment_selections` (EQS-) remains the recommendation and the
+three hand-typed heat-pump blocks in §2c-bis still drift. Only Conduit Tech is
+parsed; a second tool is a new parser behind the same interface, not a rewrite.
+And a load calculation cannot yet be filed against a building or unit directly —
+it reaches them through its assessment.
 
 ### Phase 2 — the catalog gets filled
 - Follow the HUD import pattern already proven in this repo (see
@@ -500,10 +535,14 @@ are the whole cold-climate sizing question. **Not** scraping ashp.neep.org.
 → *Yes / no?*
 
 **7.2 — What is the unit of a load calculation?**
-*Recommendation:* **per building for a central system, per unit for in-unit
-equipment** — a `load_calculations` record that points at either, because EES's
-multifamily work has both and a whole-building number cannot be split later.
-→ *Yes / no?*
+*Recommendation was:* per building for a central system, per unit for in-unit
+equipment.
+→ **DECIDED 2026-09-05, Nicholas — it belongs to the ASSESSMENT.** *"I think it
+belongs on the assessment record."* `manual_j_reports.assessment_id` is NOT
+NULL; property, building, unit, opportunity and project are inherited from the
+assessment so the sizing engine can still find a building's load directly. The
+open half of the original question stands: a load calculation cannot yet be
+filed against a building or unit that has no assessment.
 
 **7.3 — Which equipment categories are in scope for round one?**
 *Recommendation:* the three record types that already exist — heat pump,
@@ -520,10 +559,13 @@ inspection.
 → *Yes / no?*
 
 **7.5 — Where does the Manual J come from on day one?**
-*Recommendation:* **typed in from the Conduit Tech report, with the PDF attached
-as the evidence artifact.** A Conduit integration is real work and it should not
-gate the sizing engine, which is the part with the value.
-→ *Yes / no?*
+*Recommendation was:* typed in from the Conduit Tech report, with the PDF
+attached as the evidence artifact.
+→ **DECIDED 2026-09-05, Nicholas — SCRAPED, not typed.** *"I'll upload the
+Conduit Tech report… I want the software to scrape all of the relevant fields
+and put the information in."* Shipped: the coordinator drops the PDF on the
+assessment, LEAP reads it, a person checks it, the PDF is filed as the evidence.
+Typing was the more expensive option once the report turned out to be regular.
 
 **7.6 — Do Phase 0's duplicate-column cleanups ship first, on their own?**
 *Recommendation:* **yes.** They are small, they are free while the tables are
