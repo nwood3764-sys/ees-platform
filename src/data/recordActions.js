@@ -180,7 +180,9 @@ export const ACTION_REGISTRY = Object.freeze({
     label:               'Log Activity',
     icon:                'M12 5v14M5 12h14',
     color:               ACTION_COLORS.EMERALD,
-    applicableObjects:   ['opportunities', 'properties', 'contacts', 'accounts'],
+    // Any record: a call, meeting or note is Related To the record it is
+    // logged from, whatever object that is (Nicholas, 2026-09-05).
+    applicableObjects:   ALL_OBJECTS,
     defaultTier:         'primary',
     defaultSortOrder:    12,
     isAvailable: ({ editing }) => !editing,

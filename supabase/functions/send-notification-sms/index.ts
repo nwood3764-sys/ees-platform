@@ -54,6 +54,11 @@ interface ReqBody {
   contact_id?:               string
   account_id?:               string
   project_id?:               string
+  // Related To — the record the text is sent from, whatever object it is
+  // (2026-09-05). The four ids above are kept for the twelve foreign-key
+  // columns and every caller that still sends them.
+  anchor_object?:            string
+  anchor_record_id?:         string
   from_number?: string
 }
 
@@ -149,6 +154,8 @@ Deno.serve(async (req) => {
       p_project_id:             body.project_id              || null,
       p_service_appointment_id: body.service_appointment_id  || null,
       p_subject:                null,
+      p_anchor_object:          body.anchor_object           || null,
+      p_anchor_id:              body.anchor_record_id        || null,
     })
     if (convErr) {
       console.error("send-notification-sms: find_or_create_conversation failed", convErr)

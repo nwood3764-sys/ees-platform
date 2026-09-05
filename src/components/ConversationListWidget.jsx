@@ -33,7 +33,8 @@ function Chevron({ open }) {
 
 export default function ConversationListWidget({ widget, parentRecordId }) {
   const config = (widget && widget.widget_config) || {}
-  const fk = config.fk
+  const fk = config.fk || null
+  const relatedObject = config.related_object || null
   const channelFilter = config.channel_filter || null
 
   const [rows, setRows] = useState([])
@@ -42,15 +43,15 @@ export default function ConversationListWidget({ widget, parentRecordId }) {
   const [openIds, setOpenIds] = useState(() => new Set())
 
   useEffect(() => {
-    if (!fk || !parentRecordId) { setLoading(false); return }
+    if ((!fk && !relatedObject) || !parentRecordId) { setLoading(false); return }
     let alive = true
     setLoading(true); setError(null)
-    fetchConversationsForParent(fk, parentRecordId, channelFilter)
+    fetchConversationsForParent(fk, parentRecordId, channelFilter, relatedObject)
       .then(data => { if (alive) setRows(data || []) })
       .catch(e => { if (alive) setError(e.message || 'Could not load conversations') })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [fk, parentRecordId, channelFilter])
+  }, [fk, relatedObject, parentRecordId, channelFilter])
 
   const toggle = (id) => {
     setOpenIds(prev => {

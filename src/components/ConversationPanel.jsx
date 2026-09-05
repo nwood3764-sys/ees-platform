@@ -118,9 +118,10 @@ export default function ConversationPanelWidget({
     config.channel_filter === 'sms' || config.channel_filter === 'email'
       ? config.channel_filter
       : null
-  // The record this card lives on. RecordDetail passes its table name; the FK
-  // map is the fallback for any caller that renders the widget on its own.
-  const parentObject = parentTable || FK_TO_ANCHOR_OBJECT[fk] || null
+  // The record this card lives on — its Related To. RecordDetail passes its
+  // table name; a card placed since 2026-09-05 stores the object it sits on;
+  // the FK map is the fallback for a card seeded before that.
+  const parentObject = parentTable || config.related_object || FK_TO_ANCHOR_OBJECT[fk] || null
   // SMS compose context: the account/contact/project the new thread anchors to
   // (derived from this panel's own FK when it matches, else from config), plus
   // an optional prefilled recipient phone + name for the composer.
@@ -507,7 +508,7 @@ export default function ConversationPanelWidget({
               <Icon path="M12 5v14 M5 12h14" size={isMobile ? 13 : 11} color="currentColor" />
               {isMobile ? '' : 'New Text'}
             </button>
-          ) : FK_TO_ANCHOR_OBJECT[fk] && (
+          ) : parentObject && (
             <button
               onClick={(e) => { e.stopPropagation(); setShowCompose(true) }}
               title="Compose a new email related to this record"
@@ -732,7 +733,7 @@ export default function ConversationPanelWidget({
         open={showCompose}
         onClose={() => setShowCompose(false)}
         onSent={handleComposeSent}
-        anchorObject={FK_TO_ANCHOR_OBJECT[fk] || null}
+        anchorObject={parentObject}
         anchorRecordId={parentRecordId}
         defaultRecipientEmail={emailToEmail || ''}
         defaultRecipientName={emailRecipientName || ''}
@@ -748,6 +749,8 @@ export default function ConversationPanelWidget({
         accountId={smsAccountId}
         contactId={smsContactId}
         projectId={smsProjectId}
+        anchorObject={parentObject}
+        anchorRecordId={parentRecordId}
       />
       {/* Log a call / meeting / note — the same composer the Activity tab uses,
           reached from the one place all communication is read. */}
