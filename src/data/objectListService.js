@@ -15,7 +15,7 @@
 // come from live schema + picklist/user lookups.
 // ---------------------------------------------------------------------------
 
-import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
+import { supabase, fetchAllPaged, fetchAllKeyset } from '../lib/supabase'
 import { describeObject } from './adminService'
 import { loadPicklists } from './outreachService'
 import { guessPrefix } from './fieldMetadataService'
@@ -765,27 +765,27 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
     scopeApply = (q) => inner(q).eq(objectScope.column, objectScope.value)
   }
 
-  // Load every row (list search/filter runs client-side over the full set), but
-  // fetch the pages CONCURRENTLY after a HEAD count instead of one-at-a-time —
-  // ~7× faster on large objects (e.g. 17k properties). Falls back to sequential
-  // paging automatically if the count query isn't available.
-  const rows = await fetchAllPagedParallel(
-    (from, to) => {
-      let q = supabase.from(table).select(scopeSelect)
-      // Plain eq(false) on the soft-delete column (an .or(...is.null...) filter
-      // can error on some tables and return nothing). Every soft-deletable row
-      // carries a boolean.
-      if (softDel) q = q.eq(softDel, false)
-      q = scopeApply(q)
-      return q.range(from, to)
-    },
-    () => {
-      let q = supabase.from(table).select(scopeSelect, { count: 'exact', head: true })
-      if (softDel) q = q.eq(softDel, false)
-      q = scopeApply(q)
-      return q
-    },
-  )
+  // Load every row (list search/filter runs client-side over the full set),
+  // paged by PRIMARY KEY rather than by OFFSET.
+  //
+  // This used to page with .range(from, to) after a HEAD count. OFFSET has to
+  // produce and discard every row it skips, so reading 17 pages of properties
+  // made Postgres do the work seventeen times over and tipped the list past
+  // the statement timeout — see fetchAllKeyset in src/lib/supabase.js.
+  //
+  // It also fixes a latent correctness bug: this read carried NO .order() at
+  // all, and OFFSET without ORDER BY has no defined row order, so a page
+  // boundary could legally repeat or drop a row. Keyset paging is ordered by
+  // construction. No display order is restored afterwards because there was
+  // never one to restore — ListView applies the view's own sort.
+  const rows = await fetchAllKeyset(() => {
+    let q = supabase.from(table).select(scopeSelect)
+    // Plain eq(false) on the soft-delete column (an .or(...is.null...) filter
+    // can error on some tables and return nothing). Every soft-deletable row
+    // carries a boolean.
+    if (softDel) q = q.eq(softDel, false)
+    return scopeApply(q)
+  })
 
   // Drop the join-plumbing embed from via-path scoped rows before shaping.
   if (scopeStripEmbed) {
