@@ -55,8 +55,9 @@ function usePageWrap(ref) {
 function RealPanel() {
   const ref = useRef(null)
   usePageWrap(ref)
-  // The date arrives pre-filled, exactly as signing-portal-load supplies it.
-  const [values, setValues] = useState({ 'ETAB-00007': '2026-09-04' })
+  // Nothing pre-filled: signing-portal-load no longer seeds a date, because
+  // the server stamps it at the moment of signing.
+  const [values, setValues] = useState({})
   return (
     <div data-test="real-panel">
       <div ref={ref} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }} />
