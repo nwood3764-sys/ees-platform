@@ -37,6 +37,8 @@ import { C } from '../data/constants'
 import { useToast } from './Toast'
 import { Icon } from './UI'
 import { backdropDismissProps } from '../lib/modalDismiss'
+import { describeOpenRequests } from '../lib/openSignatureRequests'
+import { fetchOpenSignatureRequests, resendSignatureRequest } from '../data/signatureRequestsService'
 /**
  * The documents that can be sent for signature, and where each one lives.
  *
@@ -52,6 +54,10 @@ import { backdropDismissProps } from '../lib/modalDismiss'
 const DOCUMENTS = {
   hear_proposal: {
     noun: 'Proposal',
+    // Which record a request is outstanding ON. Declared per document rather
+    // than inferred, because the two documents live on different objects and a
+    // wrong guess would silently check the wrong record and warn about nothing.
+    parentObject: 'enrollments',
     whatHappensNext: "The proposal is generated from this opportunity's equipment, filed on the enrollment, and emailed to the property owner to sign. When they sign, the enrollment moves itself to Enrollment To Be Submitted.",
     async module() { return import('../data/hearProposalService') },
     load:      (m, id) => m.loadHearProposalContext(id),
@@ -61,6 +67,7 @@ const DOCUMENTS = {
   },
   payment_request: {
     noun: 'Invoice',
+    parentObject: 'incentive_applications',
     whatHappensNext: 'The Project Payment Request invoice is generated from this incentive application, filed on it, and emailed to the property owner to sign.',
     async module() { return import('../data/homesProposalService') },
     load:      (m, id) => m.loadPaymentRequestSignatureContext(id),
@@ -88,6 +95,9 @@ export default function SignatureSendModal({ kind, recordId, onClose, onSent }) 
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState(null)
   const [svc, setSvc] = useState(null)
+  const [openRequests, setOpenRequests] = useState([])
+  const [resending, setResending] = useState(false)
+  const [acknowledgedDuplicate, setAcknowledgedDuplicate] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -106,12 +116,43 @@ export default function SignatureSendModal({ kind, recordId, onClose, onSent }) 
         setName(c?.fields?.pjContact || '')
         setEmail(c?.fields?.pjEmail || '')
         setSubject(spec.subject(c))
+        // Decoration, so it is loaded after the context and never gates it.
+        if (spec.parentObject) {
+          const open = await fetchOpenSignatureRequests(spec.parentObject, recordId)
+          if (!cancelled) setOpenRequests(open)
+        }
       } catch (e) {
         if (!cancelled) setLoadError(e.message || String(e))
       }
     })()
     return () => { cancelled = true }
   }, [kind, recordId])
+
+  // Resending the link that is already out, rather than creating a second one.
+  // This is the answer to "the workflow is not to ask the user to resend it":
+  // the dialog states what is outstanding and offers the two real choices.
+  const resendExisting = async () => {
+    if (resending || sending) return
+    const target = openRequests[0]
+    if (!target) return
+    setResending(true)
+    try {
+      await resendSignatureRequest(target.id)
+      toast.success(`Signing email resent to ${target.recipientEmail || 'the recipient'}`)
+      onSent?.({ emailed: true, resent: true, envelope: target.id })
+    } catch (e) {
+      toast.error(`Could not resend — ${e.message || e}`)
+    } finally {
+      setResending(false)
+    }
+  }
+
+  // A SOFT gate, matching the duplicate-record check on create: the second
+  // press is allowed, it just has to be a decision made with the facts on
+  // screen. Refusing outright would be wrong -- a second request to a DIFFERENT
+  // address is a legitimate thing to want, and the platform must never be the
+  // reason a document cannot be sent.
+  const blockedByDuplicate = openRequests.length > 0 && !acknowledgedDuplicate
 
   const send = async () => {
     if (sending) return
@@ -188,6 +229,39 @@ export default function SignatureSendModal({ kind, recordId, onClose, onSent }) 
             </div>
           )}
 
+          {ctx && missing && missing.length === 0 && !result && openRequests.length > 0 && (
+            <div style={{
+              marginBottom: 14, padding: '10px 12px', borderRadius: 6,
+              background: '#e8f1fb', border: `1px solid ${C.sky}`,
+              fontSize: 12.5, color: C.navy, lineHeight: 1.55,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                A signature request is already out
+              </div>
+              <div>{describeOpenRequests(openRequests, { documentNoun: documentNoun.toLowerCase() })}</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button
+                  onClick={resendExisting}
+                  disabled={resending || sending}
+                  style={{
+                    background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+                    padding: '7px 14px', fontSize: 12.5, fontWeight: 600,
+                    cursor: (resending || sending) ? 'default' : 'pointer',
+                  }}
+                >{resending ? 'Resending…' : `Resend ${openRequests[0].recordNumber || 'that link'}`}</button>
+                <button
+                  onClick={() => setAcknowledgedDuplicate(true)}
+                  disabled={acknowledgedDuplicate || sending}
+                  style={{
+                    background: '#fff', border: `1px solid ${C.borderDark}`, borderRadius: 6,
+                    padding: '7px 14px', fontSize: 12.5, color: C.textSecondary,
+                    cursor: (acknowledgedDuplicate || sending) ? 'default' : 'pointer',
+                  }}
+                >{acknowledgedDuplicate ? 'Sending a new one' : 'Send a new one anyway'}</button>
+              </div>
+            </div>
+          )}
+
           {ctx && missing && missing.length === 0 && !result && (
             <>
               <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55, marginBottom: 14 }}>
@@ -242,8 +316,8 @@ export default function SignatureSendModal({ kind, recordId, onClose, onSent }) 
             {result ? 'Close' : 'Cancel'}
           </button>
           {ctx && missing && missing.length === 0 && !result && (
-            <button onClick={send} disabled={sending || !email.trim()}
-              style={{ background: (sending || !email.trim()) ? C.textMuted : C.emerald, color: '#fff',
+            <button onClick={send} disabled={sending || !email.trim() || blockedByDuplicate}
+              style={{ background: (sending || !email.trim() || blockedByDuplicate) ? C.textMuted : C.emerald, color: '#fff',
                 border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600,
                 cursor: sending ? 'wait' : (email.trim() ? 'pointer' : 'not-allowed') }}>
               {sending ? 'Sending…' : 'Send for Signature'}

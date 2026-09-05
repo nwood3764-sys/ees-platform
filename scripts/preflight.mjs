@@ -109,6 +109,31 @@ function caseExact(absPath) {
 // a heavy dep (acorn). For our codebase the regex catches every real
 // import; edge cases (multi-line `import { a, b, c }` across 5 lines)
 // are joined first.
+// Every local name an import statement BINDS: the default, the namespace, and
+// each named specifier under its local alias. `import { a as b }` binds `b`,
+// not `a`, and a side-effect import binds nothing.
+function importedNames(imp) {
+  const bindings = imp.bindings
+  if (!bindings || bindings === '__dynamic__' || imp.dynamic) return []
+  const names = []
+  // Split off the braced group, if any: `Default, { a, b as c }`
+  const brace = bindings.match(/\{([^}]*)\}/)
+  if (brace) {
+    for (const part of brace[1].split(',')) {
+      const local = part.trim().split(/\s+as\s+/).pop().trim()
+      if (local) names.push(local)
+    }
+  }
+  const outside = bindings.replace(/\{[^}]*\}/, '').replace(/,/g, ' ').trim()
+  for (const tok of outside.split(/\s+/)) {
+    const t = tok.trim()
+    if (!t || t === '*' || t === 'as') continue
+    names.push(t)
+  }
+  // `* as ns` leaves `ns` after the filter above, which is the binding.
+  return names
+}
+
 function extractImports(source) {
   // Collapse multi-line imports into one line each so the regex below
   // can match the whole statement.
@@ -219,6 +244,33 @@ for (const file of walkSource()) {
   const source = readFileSync(file, 'utf8')
   const imports = extractImports(source)
   const relPath = relative(repoRoot, file)
+
+  // 0. Is a name imported twice in this file?
+  //
+  // esbuild refuses it outright ("The symbol X has already been declared"), so
+  // it is a hard build failure — but it fails in the VITE stage, after every
+  // fixture has already passed. That is a slow, confusing way to learn it, and
+  // it is exactly how it shipped to CI on 2026-09-05: a script that inserted an
+  // import after the last `import` line added a second copy of one another pass
+  // had already added, several lines apart, so neither a glance nor a
+  // same-line dedupe caught it. Preflight runs first and names the file, the
+  // line and the symbol.
+  {
+    const seenNames = new Map()
+    for (const imp of imports) {
+      for (const name of importedNames(imp)) {
+        if (seenNames.has(name)) {
+          fail(
+            `Duplicate import: '${name}' is imported twice (first on line ${seenNames.get(name)}). ` +
+            `esbuild refuses this — "The symbol \"${name}\" has already been declared".`,
+            relPath, imp.line,
+          )
+        } else {
+          seenNames.set(name, imp.line)
+        }
+      }
+    }
+  }
 
   for (const imp of imports) {
     // Skip external packages (node_modules, jsr:, https:, etc.)
