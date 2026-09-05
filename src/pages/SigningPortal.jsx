@@ -481,7 +481,7 @@ function PdfViewer({ pdfUrl, tabs, tabValues, canFill, activeTabId, onTabClick, 
 // left; CSS positioning has origin at top-left. Conversion:
 //   css.left = pdf.x * scale
 //   css.top  = (pageHeight - pdf.y - pdf.height) * scale
-function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, activeTabId, onTabClick }) {
+export function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, activeTabId, onTabClick }) {
   const [, forceTick] = useState(0)
   // Re-render on layout changes (pages mounting)
   useEffect(() => {
