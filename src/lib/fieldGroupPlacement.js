@@ -1,46 +1,32 @@
 // ---------------------------------------------------------------------------
 // Field group placement — what a DRAG does to a section's field array
 // ---------------------------------------------------------------------------
-// Nicholas, 2026-09-05, on the assessments WI-IRA-MF-HOMES-AUDIT layout:
-// "It's not even allowing me to move it. I just moved the building over to the
-// right, and it moved the property, the building, and the project back to the
-// left."
+// Nicholas, 2026-09-05, in the page-layout editor: "If I move something over,
+// it goes in between the two existing fields. That's it, and then you readjust
+// to make sure the rows are horizontally aligned." And, on the swap this
+// briefly shipped with: "I don't want fields to trade places ever. That's never,
+// ever a good functionality. There's no reason in the world we'd ever trade
+// places."
 //
-// Both halves of that sentence were true, and they are two different defects.
+// So there is ONE gesture: a drop INSERTS. The dragged field lands between the
+// two fields it was dropped between, the section re-flows behind it, and the
+// rows stay whole — which they do because a field's position is its INDEX
+// (src/lib/fieldGroupLayout.js) and the renderer packs that index into rows.
+// A field the admin did not drag never goes anywhere except along the flow.
 //
-// 1. THE MOVE WAS A NO-OP. The editor resolved a drop as "insert before the
-//    tile you landed on", and it computed that insertion index in the array
-//    with the dragged field ALREADY REMOVED. Dragging a field one slot FORWARD
-//    therefore inserted it back exactly where it started: for
-//    [Name, Opportunity, Building, Project, ...], dropping Building on Project
-//    removes Building, finds Project at index 2, and inserts Building at 2 —
-//    the array it started with. Every forward drag of one slot did nothing at
-//    all, and every longer forward drag landed one cell short of the tile the
-//    admin dropped on. The classic remove-then-index-the-remainder off-by-one.
+// The defect this file was written for was the INDEX ARITHMETIC, not the
+// gesture. The editor resolved a drop as "insert before the tile you landed
+// on" and computed that index in the array with the dragged field ALREADY
+// REMOVED. For [Name, Opportunity, Building, Project, ...], dropping Building
+// on Project removes Building, finds Project at index 2, and inserts Building
+// at 2 — the array it started with. Every one-slot forward drag was the
+// identity function, and every longer forward drag landed one cell short of
+// the tile it was dropped on. `legacyInsertBeforeByName` at the bottom of this
+// file is that code, kept as a control the fixture must still see fail.
 //
-// 2. THE REST OF THE SECTION RESHUFFLED. A field's position is its INDEX
-//    (src/lib/fieldGroupLayout.js — one fact, deliberately), so the section is
-//    a reading-order flow: pull one field out of the middle and every field
-//    after it shifts by one, which in a 2-column section FLIPS THE COLUMN of
-//    every one of them. That is exactly "it moved the property, the building,
-//    and the project back to the left". No amount of fixing the off-by-one
-//    helps here: in a flow, insertion always ripples.
-//
-// So a drag has to be able to say WHICH CELL, not just "somewhere around
-// here". There are two intents and the editor now offers a target for each:
-//
-//   * SWAP — drop onto a cell. The dragged field takes that cell and whatever
-//     was there takes the dragged field's cell. Nothing else moves, ever. This
-//     is "move the building over to the right".
-//   * INSERT — drop onto the line between two cells. The field moves to that
-//     position and the flow re-wraps, which is the right behaviour when the
-//     intent is reordering.
-//
-// An empty cell is a first-class slot in both: a `spacer` is a real array
-// entry, and the blank pad at the end of a short row is materialised into one
-// the moment something is dropped on it. That is what makes "put this field in
-// the right-hand column and leave the left one empty" expressible at all —
-// before this it was not, on any layout, by any gesture.
+// The one target that does NOT push anything along is an EMPTY SLOT: a field
+// dropped on a blank takes the blank, because there is nothing there to
+// displace. That is what an empty slot is for.
 //
 // Pure — no imports, no DOM, no React — so scripts/field-group-placement-
 // fixture.mjs can replay the real production field arrays (and the pre-fix
@@ -49,8 +35,19 @@
 
 /** Drag id of a cell that holds a field or a spacer. */
 export const FIELD_CELL_PREFIX = 'fld::'
-/** Drop id of an insertion line between two cells. */
+/** Drop id of the insertion line on a cell's LEADING edge. */
 export const FIELD_INSERT_PREFIX = 'ins::'
+/**
+ * Drop id of the insertion line on the TRAILING edge of the last cell in a row.
+ *
+ * It names the same slot as the leading line of the next row's first cell — a
+ * flow has one position between two fields, not two — but it needs an id of
+ * its own because dnd-kit keys droppables by id and two boxes cannot share one.
+ * It exists because "move the building over to the right" is a gesture aimed at
+ * the right-hand end of a row, and without a target there the nearest thing to
+ * drop on is the row below.
+ */
+export const FIELD_INSERT_AFTER_PREFIX = 'insafter::'
 /**
  * Drop id of a BLANK cell — the padding the renderer draws to finish a short
  * row. It is not in the array (only its position is), which is why it needs an
@@ -71,6 +68,9 @@ export function fieldCellDragId(sectionKey, index) {
 }
 export function fieldInsertDropId(sectionKey, slot) {
   return `${FIELD_INSERT_PREFIX}${sectionKey}::${slot}`
+}
+export function fieldInsertAfterDropId(sectionKey, slot) {
+  return `${FIELD_INSERT_AFTER_PREFIX}${sectionKey}::${slot}`
 }
 export function fieldBlankDropId(sectionKey, slot) {
   return `${FIELD_BLANK_PREFIX}${sectionKey}::${slot}`
@@ -95,6 +95,7 @@ export function parseFieldDropId(id) {
   for (const [prefix, kind] of [
     [FIELD_CELL_PREFIX, 'cell'],
     [FIELD_INSERT_PREFIX, 'insert'],
+    [FIELD_INSERT_AFTER_PREFIX, 'insert'],
     [FIELD_BLANK_PREFIX, 'blank'],
   ]) {
     if (!s.startsWith(prefix)) continue
@@ -121,20 +122,6 @@ export function trimTrailingSpacers(fields) {
 }
 
 /**
- * Turn the blank pad at `slot` into a real spacer so it can be swapped with.
- *
- * A pad is drawn by the renderer but is not in the array — it is what is left
- * of a row after the last field on it. Making it real is what lets a field be
- * dropped into the empty half of a row and STAY there: without it the only
- * expressible answer is "append", which puts the field in the other column.
- */
-function materializeBlank(fields, slot) {
-  const arr = [...(fields || [])]
-  arr.splice(Math.min(Math.max(0, slot), arr.length), 0, { ...SPACER })
-  return arr
-}
-
-/**
  * Move `fromIndex` to sit at `slot` in the flow — the reordering gesture.
  *
  * `slot` is an index in the array AS PASSED IN (the field being moved is still
@@ -153,18 +140,6 @@ export function moveFieldToSlot(fields, fromIndex, slot) {
 }
 
 /**
- * Exchange two cells. The one operation that touches nothing else — which is
- * why it is the gesture for "put this field in that cell".
- */
-export function swapFieldCells(fields, a, b) {
-  const arr = [...(fields || [])]
-  if (a === b) return arr
-  if (a < 0 || b < 0 || a >= arr.length || b >= arr.length) return arr
-  const t = arr[a]; arr[a] = arr[b]; arr[b] = t
-  return trimTrailingSpacers(arr)
-}
-
-/**
  * Apply a drop that started and ended in the SAME field group.
  *
  * @param {Array<object>} fields
@@ -176,19 +151,24 @@ export function applyFieldDropWithinGroup(fields, fromIndex, target) {
   const arr = [...(fields || [])]
   if (!target || fromIndex < 0 || fromIndex >= arr.length) return arr
   if (target.kind === 'zone') return moveFieldToSlot(arr, fromIndex, arr.length)
-  if (target.kind === 'insert') return moveFieldToSlot(arr, fromIndex, target.index)
-  if (target.kind === 'blank') {
-    // Materialise the blank, then swap into it. The vacated cell is left empty
-    // rather than closed up, because the admin asked for a field to be in a
-    // particular cell and pulling the flow up by one is what moves everything
-    // else.
-    const grown = materializeBlank(arr, target.index)
-    const from  = fromIndex >= target.index ? fromIndex + 1 : fromIndex
-    return swapFieldCells(grown, from, target.index)
+  // An EMPTY SLOT is the one target that does not push anything: the field
+  // takes the blank and the blank takes nothing, because there is nothing
+  // there to displace. Everything before and after it stays exactly where it
+  // is, which is the whole reason an admin places one.
+  if (target.kind === 'cell' && isSpacer(arr[target.index])) {
+    const at = fromIndex < target.index ? target.index - 1 : target.index
+    const [moved] = arr.splice(fromIndex, 1)
+    arr[at] = moved
+    return trimTrailingSpacers(arr)
   }
-  if (target.kind !== 'cell') return arr
-  if (target.index >= arr.length) return arr
-  return swapFieldCells(arr, fromIndex, target.index)
+  // Everything else is an insertion: the field goes BETWEEN the two fields it
+  // was dropped between, and the section re-flows behind it so the rows stay
+  // whole. Dropping on a tile means "in front of this one" — the tile you
+  // dropped on moves along by one cell, it does not go anywhere else.
+  if (target.kind === 'cell' || target.kind === 'insert' || target.kind === 'blank') {
+    return moveFieldToSlot(arr, fromIndex, target.index)
+  }
+  return arr
 }
 
 /**
