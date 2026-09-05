@@ -24,6 +24,7 @@ import {
   buildUploadIconRef,
 } from '../../lib/recordTypeIcons'
 import { uploadRecordTypeIcon } from '../../data/storageService'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 // ---------------------------------------------------------------------------
 // RecordTypesPane — Object Manager > Record Types tab.
@@ -637,7 +638,7 @@ function ChildRecordTypesModal({ parentObject, parentRecordType, childObject, ch
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: saving })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex',
@@ -1001,7 +1002,7 @@ function NewRecordTypeModal({
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex',

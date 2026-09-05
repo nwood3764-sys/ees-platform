@@ -16,6 +16,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // System / non-display columns we never surface as a field choice.
 const SKIP_FIELDS = new Set([
@@ -133,7 +134,7 @@ export default function AccountMergeModal({ masterId, master, onClose, onMerged 
   const masterName = masterRow?.account_name || master?.account_name || 'this account'
 
   return (
-    <div onClick={onClose} style={overlay}>
+    <div {...backdropDismissProps(onClose)} style={overlay}>
       <div onClick={e => e.stopPropagation()} style={card}>
         <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>

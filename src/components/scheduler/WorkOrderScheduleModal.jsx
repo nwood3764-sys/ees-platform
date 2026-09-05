@@ -25,6 +25,7 @@ import {
   fetchTeamLeads,
   describePlacementError,
 } from '../../data/projectScheduler'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 // ── Date helpers (lifted from ServiceAppointmentRescheduleModal — same
 // browser-local <input type='datetime-local'> handling) ──────────────────
@@ -222,7 +223,7 @@ export default function WorkOrderScheduleModal({
   ].filter(Boolean).join(' · ')
 
   return (
-    <div style={overlay} onClick={submitting ? undefined : onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose, { disabled: submitting })}>
       <div style={card} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={headerStyle}>

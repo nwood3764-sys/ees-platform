@@ -11,6 +11,7 @@ import {
   provisionFieldTechnician,
 } from '../../data/adminService'
 import { useToast } from '../../components/Toast'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 /**
  * TechnicianSetupWizard — guided, end-to-end provisioning of a field
@@ -179,7 +180,7 @@ export default function TechnicianSetupWizard({ onClose, onComplete }) {
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
         display: 'flex',

@@ -30,6 +30,7 @@ import {
   getSubmittalSectionSchema, buildDefaultSectionConfig,
   paletteForKind, SUBMITTAL_SECTION_LABELS,
 } from '../data/submittalSectionSchemas'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const CARD_SECONDARY = '#f7f9fc'
 
@@ -169,7 +170,7 @@ export default function SubmittalDocumentTemplateEditor({ templateId, onClose, o
   const items = sections.map(s => ({ id: s._uid, _sec: s }))
 
   return (
-    <div style={overlay} onClick={saving ? undefined : onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose, { disabled: saving })}>
       <div style={card} onClick={e => e.stopPropagation()}>
         {/* header */}
         <div style={headerStyle}>

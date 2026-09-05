@@ -23,6 +23,7 @@ import {
 } from '../data/assessmentReportService'
 import { buildAssessmentReportPdf } from '../data/paperworkModel'
 import { ASSESSMENT_REPORT_KIND, reportFileName } from '../lib/assessmentReport'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const CARD_SECONDARY = '#f7f9fc'
 
@@ -109,7 +110,7 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
   const noPhotos = ctx && ctx.counts.photosFlagged === 0
 
   return (
-    <div style={backdrop} onClick={onClose}>
+    <div style={backdrop} {...backdropDismissProps(onClose)}>
       <div style={panel} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={header}>

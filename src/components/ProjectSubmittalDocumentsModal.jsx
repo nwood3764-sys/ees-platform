@@ -36,6 +36,7 @@ import {
   SUBMITTAL_STAGE_DEFINITIONS, DOCUMENTS, DOCUMENT_DEFINITIONS,
   documentDefinitionsForSubmittal, programsWithDocumentsForStage, PROGRAM_SUBMITTALS,
 } from '../data/paperworkSubmittals'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // The Combustion Safety Notification is a per-building CAPTURE form (a line
 // editor), not a computed document — it opens its own modal.
@@ -301,7 +302,7 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
 
   return (
     <>
-    <div style={overlay} onClick={busyDoc ? undefined : onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose, { disabled: busyDoc })}>
       <div style={card} onClick={e => e.stopPropagation()}>
         <div style={headerStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>

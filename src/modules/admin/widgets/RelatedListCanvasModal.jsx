@@ -11,6 +11,7 @@ import {
   buttonPrimaryStyle, buttonSecondaryStyle,
   dangerBoxStyle, hintBoxStyle,
 } from '../adminStyles'
+import { backdropDismissProps } from '../../../lib/modalDismiss'
 
 // ---------------------------------------------------------------------------
 // RelatedListCanvasModal — configure a related_list widget for the canvas
@@ -693,7 +694,7 @@ export default function RelatedListCanvasModal({
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      {...backdropDismissProps(onClose, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 700,
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',

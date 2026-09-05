@@ -16,6 +16,7 @@ import {
   rejectCandidate,
   isPlaceholderOrgName,
 } from '../data/ownerResearchService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // ---------------------------------------------------------------------------
 // OwnerResearchQueue — the "Owner Research" section of the Outreach module.
@@ -93,7 +94,7 @@ function contactAccountIdFor(candidate) {
 
 function Modal({ title, onClose, children, footer }) {
   return (
-    <div onClick={onClose}
+    <div {...backdropDismissProps(onClose)}
       style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.55)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={e => e.stopPropagation()}
         style={{ background: C.card, borderRadius: 10, width: 'min(560px, 100%)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 12px 40px rgba(7,17,31,0.4)' }}>

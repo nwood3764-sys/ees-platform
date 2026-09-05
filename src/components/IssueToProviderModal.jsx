@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
 import { fetchActiveServiceProviders, issueWorkOrderToProvider } from '../data/serviceProviderService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 export default function IssueToProviderModal({ workOrderId, onClose, onIssued }) {
   const toast = useToast()
@@ -39,7 +40,7 @@ export default function IssueToProviderModal({ workOrderId, onClose, onIssued })
   }
 
   return (
-    <div style={overlay} onClick={onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose)}>
       <div style={card} onClick={(e) => e.stopPropagation()}>
         <div style={headerStyle}>
           <div>
