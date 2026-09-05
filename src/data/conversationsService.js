@@ -1272,3 +1272,19 @@ export function formatBytes(n) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
+
+// ── Inbound email health ─────────────────────────────────────────────────
+// Whether each shared mailbox is actually receiving into LEAP.
+//
+// The verdict is computed in the database on every call, from evidence — when
+// Microsoft last confirmed the subscription, when it expires, and what mail
+// has actually landed. It is deliberately NOT read out of a stored status
+// column: graph_subscriptions carried gs_status = 'active' with an expiry two
+// months in the past for two months, because the renewal job renewed at
+// Microsoft and never wrote the answer back. A row that cannot change is not
+// a status, and a value like that is what a screen would have shown.
+export async function fetchInboundEmailHealth() {
+  const { data, error } = await supabase.rpc('graph_subscription_health')
+  if (error) throw error
+  return data || []
+}
