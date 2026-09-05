@@ -42,12 +42,14 @@ record** — see §4.
 |---|---|---|---|
 | 1 | **Programme eligibility** | Will this programme pay for this model? | ✅ **BUILT** (2026-09-03) |
 | 2 | **Installation type** | Can this physically go in this building? | ❌ columns exist, vocabulary empty |
-| 3 | **Sizing** | Does it carry the load at design conditions? | ❌ nothing — and no load field exists |
+| 3 | **Sizing** | Does it carry the load at design conditions? | 🟡 the load now lands in LEAP (2026-09-05); the sizing engine is unbuilt |
 | 4 | **EES preference** | Do we install and stock this? | 🟡 price books exist, not linked to equipment |
 
 Filter 1 already works and is enforced in the database. Filters 2–4 are the
-build. **Filter 3 is the hard one, and it is blocked on something smaller than
-it looks: LEAP has nowhere to put a design load.**
+build. **Filter 3 was blocked on something smaller than it looked — LEAP had
+nowhere to put a design load — and that blocker was cleared on 2026-09-05:
+see Phase 1 below.** What remains of Filter 3 is the sizing arithmetic itself:
+capacity at the winter design temperature against the stored design load.
 
 ---
 
@@ -513,22 +515,74 @@ Each phase is additive and independently shippable.
   value never needs translating.
 - **Decide §7.1 (data source) before writing any importer.**
 
-### Phase 1 — read the load off the assessment  *(dependency, not this workstream's build)*
-**DECIDED 2026-09-05 (Nicholas): the design load goes on the ASSESSMENT record,
-and a separate session is adding it.** This workstream does not design a
-`load_calculations` object and must not add competing columns.
-- What this workstream owes Phase 1 is a **contract, not a table**: name the
-  fields the engine reads — design heating load Btu/h, design cooling load
-  Btu/h (sensible and latent), winter 99 % design dry bulb, summer 1 % design
-  dry bulb, weather station, conditioned floor area, and the source Manual J
-  PDF as the evidence artifact. Agree those column names with the other session
-  before either side writes code; a mismatch here is the one thing that makes
-  both efforts useless.
-- Today `assessments` carries **none** of them — verified 2026-09-05, every
-  column searched. The nearest things are `assessment_output_rated_heating_capacity_btuh`
-  (a nameplate rating, not a load) and `assessment_hp_backup_heating_capacity_btuh`.
-- The engine reads them and **never writes them**. The standalone tool takes the
-  same numbers by hand, which is what proves the engine is record-independent.
+### Phase 1 — the load lands in LEAP  ✅ **SHIPPED 2026-09-05**
+
+**DECIDED 2026-09-05 (Nicholas): the design load belongs to the ASSESSMENT.**
+*"I think it belongs on the assessment record… The user, probably the project
+coordinator, will drag it on top of this widget you're making, and then you'll
+scrape the information from it and then save the PDF to the assessment object."*
+
+Built and live. **It is NOT columns on `assessments`** — a Manual J is a shape,
+not a field set (17 load blocks at five scopes, 15 components in each, 14
+envelope assemblies), and `assessments` already carries 250 columns. It is
+**`manual_j_reports` (MJR-)**, whose `assessment_id` is NOT NULL, with
+`manual_j_load_blocks` / `_load_components` / `_building_materials` beneath it.
+Property, building, unit, opportunity and project are inherited from the
+assessment, so the engine can find a building's load without walking back up.
+
+**It is scraped, not typed** — §7.5 recommended typing six numbers with a parse
+deferred to Phase 5, and the parse turned out to be the cheaper half: the report
+is regular, and typing six numbers is where a transposed digit becomes a
+mis-sized heat pump. The coordinator drops the Conduit Tech PDF on the card,
+LEAP reads the whole report, a person checks it, and the PDF is filed on the
+assessment as the evidence artifact.
+
+#### The contract the engine reads — column names, settled
+
+Read these off `manual_j_reports`, newest non-deleted row for the assessment.
+**The engine READS them and never writes them**, which is what keeps it
+record-independent and lets the standalone tool take the same numbers by hand.
+
+| What the engine needs | Column |
+|---|---|
+| Design heating load Btu/h | `mjr_design_heating_load_btuh` |
+| Design cooling load Btu/h (total) | `mjr_design_cooling_load_btuh` |
+| …sensible / latent | `mjr_design_sensible_cooling_btuh` / `mjr_design_latent_cooling_btuh` |
+| Which load that is, and why | `mjr_design_load_basis` / `mjr_design_load_basis_id` |
+| Winter 99 % design dry bulb | `mjr_heating_outdoor_db_f` |
+| Summer 1 % design dry bulb | `mjr_cooling_outdoor_db_f` |
+| Indoor design conditions | `mjr_heating_indoor_db_f` / `mjr_cooling_indoor_db_f` / `mjr_cooling_indoor_rh_pct` |
+| Weather station | `mjr_weather_station` |
+| Elevation / altitude correction | `mjr_elevation_ft` / `mjr_altitude_correction_factor` |
+| Conditioned floor area | `mjr_conditioned_floor_area_sq_ft` |
+| Construction year (NEEP brackets on it) | `mjr_neep_construction_year` |
+| Ducted or ductless | `mjr_neep_ducting_configuration` |
+| The source PDF | `document_id` → `documents` |
+
+Per-room loads and per-assembly U-values are in the child tables when the engine
+wants to size a single zone or reason about the envelope.
+
+#### The trap any sizing engine has to know about
+
+**Do NOT read the whole-home load block.** A report that models more than one
+proposed system prints a Whole Home total that counts every shared room **once
+per system**. On the real 2506 Frazier Ave report the printed whole-home heating
+load is **46,735 Btu/h** and the building needs **29,882** — the difference is
+Zone 1 over again, its five rooms served by both the gas furnace and the
+cold-climate heat pump being compared. Sizing to the printed figure oversizes by
+1.6×. The cooling side of the same report does *not* diverge, so the check runs
+per measure.
+
+`mjr_design_heating_load_btuh` is the corrected, person-confirmed number and is
+safe. The raw blocks are stored exactly as printed — including the double count
+— because correcting a source silently is how a wrong number becomes a fact.
+
+**Still open from this phase:** only Conduit Tech is parsed; a second tool is a
+new parser behind the same interface, not a rewrite. A load calculation reaches
+a building or unit only through its assessment. (§7.7 is now settled — the
+selection lands on `opportunity_line_items.oli_equipment_product_id` — so the
+`equipment_selections` object this plan once proposed is withdrawn, and the
+three hand-typed heat-pump blocks in §2c-bis are a separate follow-up.)
 
 ### Phase 2 — the catalog gets filled
 - Follow the HUD import pattern already proven in this repo (see
@@ -650,9 +704,14 @@ ashp.neep.org. It **does** publish capacity at 47/17/5 °F and COP at
 No subscription is needed.
 
 **7.2 — Where does the design load live?**
-**DECIDED 2026-09-05, Nicholas: on the ASSESSMENT record**, being added by a
-separate session. This workstream reads it and adds no competing columns
-(§Phase 1). Supersedes the earlier `load_calculations` proposal.
+**DECIDED 2026-09-05, Nicholas: on the ASSESSMENT record.** *"I think it belongs
+on the assessment record."* **Shipped** — `manual_j_reports.assessment_id` is NOT
+NULL, with the load blocks, components and assemblies beneath it; property,
+building, unit, opportunity and project are inherited so the sizing engine can
+find a building's load directly. Supersedes the earlier `load_calculations`
+proposal. The engine reads these columns and adds no competing ones — the
+contract is in Phase 1. Still open: a load calculation reaches a building or
+unit only through its assessment.
 
 **7.3 — Which equipment categories are in scope for round one?**
 *Recommendation:* the three equipment record types that already exist — heat
@@ -668,11 +727,15 @@ callback, a warranty claim, and a failed programme inspection.
 → *Yes / no?*
 
 **7.5 — Where does the Manual J come from on day one?**
-*Recommendation:* **typed in from the Conduit Tech report, with the PDF attached
-as the evidence artifact.** A Conduit integration is real work and should not
-gate the sizing engine, which is the part with the value. (The field names are
-the other session's; this is about the source, not the schema.)
-→ *Yes / no?*
+*Recommendation was:* typed in from the Conduit Tech report, with the PDF
+attached as the evidence artifact.
+→ **DECIDED 2026-09-05, Nicholas — SCRAPED, not typed.** *"I'll upload the
+Conduit Tech report… I want the software to scrape all of the relevant fields
+and put the information in."* **Shipped**: the coordinator drops the PDF on the
+assessment, LEAP reads it, a person checks it, and the PDF is filed as the
+evidence. Typing turned out to be the more expensive option once the report
+proved regular — and it is where a transposed digit becomes a mis-sized heat
+pump.
 
 **7.6 — Do Phase 0's duplicate-column cleanups ship first, on their own?**
 *Recommendation:* **yes.** Small, free while the tables are empty, and ingesting

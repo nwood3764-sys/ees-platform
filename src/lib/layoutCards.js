@@ -44,7 +44,7 @@ export const CONVERSATION_CARD_TITLE = 'Communications'
 
 export const CARD_WIDGET_TYPES = new Set([
   'related_list', 'file_gallery', 'conversation_panel', 'conversation_messages',
-  'conversation_list', 'report', 'prtsn_history', 'work_plan',
+  'conversation_list', 'report', 'prtsn_history', 'work_plan', 'manual_j',
 ])
 
 /** True when this widget is a card (drawn as its own panel), not a field group. */
@@ -164,6 +164,22 @@ export const CARD_CATALOG = [
     availableOn: (object) => object === 'work_orders'
       ? null
       : 'A work plan belongs to a work order.',
+    buildConfig: () => ({}),
+  },
+  {
+    id: 'manual_j',
+    widgetType: 'manual_j',
+    label: 'Manual J Load Calculation',
+    description: 'Drop the Manual J report; LEAP reads the design loads, conditions and assemblies off it.',
+    defaultTitle: 'Manual J Load Calculation',
+    configure: null,
+    // A Manual J belongs to the assessment that produced it (Nicholas,
+    // 2026-09-05), and `manual_j_reports.assessment_id` is NOT NULL — so the
+    // card genuinely cannot store anything anywhere else. This is the same
+    // shape as the Work Plan card, not a preference about where it looks best.
+    availableOn: (object) => object === 'assessments'
+      ? null
+      : 'A Manual J load calculation belongs to the assessment that produced it.',
     buildConfig: () => ({}),
   },
   {

@@ -31,6 +31,10 @@ const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstall
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
 const SubmittedEnrollmentModal      = lazy(() => import('./SubmittedEnrollmentModal'))
 const GeneratedDocumentModal        = lazy(() => import('./GeneratedDocumentModal'))
+// The Manual J card is lazy: it pulls pdf.js from the CDN the moment a report
+// is dropped on it, and an assessment nobody drops a PDF on should never pay
+// for that.
+const ManualJReportCard             = lazy(() => import('./ManualJReportCard'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -9953,6 +9957,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
     if (w.widget_type === 'conversation_list') {
       return <ConversationListWidget key={w.id} widget={w} parentRecordId={recordId} />
+    }
+    if (w.widget_type === 'manual_j') {
+      return (
+        <Suspense key={w.id} fallback={null}>
+          <ManualJReportCard recordId={recordId} title={w.widget_title || 'Manual J Load Calculation'} />
+        </Suspense>
+      )
     }
     if (w.widget_type === 'prtsn_history') {
       return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />
