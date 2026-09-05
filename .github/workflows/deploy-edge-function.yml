@@ -17,6 +17,17 @@ name: Deploy Edge Function
 #   SUPABASE_ACCESS_TOKEN - a Supabase personal access token with access to the
 #                           LEAP project. Create it at
 #                           https://supabase.com/dashboard/account/tokens
+#
+# Creating that token, recorded because two of the answers are counter-intuitive:
+#   - The project is named "EES AI - LEAP" (ref flyjigrijjjtcsvpgzvk). The token
+#     form picks by NAME, not by ref.
+#   - It sits in the LEGACY-NAMED organization, NOT the one called "EES". The
+#     obvious pick is the wrong one, and a token scoped to the wrong org
+#     authenticates fine and then fails the deploy with "project not found".
+#   - Permissions default to None: it needs Application services -> Edge
+#     Functions = Write, and Project = Read. Nothing else.
+#   - The token in use EXPIRES 2027-09-01. On that date this workflow starts
+#     failing with an auth error; regenerate the token and replace the secret.
 
 on:
   workflow_dispatch:
