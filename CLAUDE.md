@@ -16,6 +16,9 @@ The company running on LEAP is **Energy Efficiency Services of Wisconsin (EES / 
 
 - **Frontend:** React + Vite. Single-file HTML for simple modules; React + Tailwind + shadcn/ui for complex multi-view apps.
 - **Database:** Supabase / PostgreSQL — project `flyjigrijjjtcsvpgzvk`. RLS on all tables, FKs enforced, `created_at`/`updated_at` on every record, soft-deletes only.
+  - **In the Supabase dashboard the project is named `EES AI - LEAP`.** The dashboard picks projects and organizations by NAME, never by ref, so the ref alone is not enough to follow an instruction there.
+  - **It lives in the LEGACY-NAMED organization, id `zedexbkelkxposiflbhn` (Pro plan) — NOT the organization called `EES`,** which is a separate container holding nothing of LEAP's. The obvious pick is the wrong one; a personal access token scoped to the `EES` org authenticates fine and then fails with *project not found*. Same org also holds **`LEAP Staging`**, which shares its quota.
+  - **Deploying an edge function:** this sandbox has no Supabase CLI and no management token, and the MCP `deploy_edge_function` tool takes the source **inline** — so a large function means re-emitting the whole file through the model, which is a real corruption risk on a service Supabase cannot roll back. Use **Actions → Deploy Edge Function** (`.github/workflows/deploy-edge-function.yml`) instead; it needs the repo secret `SUPABASE_ACCESS_TOKEN` (Edge Functions = Write, Project = Read; the token in use expires **2027-09-01**). Small functions through MCP are fine.
 - **Hosting:** Netlify. Commits to `master` auto-deploy. Subdomain convention `[module].ees-wi.org`.
 - **Repo:** `nwood3764-sys/ees-platform`, branch `master`. Commit author must be `Nicholas Wood / nicholas.wood@ees-wi.org` or Netlify blocks the build.
 
