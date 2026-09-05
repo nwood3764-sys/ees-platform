@@ -281,7 +281,7 @@ export default function OpportunityProductsWidget({
         equipStep.product.value, newEquip?.manufacturer, model)
       // Straight through to the line item: the person came here to add a
       // product, not to administer a catalogue.
-      await insertProduct(equipStep.product.value, equipmentId)
+      await applyEquipment(equipmentId)
       setNewEquip(null)
     } catch (e) {
       console.error('Create equipment failed', e)
@@ -291,18 +291,56 @@ export default function OpportunityProductsWidget({
     }
   }
 
+  /**
+   * Open the equipment step for one measure.
+   *
+   * lineId null  — the line does not exist yet; answering inserts it.
+   * lineId set   — the line is already saved and has no equipment. That is how
+   *                the lines created before the equipment step existed are
+   *                fixed: by filling in the model, not by deleting a priced
+   *                line and re-adding it.
+   */
+  const openEquipmentStep = async (product, lineId = null) => {
+    setNewEquip(null)
+    setChoosingBook(false)
+    setAddOpen(true)
+    setEquipStep({ product, options: null, lineId })
+    const same = cur => cur && cur.product.value === product.value && cur.lineId === lineId
+    try {
+      const models = await listQualifyingEquipment(product.value)
+      setEquipStep(cur => (same(cur) ? { ...cur, options: models } : cur))
+    } catch (e) {
+      console.error('Load qualifying equipment failed', e)
+      setEquipStep(cur => (same(cur) ? { ...cur, options: [] } : cur))
+    }
+  }
+
   // Picking a product either adds the line straight away, or — when the measure
   // installs a model-numbered device — opens the equipment step first.
   const chooseProduct = async (option) => {
     if (!option.requiresEquipment) return insertProduct(option.value)
-    setNewEquip(null)
-    setEquipStep({ product: option, options: null })
+    return openEquipmentStep(option)
+  }
+
+  /**
+   * The equipment step's answer, whichever way the step was opened: insert the
+   * new line, or fill in the model on the line that is already there.
+   */
+  const applyEquipment = async (equipmentProductId) => {
+    if (!equipStep) return
+    if (!equipStep.lineId) return insertProduct(equipStep.product.value, equipmentProductId)
+    setBusyId(equipStep.lineId)
     try {
-      const models = await listQualifyingEquipment(option.value)
-      setEquipStep(cur => (cur && cur.product.value === option.value ? { ...cur, options: models } : cur))
+      const row = await updateOpportunityProductField(
+        equipStep.lineId, 'oli_equipment_product_id', equipmentProductId)
+      setRows(prev => prev.map(r => (r.id === row.id ? row : r)))
+      setEquipStep(null)
+      setAddOpen(false)
     } catch (e) {
-      console.error('Load qualifying equipment failed', e)
-      setEquipStep(cur => (cur && cur.product.value === option.value ? { ...cur, options: [] } : cur))
+      console.error('Set line equipment failed', e)
+      toast.error(describeAddError(e))
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -518,6 +556,7 @@ export default function OpportunityProductsWidget({
                 // Step 2: browse the whole product list for the opportunity's
                 // price book (search is an optional filter, not required).
                 <>
+                  {!equipStep?.lineId && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>
                       Products in {priceBook.price_book_name || 'this price book'}
@@ -529,6 +568,8 @@ export default function OpportunityProductsWidget({
                       >Change price book</button>
                     )}
                   </div>
+                  )}
+                  {!equipStep?.lineId && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                     <input
                       autoFocus
@@ -539,6 +580,7 @@ export default function OpportunityProductsWidget({
                     />
                     <button onClick={() => { setAddOpen(false); setEquipStep(null); setNewEquip(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
                   </div>
+                  )}
                   {equipStep ? (
                     /* The equipment step. The measure is chosen; now say which
                        model is going in. The line cannot be saved without it,
@@ -562,7 +604,7 @@ export default function OpportunityProductsWidget({
                               <button
                                 key={m.value}
                                 disabled={adding || savingEquip}
-                                onClick={() => insertProduct(equipStep.product.value, m.value)}
+                                onClick={() => applyEquipment(m.value)}
                                 style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: (adding || savingEquip) ? 'wait' : 'pointer', color: C.textPrimary }}
                               >
                                 {m.label}
@@ -637,10 +679,10 @@ export default function OpportunityProductsWidget({
                       </div>
                       <div style={{ padding: '8px 12px', borderTop: `1px solid ${C.border}` }}>
                         <button
-                          onClick={() => { setEquipStep(null); setNewEquip(null) }}
+                          onClick={() => { setEquipStep(null); setNewEquip(null); if (equipStep.lineId) setAddOpen(false) }}
                           style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}
                         >
-                          ← Back to products
+                          {equipStep.lineId ? 'Cancel' : '← Back to products'}
                         </button>
                       </div>
                     </div>
@@ -724,16 +766,33 @@ export default function OpportunityProductsWidget({
                         </td>
                         {/* Equipment. A line that installs nothing model-numbered
                             shows a dash, not an empty cell that reads as unanswered;
-                            a HEAR line still missing its model says so plainly, which
-                            is how the seven rows created before this column existed
-                            announce themselves. */}
+                            a line still missing its model says so plainly AND offers
+                            the same equipment step the add flow uses, which is how
+                            the rows created before that step existed get fixed.
+
+                            Read from the MEASURE'S own flag, never from the line's
+                            cached oli_is_equipment_line: that column is a copy, and
+                            on the two heat pump lines written before the rule it said
+                            FALSE — so the cell showed the dash that means "needs
+                            nothing" on a line that must have equipment. The copy is
+                            now cascaded (20260905172049); the screen no longer
+                            depends on it being right. */}
                         <td style={{ ...td, minWidth: 170 }}>
-                          {!row.oli_is_equipment_line ? (
+                          {!row.product_requires_equipment ? (
                             <span style={{ color: C.textMuted }}>—</span>
                           ) : row.equipment_name ? (
                             row.equipment_name
                           ) : (
-                            <span style={{ color: C.amber, fontWeight: 600 }}>Not selected</span>
+                            <button
+                              disabled={rowBusy}
+                              onClick={() => openEquipmentStep(
+                                { value: row.product_id, label: row.product_name || 'this measure' },
+                                row.id)}
+                              title="Select the equipment being installed"
+                              style={{ background: 'none', border: 'none', padding: 0, color: C.amber, fontSize: 13, fontWeight: 600, cursor: rowBusy ? 'wait' : 'pointer', textAlign: 'left', textDecoration: 'underline' }}
+                            >
+                              Not selected
+                            </button>
                           )}
                         </td>
                         <td style={{ ...td, minWidth: 200 }}>{renderEditable(row, 'oli_line_description', row.oli_line_description || '—', 'left')}</td>
