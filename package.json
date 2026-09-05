@@ -26,6 +26,7 @@
     "verify:datetime-field": "node tools/datetime-field-check/run.mjs",
     "verify:service-appointment-list": "node tools/service-appointment-list-check/run.mjs",
     "verify:page-layout-alignment": "node tools/page-layout-alignment-check/run.mjs",
+    "verify:layout-field-drag": "node tools/layout-field-drag-check/run.mjs",
     "verify:hear-equipment-signature": "node tools/hear-equipment-signature-check/run.mjs"
   },
   "dependencies": {
