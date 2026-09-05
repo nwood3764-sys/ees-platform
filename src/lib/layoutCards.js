@@ -29,7 +29,7 @@
 // so a copy is deterministic and testable. Pinned by
 // scripts/layout-cards-fixture.mjs.
 
-import { OBJECT_CONVERSATION_FK } from './conversationAnchors.js'
+import { OBJECT_CONVERSATION_FK, objectCanHoldConversations, conversationAnchorConfig } from './conversationAnchors.js'
 
 // What the omni-channel card is CALLED, in one place: the palette that places
 // it, the card the record page draws, and the migration that seeded it all say
@@ -57,14 +57,13 @@ export function isCardWidget(widgetOrType) {
 
 // ─── Object-scoped availability ──────────────────────────────────────────────
 
-// Objects whose records can host a Communications (two-way email) panel, and
-// the FK column on `conversations` that anchors a thread to them. A
-// conversation_panel stores its anchor as widget_config.fk.
-//
-// This used to be one of eight hand-kept copies of that fact. There is now one
-// client definition — conversationAnchors.js — and the database derives its
-// own from the conversations table's foreign keys. Re-exported here because
-// the layout palette has always been imported for it.
+// A Communications card can go on ANY object with a record page (Nicholas,
+// 2026-09-05: "on projects, on work orders, on anything"). A thread is
+// Related To the record it was started from; a conversation_panel stores the
+// object it sits on as widget_config.related_object, plus the object's own
+// column on `conversations` as widget_config.fk when it has one (twelve do —
+// see conversationAnchors.js). Re-exported because the palette has always
+// been imported for it.
 export { OBJECT_CONVERSATION_FK }
 
 // Objects a PHOTOS gallery may be placed on. Mirror of PHOTO_ALLOWED_OBJECTS in
@@ -135,14 +134,14 @@ export const CARD_CATALOG = [
     id: 'conversation_panel',
     widgetType: 'conversation_panel',
     label: CONVERSATION_CARD_TITLE,
-    description: 'Two-way email threads anchored to this record.',
+    description: 'Email threads, text threads and logged calls related to this record.',
     defaultTitle: CONVERSATION_CARD_TITLE,
     configure: null,
-    availableOn: (object) => OBJECT_CONVERSATION_FK[object]
+    availableOn: (object) => objectCanHoldConversations(object)
       ? null
-      : 'Conversations carry no foreign key to this object, so a thread cannot be anchored to one of its records.',
+      : 'A thread cannot be related to a person or to another thread.',
     buildConfig: (object) => ({
-      fk: OBJECT_CONVERSATION_FK[object], table: 'conversations', channel_filter: null,
+      ...conversationAnchorConfig(object), table: 'conversations', channel_filter: null,
     }),
   },
   {

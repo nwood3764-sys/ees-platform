@@ -59,12 +59,12 @@ import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
 import { CardPaletteModal, CardConfigModal, CopyCardModal } from './widgets/CardPaletteModal'
 import {
   CARD_WIDGET_TYPES,
-  cardDefinition, buildCardWidget, cardCopyTargets, copyCardTo,
+  cardDefinition, buildCardWidget, cardCopyTargets, copyCardTo, CONVERSATION_CARD_TITLE,
 } from '../../lib/layoutCards.js'
 
 const WIDGET_LABELS = {
   field_group: 'Field Group', related_list: 'Related List', report: 'Report',
-  file_gallery: 'File Gallery', conversation_panel: 'Conversation', status_path: 'Status Path',
+  file_gallery: 'File Gallery', conversation_panel: CONVERSATION_CARD_TITLE, status_path: 'Status Path',
   prtsn_history: 'Publish History', map: 'Map',
 }
 

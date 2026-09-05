@@ -107,13 +107,19 @@ check('the Photos refusal names Documents as the card to use instead',
 // here, which is why the check reads the other way now.
 check('Communications can be placed on an enrollment',
   enrollmentCards.find(c => c.id === 'conversation_panel').disabled, false)
-// CONTROL — an object with no anchor column on conversations is still refused,
-// and says why. A card that cannot hold a thread must not be offered.
+// 2026-09-05 — a thread is Related To any record with a page (Nicholas: "on
+// projects, on work orders, on anything… Why are there limits?"). A work
+// step, refused here until then, is offered; the two rule-based exclusions
+// are the CONTROL.
 const workStepCards = availableCards('work_steps', [])
-check('Communications is refused on a work step',
-  workStepCards.find(c => c.id === 'conversation_panel').disabled, true)
-check('the refusal explains that no thread can be anchored there',
-  /foreign key/.test(workStepCards.find(c => c.id === 'conversation_panel').disabledReason), true)
+check('Communications is offered on a work step',
+  workStepCards.find(c => c.id === 'conversation_panel').disabled, false)
+check('Communications is offered on a vehicle',
+  availableCards('vehicles', []).find(c => c.id === 'conversation_panel').disabled, false)
+check('Communications is refused on users, and says why',
+  /person/.test(availableCards('users', []).find(c => c.id === 'conversation_panel').disabledReason), true)
+check('Communications is refused on conversations themselves',
+  availableCards('conversations', []).find(c => c.id === 'conversation_panel').disabled, true)
 check('Work Plan is refused off a work order',
   enrollmentCards.find(c => c.id === 'work_plan').disabled, true)
 check('Publish History is refused off a project report template',
@@ -170,8 +176,11 @@ check('a Documents card is titled Documents', docsCard.title, 'Documents')
 check('a new card carries the key it was given', docsCard.key, 'w-new-1')
 
 const commsCard = buildCardWidget('conversation_panel', 'properties', 'w-new-2')
-check('a Communications card anchors to this object’s FK on conversations',
-  commsCard.config, { fk: 'property_id', table: 'conversations', channel_filter: null })
+check('a Communications card stores its object and, where there is one, the column on conversations',
+  commsCard.config, { related_object: 'properties', fk: 'property_id', table: 'conversations', channel_filter: null })
+check('a Communications card on a work step stores its object and no column',
+  buildCardWidget('conversation_panel', 'work_steps', 'w-new-2b').config,
+  { related_object: 'work_steps', fk: null, table: 'conversations', channel_filter: null })
 check('a Photos card on a work order targets photos',
   buildCardWidget('photos', 'work_orders', 'w-new-3').config, { target: 'photos' })
 check('a Photos card cannot be built for an enrollment even by id',

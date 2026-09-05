@@ -24,6 +24,7 @@ import {
   FK_TO_ANCHOR_OBJECT,
   objectCanHoldConversations,
   resolveAnchorFromConversation,
+  conversationAnchorConfig,
 } from '../src/lib/conversationAnchors.js'
 
 let failures = 0
@@ -38,27 +39,49 @@ function check(label, actual, expected) {
   }
 }
 
-// ─── The objects, and the two that this change is about ──────────────────────
+// ─── Related To: any object with a record page (2026-09-05) ─────────────────
+//
+// Nicholas: "I want to be able to put communications on wherever I want: on
+// projects, on work orders, on anything… Why are there limits?" The limit was
+// this module's object list. A thread now carries a polymorphic Related To
+// and the database (conversation_related_to_objects()) decides which objects
+// qualify — every record-carrying table with a live page layout, 72 on prod
+// the day this shipped. The client keeps NO list of objects; only the twelve
+// foreign-key columns, which still carry the owner-chain rule, the state
+// scope and the account roll-up.
 
 check('enrollments can hold a Communications card', objectCanHoldConversations('enrollments'), true)
 check('incentive applications can hold one', objectCanHoldConversations('incentive_applications'), true)
 check('an enrollment thread is anchored on enrollment_id',
   OBJECT_CONVERSATION_FK.enrollments, 'enrollment_id')
-check('an object with no anchor is refused, not guessed',
-  objectCanHoldConversations('work_steps'), false)
-check('an unknown object is refused', objectCanHoldConversations('not_a_table'), false)
-check('no object is missing', CONVERSATION_ANCHORS.length, 12)
+check('a work step — no column on conversations — can hold one now',
+  objectCanHoldConversations('work_steps'), true)
+check('a vehicle can hold one', objectCanHoldConversations('vehicles'), true)
+check('an object the client has never heard of is not refused here — the database decides',
+  objectCanHoldConversations('some_future_object'), true)
+// CONTROL — the two exclusions are a rule the database applies too.
+check('a person is never a Related To', objectCanHoldConversations('users'), false)
+check('a thread is never Related To a thread', objectCanHoldConversations('conversations'), false)
+check('an empty object is refused', objectCanHoldConversations(''), false)
+check('a null object is refused', objectCanHoldConversations(null), false)
+check('the twelve foreign-key anchors are unchanged', CONVERSATION_ANCHORS.length, 12)
 
-// Every object the database can anchor a thread to — conversations' own
-// foreign keys, minus users and picklist_values — read back from prod on
-// 2026-09-03. The client map must name exactly these.
+// The twelve objects with their own column on conversations — read back from
+// prod. The client map must name exactly these, because a thread Related To
+// one of them is ALSO written to its column, and the reply resolver reads it.
 const ANCHORS_IN_THE_DATABASE = [
   'accounts', 'assessments', 'buildings', 'contacts', 'enrollments',
   'incentive_applications', 'opportunities', 'projects', 'properties',
   'service_appointments', 'units', 'work_orders',
 ]
-check('the client names exactly the objects the database anchors',
+check('the client names exactly the objects the database has a column for',
   CONVERSATION_ANCHORS.map(a => a.object).sort(), ANCHORS_IN_THE_DATABASE)
+
+// What a card stores: the object it sits on, plus the column when there is one.
+check('a card on a property stores its object and its column',
+  conversationAnchorConfig('properties'), { related_object: 'properties', fk: 'property_id' })
+check('a card on a work step stores its object and no column',
+  conversationAnchorConfig('work_steps'), { related_object: 'work_steps', fk: null })
 
 // ─── The two maps are one map ────────────────────────────────────────────────
 
@@ -80,7 +103,18 @@ check('every anchor column follows the naming convention',
   CONVERSATION_ANCHORS.filter(a => a.fk !== `${singular(a.object)}_id`).map(a => a.object),
   [])
 
-// ─── The order is the answer to "reply from where?" ──────────────────────────
+// ─── Related To wins; the order answers "reply from where?" otherwise ────────
+
+check('a thread Related To a work step replies from the work step',
+  resolveAnchorFromConversation({ conv_related_object: 'work_steps', conv_related_id: 'ws1', work_order_id: 'w1', property_id: 'p1' }),
+  { anchorObject: 'work_steps', anchorRecordId: 'ws1' })
+check('a Related To to a foreign-key-backed object is read the same way',
+  resolveAnchorFromConversation({ conv_related_object: 'accounts', conv_related_id: 'a1', contact_id: 'c1', account_id: 'a1' }),
+  { anchorObject: 'accounts', anchorRecordId: 'a1' })
+check('a half-filled Related To (object, no id) falls back to the columns',
+  resolveAnchorFromConversation({ conv_related_object: 'work_steps', conv_related_id: null, property_id: 'p1' }),
+  { anchorObject: 'properties', anchorRecordId: 'p1' })
+
 
 check('a thread carrying only a property replies from the property',
   resolveAnchorFromConversation({ property_id: 'p1' }),
