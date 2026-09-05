@@ -44,7 +44,7 @@
 
 import { useState, useEffect, useCallback, memo } from 'react'
 import {
-  DndContext, closestCorners, pointerWithin, PointerSensor, KeyboardSensor, useSensor, useSensors,
+  DndContext, closestCorners, closestCenter, pointerWithin, PointerSensor, KeyboardSensor, useSensor, useSensors,
   useDroppable, useDraggable, useDndContext,
 } from '@dnd-kit/core'
 import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
@@ -57,11 +57,9 @@ import { describeObject } from '../../data/adminService'
 import { consumeLayoutReturnRecord } from '../../lib/urlNav'
 import { packFieldGroupRows } from '../../lib/fieldGroupLayout'
 import {
-  FIELD_CELL_PREFIX, FIELD_INSERT_PREFIX, FIELD_INSERT_AFTER_PREFIX, FIELD_BLANK_PREFIX,
-  FIELD_ZONE_SUFFIX, SPACER,
-  fieldCellDragId, fieldInsertDropId, fieldInsertAfterDropId, fieldBlankDropId,
-  fieldZoneDropId, parseFieldDropId,
-  applyFieldDropWithinGroup, removeFieldAt, insertFieldIntoGroup,
+  FIELD_CELL_PREFIX, FIELD_BLANK_PREFIX, FIELD_COLUMN_END_PREFIX, FIELD_ZONE_SUFFIX, SPACER,
+  fieldCellDragId, fieldBlankDropId, fieldColumnEndDropId, fieldZoneDropId, parseFieldDropId,
+  applyFieldDropWithinGroup, removeFieldAt, insertFieldIntoGroup, toColumnBands,
 } from '../../lib/fieldGroupPlacement'
 import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
 import { CardPaletteModal, CardConfigModal, CopyCardModal } from './widgets/CardPaletteModal'
@@ -198,14 +196,19 @@ function dragFamily(id) {
   return 'field'
 }
 
-// A field drag has to resolve to the exact thing under the POINTER, not to the
-// nearest box: an insertion line lives in the 6px gutter between two tiles and
-// is deliberately narrow, so closestCorners — which measures from a box's
-// corners — would hand the drop to the tile beside it every time and the two
-// gestures would collapse back into one. pointerWithin answers "which boxes is
-// the cursor actually inside", and the line wins over the tile it overlays,
-// which wins over the group behind both. Keyboard drags report no pointer, so
-// those still fall through to closestCorners.
+// Which droppable a field drag lands on.
+//
+// Two rules, and the second is the one that was missing. A drop resolves to the
+// thing under the POINTER — a cell, the blank at the end of a short column, or
+// the strip under a column — because these are small boxes and closestCorners,
+// which measures from a box's corners, hands a drop to whichever neighbour
+// happens to be nearer.
+//
+// And a drop that lands inside a section but not on any of them — the 6px gap
+// between two rows is enough — resolves to that section's NEAREST cell, never
+// to the section itself. Falling through to the section meant "append", so
+// missing a tile by a few pixels sent the field to the end of the layout and
+// re-columned everything after it. A near miss must never be a long move.
 //
 // Exported so tools/layout-field-drag-check drives the REAL resolution in a
 // real browser. Which droppable a pixel belongs to is not a fact you can read
@@ -214,34 +217,36 @@ export function canvasCollisionDetection(args) {
   const family = dragFamily(args.active.id)
   const droppableContainers = args.droppableContainers.filter(c => dragFamily(c.id) === family)
   if (family === 'field') {
+    const isPlace = (c) => {
+      const id = String(c.id)
+      return id.startsWith(FIELD_CELL_PREFIX) || id.startsWith(FIELD_BLANK_PREFIX)
+        || id.startsWith(FIELD_COLUMN_END_PREFIX)
+    }
     const within = pointerWithin({ ...args, droppableContainers })
-    for (const test of [
-      (c) => String(c.id).startsWith(FIELD_INSERT_PREFIX) || String(c.id).startsWith(FIELD_INSERT_AFTER_PREFIX),
-      (c) => String(c.id).startsWith(FIELD_CELL_PREFIX) || String(c.id).startsWith(FIELD_BLANK_PREFIX),
-      (c) => String(c.id).endsWith(FIELD_ZONE_SUFFIX),
-    ]) {
-      const hit = within.find(test)
-      if (hit) return [hit]
+    const hit = within.find(isPlace)
+    if (hit) return [hit]
+    const zone = within.find(c => String(c.id).endsWith(FIELD_ZONE_SUFFIX))
+    if (zone) {
+      const sectionKey = parseFieldDropId(zone.id)?.sectionKey
+      const own = droppableContainers.filter(c => isPlace(c) && parseFieldDropId(c.id)?.sectionKey === sectionKey)
+      if (own.length) return closestCenter({ ...args, droppableContainers: own })
+      return [zone]
     }
   }
   return closestCorners({ ...args, droppableContainers })
 }
 
-// A field drag ends in exactly one of three places, and each says something
-// different about where the field should end up. The rules themselves are in
-// src/lib/fieldGroupPlacement.js — this resolves the ids to sections and hands
-// the section's field array over.
+// A field drag ends on a cell, on the blank at the end of a short column, on
+// the strip under a column, or on the group itself. Each resolves to a position
+// in a COLUMN — the rules are in src/lib/fieldGroupPlacement.js — and this
+// turns the ids into sections and hands the section's field array over.
 //
-// A drop INSERTS. Nicholas, 2026-09-05: "If I move something over, it goes in
-// between the two existing fields. That's it, and then you readjust to make
-// sure the rows are horizontally aligned" — and, on the swap an earlier cut of
-// this shipped with, "I don't want fields to trade places ever." So the field
-// lands where it was dropped and the fields after it move along one place; a
-// field the admin did not drag is never thrown across the section.
+// The section's column count is part of the answer, not decoration: it is what
+// says which column a cell is in.
 //
-// Moving a field to ANOTHER section is the same insertion, one section over:
-// it leaves the section it came from (which closes up behind it) and lands
-// where it was dropped, filling an empty slot if that is what it landed on.
+// Moving a field to ANOTHER section is the same placement one section over: it
+// leaves the column it came from, which closes up, and lands in the column it
+// was dropped on.
 //
 // Pure, and exported, so the fixture and the browser check both drive the real
 // thing rather than a re-typed copy of it.
@@ -258,13 +263,13 @@ export function applyFieldDropToSections(sections, activeId, overId) {
 
   let nextBySection
   if (src.key === tgt.key) {
-    nextBySection = { [src.key]: applyFieldDropWithinGroup(srcFields, from.index, to) }
+    nextBySection = { [src.key]: applyFieldDropWithinGroup(srcFields, src.columns || 2, from.index, to) }
   } else {
-    const taken = removeFieldAt(srcFields, from.index)
+    const taken = removeFieldAt(srcFields, src.columns || 2, from.index)
     if (!taken.field) return sections
     nextBySection = {
       [src.key]: taken.fields,
-      [tgt.key]: insertFieldIntoGroup(fieldsOf(tgt), taken.field, to),
+      [tgt.key]: insertFieldIntoGroup(fieldsOf(tgt), tgt.columns || 2, taken.field, to),
     }
   }
   return sections.map(sec => {
@@ -1367,9 +1372,9 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenCa
 // could only mean "insert before this tile", so putting a field in a
 // particular CELL was impossible — the flow re-wrapped and every field after
 // the drop changed column. Every cell is now a drop target of its own and a
-// drop on one INSERTS there — the field goes between the two fields it was
-// dropped between, and the fields after it move along one place. See
-// src/lib/fieldGroupPlacement.js.
+// drop on one puts the field in that COLUMN at that position — the column
+// makes room below it, the column it came from closes up, and no field ever
+// changes column on its own. See src/lib/fieldGroupPlacement.js.
 //
 // No DndContext here: the whole canvas shares ONE context (in
 // LayoutCanvasEditor) so a field can be dragged across sections, not just
@@ -1380,20 +1385,20 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenCa
 // editor, and the two surfaces disagreeing about placement is what caused the
 // staggered rows in the first place.
 export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
-  // Section-scoped drop target for the group as a whole — a drop that lands on
-  // no particular cell (an empty section, or the gap below the last row)
-  // appends. Without it a section with no fields could not be dropped into.
+  // Section-scoped drop target for the group as a whole. A drop that lands on
+  // no cell resolves to this section's nearest cell (see
+  // canvasCollisionDetection); this is only reached for a section with no
+  // fields at all, and for a drop from another section.
   const { setNodeRef, isOver } = useDroppable({ id: fieldZoneDropId(sectionKey) })
-  // Is a field being dragged right now? The insertion lines live in the gutter
-  // between tiles and are invisible until there is something to insert — an
-  // editor covered in hairlines nobody is using reads as clutter.
   const { active } = useDndContext()
   const dragging = active != null && dragFamily(active.id) === 'field'
   const rows = packFieldGroupRows(fields, cols)
-  // Removal is by INDEX, not by name: a `spacer` is a real entry in the array
-  // and has no name (the widget-config validator checks any field that has
-  // one, and a spacer names no column).
-  const removeAt = (index) => onChange(fields.filter((_, i) => i !== index))
+  // Removing a field closes up ITS COLUMN, exactly as dragging it out of the
+  // section does — splicing the raw array instead would pull the whole flow up
+  // by one and re-column every field after it, which is the thing this model
+  // exists to stop. Removal is by INDEX, not by name: a `spacer` is a real
+  // entry in the array and has no name.
+  const removeAt = (index) => onChange(removeFieldAt(fields, cols, index).fields)
   const addSpacer = () => onChange([...fields, { ...SPACER }])
   const toggleFullWidth = (index) => onChange(fields.map((f, i) => {
     if (i !== index) return f
@@ -1402,24 +1407,17 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
     return rest
   }))
 
-  // Where a BLANK cell sits in the array. The blank is drawn but not stored —
-  // it is whatever is left of a row after its last field — so its position is
-  // the index of the next real entry, or the end of the array. Dropping onto
-  // one has to know that number to put the field in the cell the admin aimed
-  // at instead of appending it and landing a column away.
-  const cellSeq = rows.flatMap((row, r) => row.cells.map((cell, c) => ({ ...cell, r, c })))
-  const blankSlots = new Map()
-  // The slot that sits AFTER each cell — the index of the next real entry, or
-  // the end of the array. It is what the trailing insertion line on the last
-  // cell of a row points at, so "drop it to the right of this field" has
-  // somewhere to land instead of falling to the row below.
-  const slotAfter = new Map()
-  let following = fields.length
-  for (let i = cellSeq.length - 1; i >= 0; i--) {
-    slotAfter.set(`${cellSeq[i].r}:${cellSeq[i].c}`, following)
-    if (cellSeq[i].blank) blankSlots.set(`${cellSeq[i].r}:${cellSeq[i].c}`, following)
-    else following = cellSeq[i].index
-  }
+  // Which BAND each row belongs to, so the strip under a column names the band
+  // it ends. A full-width field is a row of its own and splits the section into
+  // bands, which is the one thing that stops "column 2" being a single list.
+  const bands = toColumnBands(fields, cols)
+  const bandOfRow = new Map()
+  bands.forEach((band, bi) => (band.rows || []).forEach(r => bandOfRow.set(r, bi)))
+  const lastRowOfBand = new Map()
+  bands.forEach((band, bi) => {
+    if (band.type !== 'grid' || !band.rows.length) return
+    lastRowOfBand.set(bi, band.rows[band.rows.length - 1])
+  })
 
   return (
     <div ref={setNodeRef} style={{
@@ -1429,59 +1427,70 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
     }}>
       {fields.length === 0 && (
         <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic', padding: '10px 2px' }}>
-          Drop fields here — they fill left to right, then wrap to the next row.
+          Drop fields here.
         </div>
       )}
-      {rows.map((row, rowIndex) => (
-        <div key={`row-${rowIndex}`} data-field-row={rowIndex}
-          style={{ display: 'flex', alignItems: 'stretch', gap: 6, marginBottom: 6 }}>
-          {row.cells.map((cell, cellIndex) => {
-            const isRowEnd = cellIndex === row.cells.length - 1
-            const blankSlot = cell.blank ? (blankSlots.get(`${rowIndex}:${cellIndex}`) ?? fields.length) : null
-            return (
-              <div key={cell.blank ? `pad-${rowIndex}-${cellIndex}` : (cell.field.name || `spacer-${cell.index}`)}
-                data-field-cell={cell.blank ? '' : String(cell.index)}
-                style={{ position: 'relative', flex: `${cell.span} 1 0%`, minWidth: 0, display: 'flex' }}>
-                {!cell.blank && (
-                  <InsertLine sectionKey={sectionKey} slot={cell.index} edge="start" visible={dragging} />
-                )}
-                {isRowEnd && (
-                  <InsertLine sectionKey={sectionKey} after
-                    slot={slotAfter.get(`${rowIndex}:${cellIndex}`) ?? fields.length}
-                    edge="end" visible={dragging} />
-                )}
-                {cell.blank ? (
-                  // The padding at the end of a short row is drawn, not
-                  // omitted: the record page renders it too, and it is a real
-                  // drop target — putting a field in the empty half of a row
-                  // is the one placement the editor could not express before.
-                  <BlankCell sectionKey={sectionKey} slot={blankSlot} />
-                ) : cell.field.type === 'spacer' ? (
-                  <SpacerTile sectionKey={sectionKey} index={cell.index} onRemove={() => removeAt(cell.index)} />
-                ) : (
-                  <FieldTile
-                    field={cell.field}
-                    object={object}
-                    sectionKey={sectionKey}
-                    index={cell.index}
-                    fullWidth={cell.span > 1}
-                    canSpan={cols > 1}
-                    onToggleFullWidth={() => toggleFullWidth(cell.index)}
-                    onRemove={() => removeAt(cell.index)}
-                  />
-                )}
+      {rows.map((row, rowIndex) => {
+        const bandIndex = bandOfRow.get(rowIndex)
+        const endsBand = lastRowOfBand.get(bandIndex) === rowIndex
+        let column = 0
+        return (
+          <div key={`row-${rowIndex}`}>
+            <div data-field-row={rowIndex}
+              style={{ display: 'flex', alignItems: 'stretch', gap: 6, marginBottom: 6 }}>
+              {row.cells.map((cell, cellIndex) => {
+                const colIndex = column
+                column += cell.span
+                return (
+                  <div key={cell.blank ? `pad-${rowIndex}-${cellIndex}` : (cell.field.name || `spacer-${cell.index}`)}
+                    data-field-cell={cell.blank ? '' : String(cell.index)}
+                    data-field-column={colIndex}
+                    style={{ position: 'relative', flex: `${cell.span} 1 0%`, minWidth: 0, display: 'flex' }}>
+                    {cell.blank ? (
+                      // The blank where a column has run short. It is a real
+                      // drop target: a field dropped on it takes that cell and
+                      // nothing in the section moves at all.
+                      <BlankCell sectionKey={sectionKey} row={rowIndex} col={colIndex} />
+                    ) : cell.field.type === 'spacer' ? (
+                      <SpacerTile sectionKey={sectionKey} index={cell.index} onRemove={() => removeAt(cell.index)} />
+                    ) : (
+                      <FieldTile
+                        field={cell.field}
+                        object={object}
+                        sectionKey={sectionKey}
+                        index={cell.index}
+                        fullWidth={cell.span > 1}
+                        canSpan={cols > 1}
+                        onToggleFullWidth={() => toggleFullWidth(cell.index)}
+                        onRemove={() => removeAt(cell.index)}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {endsBand && cols > 1 && (
+              // One strip per column, under the last row it holds: "put it at
+              // the bottom of this column". Without it the only way to reach
+              // the end of a full column would be to drop past the section,
+              // which is how a short move became a move to the end.
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6, height: dragging ? 16 : 0,
+                opacity: dragging ? 1 : 0, transition: 'height 120ms ease' }} aria-hidden="true">
+                {Array.from({ length: cols }, (_, c) => (
+                  <ColumnEndStrip key={c} sectionKey={sectionKey} band={bandIndex} col={c} />
+                ))}
               </div>
-            )
-          })}
-        </div>
-      ))}
+            )}
+          </div>
+        )
+      })}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2 }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: C.textMuted, lineHeight: 1.4 }}>
-          Drop a field <b>between two fields</b> and it goes there — the fields after it move along one place
-          and the rows re-fill. Drop it <b>on an empty slot</b> to fill that slot without moving anything else.
+          Drop a field where you want it and it goes there. <b>A field never changes column</b> unless
+          you drag it to another one — the column you drop into makes room, the one you took it from closes up.
         </span>
         <button onClick={addSpacer}
-          title="Add an empty slot at the end, then drag it where you want the gap. A field dropped on an empty slot fills it without moving anything else."
+          title="Add an empty slot at the end of the last column, then drag it where you want the gap. A field dropped on an empty slot fills it without moving anything else."
           style={{ padding: '4px 9px', fontSize: 11, fontWeight: 500, background: 'transparent',
             color: C.textSecondary, border: `1px dashed ${C.border}`, borderRadius: 5, cursor: 'pointer', flexShrink: 0 }}>
           + Empty slot
@@ -1491,39 +1500,27 @@ export function FieldRowGrid({ cols, fields, object, onChange, sectionKey }) {
   )
 }
 
-// The line between two cells — "put the field HERE, and let the rest re-flow".
-// It sits in the 6px gutter and is 14px wide, which is why the field family
-// resolves collisions by POINTER rather than by nearest box: a target this
-// narrow never wins a corner-distance contest against the tile beside it.
-// pointerEvents stays off so it can never swallow a click on a tile's buttons —
-// dnd-kit measures rectangles, it does not hit-test the DOM.
-function InsertLine({ sectionKey, slot, edge, visible, after = false }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: after ? fieldInsertAfterDropId(sectionKey, slot) : fieldInsertDropId(sectionKey, slot),
-  })
+// The bottom of a column. Only drawn while a field is being dragged — an editor
+// carrying a row of empty strips at rest reads as clutter.
+function ColumnEndStrip({ sectionKey, band, col }) {
+  const { setNodeRef, isOver } = useDroppable({ id: fieldColumnEndDropId(sectionKey, band, col) })
   return (
-    <div ref={setNodeRef} aria-hidden="true" data-insert-line={slot}
-      data-insert-after={after ? '' : undefined} style={{
-      position: 'absolute', top: -2, bottom: -2, width: 14, zIndex: 3,
-      pointerEvents: 'none',
-      ...(edge === 'end' ? { right: -8 } : { left: -8 }),
-      display: 'flex', alignItems: 'stretch', justifyContent: 'center',
-      opacity: visible ? 1 : 0,
+    <div ref={setNodeRef} data-column-end={col} style={{
+      flex: 1, minWidth: 0, borderRadius: 5,
+      border: `1px dashed ${isOver ? C.emerald : C.border}`,
+      background: isOver ? '#f0faf5' : 'transparent',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 9.5, letterSpacing: 0.3, color: isOver ? C.emeraldMid : C.textMuted,
     }}>
-      <div style={{
-        width: isOver ? 4 : 2, borderRadius: 2,
-        background: isOver ? C.emerald : C.borderDark,
-        opacity: isOver ? 1 : 0.45,
-      }} />
+      {isOver ? 'END OF THIS COLUMN' : ''}
     </div>
   )
 }
 
-// The blank at the end of a short row. Not stored in the array — its position
-// is — so it carries its own id kind ("fldpad::"), and a drop on it
-// materialises it into a real empty slot and drops the field into it.
-function BlankCell({ sectionKey, slot }) {
-  const { setNodeRef, isOver } = useDroppable({ id: fieldBlankDropId(sectionKey, slot) })
+// The blank where a column has run short. Not stored in the array — its
+// position is — so it carries its ROW and COLUMN rather than an index.
+function BlankCell({ sectionKey, row, col }) {
+  const { setNodeRef, isOver } = useDroppable({ id: fieldBlankDropId(sectionKey, row, col) })
   return (
     <div ref={setNodeRef} aria-hidden="true" data-cell-kind="blank" style={{
       flex: 1, minWidth: 0, borderRadius: 6,
@@ -1561,7 +1558,8 @@ function SpacerTile({ sectionKey, index, onRemove }) {
 }
 
 // One cell is both the thing you pick up and the thing you can drop onto —
-// dropping a field on a tile puts it in front of that tile. Draggable and
+// dropping a field on a tile puts it at that tile's position in its COLUMN.
+// Draggable and
 // droppable share the id; dnd-kit keeps the two registries apart, which is what
 // useSortable does internally. useSortable itself is deliberately NOT used
 // here: its strategy animates a preview from the tile rectangles it measured at
@@ -1599,7 +1597,7 @@ function FieldTile({ field, object, sectionKey, index, fullWidth, canSpan, onTog
       border: `1px solid ${isOver ? C.emerald : C.border}`, borderRadius: 6,
       boxShadow: isOver ? `0 0 0 1px ${C.emerald}` : 'none',
     }}>
-      <span {...handleProps} data-drag-handle="" title="Drag it between two fields to drop it there — the fields after it move along one place"
+      <span {...handleProps} data-drag-handle="" title="Drag it where you want it. The column you drop into makes room; the column you take it from closes up."
         style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
       <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {field.type === 'related_field' && field.related?.fk_column && (
@@ -1608,7 +1606,7 @@ function FieldTile({ field, object, sectionKey, index, fullWidth, canSpan, onTog
         {label}
       </span>
       {isOver && (
-        <span style={{ fontSize: 10, fontWeight: 600, color: C.emeraldMid, letterSpacing: 0.3, flexShrink: 0 }}>INSERT HERE</span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: C.emeraldMid, letterSpacing: 0.3, flexShrink: 0 }}>DROP HERE</span>
       )}
       {canSpan && (
         <button

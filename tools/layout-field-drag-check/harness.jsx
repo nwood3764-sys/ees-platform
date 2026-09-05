@@ -11,16 +11,16 @@
 // layout. So the runner performs real mouse drags on this page.
 //
 // The CONTROL grid beside it is identical in every respect except that it
-// resolves the drop the way the editor did before 2026-09-05: remove the
-// dragged field, find the drop target BY NAME in what is left, insert before
-// it. The same drag must come back a no-op there. If it ever stops being one,
-// this check has stopped reproducing the reported bug.
+// resolves the drop as a FLOW — one array, insert at that index — which is what
+// the editor did before the column model. The same drag must come back with
+// half the section on the other side of the card. If it ever stops doing that,
+// this check has stopped reproducing what was reported.
 
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { FieldRowGrid, canvasCollisionDetection, applyFieldDropToSections } from '../../src/modules/admin/LayoutCanvasEditor'
-import { legacyInsertBeforeByName, parseFieldDropId } from '../../src/lib/fieldGroupPlacement'
+import { legacyFlowMove, parseFieldDropId } from '../../src/lib/fieldGroupPlacement'
 import { C } from '../../src/data/constants'
 
 const f = (name, label) => ({ name, type: 'text', label })
@@ -112,9 +112,8 @@ function Control() {
         const from = parseFieldDropId(String(active.id))
         const to = parseFieldDropId(String(over.id))
         if (!from || from.kind !== 'cell' || !to) return
-        const activeName = fields[from.index]?.name
-        const overName = to.kind === 'cell' ? fields[to.index]?.name : null
-        setFields(prev => legacyInsertBeforeByName(prev, activeName, overName))
+        const slot = to.kind === 'cell' ? to.index : fields.length
+        setFields(prev => legacyFlowMove(prev, from.index, slot))
       }}>
       <div style={{ width: 900 }}>
         <Grid testId="control-information"
