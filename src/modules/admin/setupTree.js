@@ -59,6 +59,7 @@ export const SETUP_TREE = [
       { id: 'envelopes',          label: 'Envelopes' },
       { id: 'outbound_mailboxes', label: 'Outbound Mailboxes' },
       { id: 'unmatched_inbox',    label: 'Unmatched Inbox' },
+      { id: 'inbound_email_health', label: 'Inbound Email Health' },
     ],
   },
   {

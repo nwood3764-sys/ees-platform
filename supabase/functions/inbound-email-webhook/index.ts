@@ -1,4 +1,13 @@
-// ─── inbound-email-webhook v3 ────────────────────────────────────────────
+// ─── inbound-email-webhook v4 ────────────────────────────────────────────
+// v4 change vs v3 (2026-09-05): an unmatched message now records WHICH
+// mailbox it arrived in (ui_mailbox), taken from the subscription resource.
+// The function already parsed that out and threw it away, so 643 captured
+// messages could not be counted per mailbox — which meant the one hard piece
+// of evidence that a mailbox is receiving (mail landing in it) was
+// unavailable to graph_subscription_health(). It is NOT derivable after the
+// fact from ui_to_address: a message that reached the box on Cc or Bcc names
+// the box nowhere in To.
+//
 // v3 changes vs v2:
 //   1. clientState env var (GRAPH_WEBHOOK_CLIENT_STATE) is now REQUIRED.
 //      v2 fell open if unset (logged a warning, processed anyway). Any
@@ -287,6 +296,7 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
     ui_subject:              subject || null,
     ui_body_preview:         bodyContent.slice(0, 500) || null,
     ui_provider:             "microsoft_graph",
+    ui_mailbox:              ourMailbox,
     ui_provider_message_id:  idempotencyKey || message.id || "unknown",
     ui_in_reply_to_header:   headersByName.get("in-reply-to") || null,
     ui_references_header:    headersByName.get("references") || null,
