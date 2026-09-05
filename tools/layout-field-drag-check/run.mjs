@@ -120,12 +120,6 @@ async function tileBox(testId, label) {
       .find(t => t.getAttribute('data-cell-label') === label)
     if (!tile) return null
     const r = tile.getBoundingClientRect()
-    const cell = tile.closest('[data-field-cell]')
-    const lines = cell ? [...cell.querySelectorAll('[data-insert-line]')] : []
-    const line = lines[0] || null
-    const trail = lines.find(l => l.getAttribute('data-insert-after') !== null) || null
-    const lr = line ? line.getBoundingClientRect() : null
-    const tr = trail ? trail.getBoundingClientRect() : null
     // A tile is picked up by its ⠿ handle, exactly as an admin does it — the
     // drag listeners are on the handle so the label, the ↔ toggle and the ×
     // stay clickable.
@@ -133,10 +127,36 @@ async function tileBox(testId, label) {
     return {
       handle: [h.left + h.width / 2, h.top + h.height / 2],
       centre: [r.left + r.width / 2, r.top + r.height / 2],
-      line: lr ? [lr.left + lr.width / 2, lr.top + lr.height / 2] : null,
-      after: tr ? [tr.left + tr.width / 2, tr.top + tr.height / 2] : null,
+      box: { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
     }
   }, { testId, label })
+}
+
+// The strips under the columns only exist while a drag is in flight, so this
+// reads them mid-drag: press, move, then measure.
+async function columnEndBox(testId, col) {
+  return page.evaluate(({ testId, col }) => {
+    const group = document.querySelector(`[data-test="${testId}"]`)
+    const el = group.querySelector(`[data-column-end="${col}"]`)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    if (r.height < 2) return null
+    return { centre: [r.left + r.width / 2, r.top + r.height / 2] }
+  }, { testId, col })
+}
+
+// How many fields ended up in a different COLUMN. "Moving one field must not
+// move five others" is a claim about this number.
+const COLUMN_CHANGES = ({ before, after }) => {
+  const cols = (rows) => {
+    const m = {}
+    rows.forEach(row => row.forEach((label, c) => {
+      if (label && label !== '—' && label !== 'Empty slot') m[label] = c
+    }))
+    return m
+  }
+  const a = cols(before), b = cols(after)
+  return Object.keys({ ...a, ...b }).filter(k => a[k] !== b[k]).length
 }
 
 async function blankBox(testId) {
@@ -151,10 +171,11 @@ async function blankBox(testId) {
 
 // A real drag: press, cross the 4px activation distance, travel in steps so
 // dnd-kit measures on the way, release.
-async function drag(from, to) {
+async function drag(from, to, opts = {}) {
   await page.mouse.move(from[0], from[1])
   await page.mouse.down()
   await page.mouse.move(from[0] + 8, from[1] + 8, { steps: 4 })
+  if (opts.hover) await page.waitForTimeout(150)
   await page.mouse.move(to[0], to[1], { steps: 12 })
   await page.mouse.move(to[0], to[1])
   await page.mouse.up()
@@ -184,93 +205,106 @@ try {
     JSON.stringify(await page.evaluate(READ, 'live-information')))
 
   // ── 1. THE REPORTED DRAG: Building into the right-hand column ────────────
-  // Nicholas, 2026-09-05: "If I move something over, it goes in between the two
-  // existing fields." To put Building on the right he drops it between Project
-  // and Property Contact — the line at the start of row 3.
-  {
-    const src = await tileBox('live-information', 'Building')
-    const dst = await tileBox('live-information', 'Property Contact for IQ Assessment')
-    await drag(src.handle, dst.line)
-    const after = await page.evaluate(READ, 'live-information')
-    note(String(await page.evaluate(() => window.__lastOver)).startsWith('ins::'),
-      'a drop aimed at the gutter resolves to the insertion line, not the tile beside it',
-      String(await page.evaluate(() => window.__lastOver)))
-    note(eq(after[1], ['Project', 'Building']),
-      'the field lands between the two fields it was dropped between',
-      JSON.stringify(after[1]))
-    note(eq(after.slice(2), BEFORE.slice(2)),
-      'and nothing below the drop moves at all',
-      JSON.stringify(after))
-  }
-
-  // ── 1b. "I moved the building over to the right" ─────────────────────────
-  // Aimed at the RIGHT-HAND END of the row Building is on. There is a target
-  // there now: without one, the nearest thing to drop on was the row below,
-  // which is how a drag meant to move a field one place across a row ended up
-  // rearranging the section.
-  await reload()
+  // Nicholas: "I can't move one field and have five other fields move around."
+  // Column 2 reads Opportunity / Project / Property / Assessor Name. Dropping
+  // Building on Project puts it at Project's position IN COLUMN 2.
   {
     const src = await tileBox('live-information', 'Building')
     const dst = await tileBox('live-information', 'Project')
-    note(dst.after != null, 'the last cell of a row carries an insertion line on its right edge')
-    await drag(src.handle, dst.after)
-    const after = await page.evaluate(READ, 'live-information')
-    note(eq(after[1], ['Project', 'Building']),
-      'dropping Building off the right-hand end of its row puts it in the right-hand column',
-      JSON.stringify(after[1]))
-    note(eq(after.slice(2), BEFORE.slice(2)),
-      'and every row below it is untouched',
-      JSON.stringify(after))
-  }
-
-  // ── 2. NOTHING EVER TRADES PLACES ────────────────────────────────────────
-  // "I don't want fields to trade places ever. That's never, ever a good
-  // functionality." A drop on a tile puts the field in FRONT of that tile; the
-  // tile moves along one cell and is never thrown across the section.
-  await reload()
-  {
-    const src = await tileBox('live-information', 'Building')
-    const dst = await tileBox('live-information', 'Assessor Name')
     await drag(src.handle, dst.centre)
     const after = await page.evaluate(READ, 'live-information')
-    note(String(await page.evaluate(() => window.__lastOver)).startsWith('fld::'),
-      'the drop resolved to the tile, not to the insertion line overlaying its edge',
-      String(await page.evaluate(() => window.__lastOver)))
-    note(eq(after[3], ['Building', 'Assessor Name']),
-      'the dragged field takes the cell and the tile moves along one place',
-      JSON.stringify(after[3]))
-    note(!after.some(r => r[0] === 'Assessor Name'),
-      'the displaced field is NOT thrown into the other column',
-      JSON.stringify(after))
+    note(eq(after.map(r => r[1]),
+      ['Opportunity', 'Building', 'Project', 'Property', 'Assessor Name', '—']),
+      'the dragged field lands in the column it was dropped on, at that position',
+      JSON.stringify(after.map(r => r[1])))
+    note(eq(after.map(r => r[0]),
+      ['Name', 'Property Contact for IQ Assessment', 'Gas Fuel Provider',
+       'Date Of Iq Assessment', 'Start Time Of Iq Assessment', 'End Time Of Iq Assessment']),
+      'the column it came from closes up and nothing in it changes side',
+      JSON.stringify(after.map(r => r[0])))
+    note(await page.evaluate(COLUMN_CHANGES, { before: BEFORE, after }) === 1,
+      'EXACTLY ONE field changed column — the one that was dragged',
+      JSON.stringify(await page.evaluate(COLUMN_CHANGES, { before: BEFORE, after })))
   }
 
-  // ── 3. CONTROL — the pre-fix resolution still does nothing ───────────────
+  // ── 2. CONTROL — the flow, which is what was being reported ──────────────
   {
     const src = await tileBox('control-information', 'Building')
-    const dst = await tileBox('control-information', 'Project')
+    const dst = await tileBox('control-information', 'Assessor Name')
     await drag(src.handle, dst.centre)
     const after = await page.evaluate(READ, 'control-information')
-    note(eq(after, BEFORE),
-      'CONTROL: a one-slot forward drag under the old rule still does nothing at all',
+    const changed = await page.evaluate(COLUMN_CHANGES, { before: BEFORE, after })
+    note(changed >= 3,
+      `CONTROL: under the flow rule the same drag re-columns ${changed} fields`,
       JSON.stringify(after))
   }
 
-  // ── 4. An empty slot is the one target that pushes nothing ───────────────
+  // ── 3. Within one column, the other column never notices ────────────────
   await reload()
   {
-    const src = await tileBox('live-information', 'Assessor Name')
+    const src = await tileBox('live-information', 'End Time Of Iq Assessment')
+    const dst = await tileBox('live-information', 'Building')
+    await drag(src.handle, dst.centre)
+    const after = await page.evaluate(READ, 'live-information')
+    note(eq(after.map(r => r[0]).slice(0, 3),
+      ['Name', 'End Time Of Iq Assessment', 'Building']),
+      'a field dragged up its own column lands where it was dropped',
+      JSON.stringify(after.map(r => r[0])))
+    note(eq(after.map(r => r[1]), BEFORE.map(r => r[1])),
+      'and the other column is byte for byte what it was',
+      JSON.stringify(after.map(r => r[1])))
+  }
+
+  // ── 4. An empty slot is filled, and nothing else moves at all ───────────
+  await reload()
+  {
+    const src = await tileBox('live-information', 'End Time Of Iq Assessment')
     const slot = await tileBox('live-information', 'Empty slot')
     await drag(src.handle, slot.centre)
     const after = await page.evaluate(READ, 'live-information')
-    note(eq(after[3], ['Gas Fuel Provider', 'Date Of Iq Assessment']),
-      'a field dropped on an empty slot fills it',
+    note(eq(after[4], ['Date Of Iq Assessment', 'End Time Of Iq Assessment']),
+      'a field dropped on an empty slot takes that exact cell',
       JSON.stringify(after))
-    note(after.every(r => r.length === 2),
-      'and every row is still whole',
+    note(await page.evaluate(COLUMN_CHANGES, { before: BEFORE, after }) === 1,
+      'and it is the only field that changed column',
       JSON.stringify(after))
   }
 
-  // ── 5. Across sections it is a move, and the source closes up ────────────
+  // ── 5. A NEAR MISS never sends the field to the end ─────────────────────
+  // The 6px gap between two rows is inside the section but on no cell. It used
+  // to fall through to the section, which meant "append" — so missing a tile by
+  // a few pixels sent the field to the end of the layout and re-columned
+  // everything after it.
+  await reload()
+  {
+    const src = await tileBox('live-information', 'Building')
+    const a = await tileBox('live-information', 'Property Contact for IQ Assessment')
+    const b = await tileBox('live-information', 'Gas Fuel Provider')
+    const gap = [a.centre[0], (a.box.bottom + b.box.top) / 2]
+    await drag(src.handle, gap)
+    const after = await page.evaluate(READ, 'live-information')
+    note(after[after.length - 1][0] !== 'Building',
+      'a drop in the gap between two rows does NOT send the field to the end',
+      JSON.stringify(after))
+    note(await page.evaluate(COLUMN_CHANGES, { before: BEFORE, after }) <= 1,
+      'and a near miss never moves a field sideways',
+      JSON.stringify(after))
+  }
+
+  // ── 6. The bottom of a full column is reachable ─────────────────────────
+  await reload()
+  {
+    const src = await tileBox('live-information', 'Building')
+    const strip = await columnEndBox('live-information', 1)
+    note(strip != null, 'each column carries a drop strip under it while dragging')
+    await drag(src.handle, strip.centre, { hover: true })
+    const after = await page.evaluate(READ, 'live-information')
+    note(after[after.length - 1][1] === 'Building',
+      'a field dropped under a column goes to the bottom of that column',
+      JSON.stringify(after.map(r => r[1])))
+  }
+
+  // ── 7. Across sections it is a move, and the source column closes up ────
   await reload()
   {
     const src = await tileBox('live-information', 'Building')
@@ -278,24 +312,12 @@ try {
     await drag(src.handle, dst.centre)
     const info = await page.evaluate(READ, 'live-information')
     const occ  = await page.evaluate(READ, 'live-occupancy')
-    note(eq(occ[0], ['Building Sq Ft', 'Building']),
-      'a field dragged into another section lands at the cell it was dropped on',
+    note(eq(occ.map(r => r[1]), ['Building', 'Number Of Units']),
+      'a field dragged into another section lands in the column it was dropped on',
       JSON.stringify(occ))
-    note(eq(info[1], ['Project', 'Property Contact for IQ Assessment']),
-      'and the section it left closes up behind it — a field leaving does not punch a hole',
-      JSON.stringify(info[1]))
-  }
-
-  // ── 6. An empty slot is itself draggable ────────────────────────────────
-  await reload()
-  {
-    const src = await tileBox('live-information', 'Empty slot')
-    const dst = await tileBox('live-information', 'Opportunity')
-    await drag(src.handle, dst.centre)
-    const after = await page.evaluate(READ, 'live-information')
-    note(eq(after[0], ['Name', 'Empty slot']),
-      'an empty slot can be dragged to the cell it should blank',
-      JSON.stringify(after[0]))
+    note(eq(info.map(r => r[0]).slice(0, 2), ['Name', 'Property Contact for IQ Assessment']),
+      'and the column it left closes up behind it',
+      JSON.stringify(info.map(r => r[0])))
   }
 
   await page.screenshot({ path: join(here, 'layout-field-drag.png'), fullPage: true })
