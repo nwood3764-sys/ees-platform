@@ -259,9 +259,10 @@ export const hasSupabaseConfig = Boolean(url && key)
 // once we have hundreds of thousands of units).
 //
 // NOTE: sequential. For tables with 5,000+ rows you almost certainly
-// want fetchAllPagedParallel below — same interface, ~10× faster.
-// fetchAllPaged is kept for cases where the caller intentionally
-// wants sequential behavior (e.g. respecting an upstream rate limit).
+// want fetchAllKeyset below, which pages by primary key instead of by
+// OFFSET. fetchAllPaged is fine for a set that fits in one or two pages —
+// with no pages to skip, OFFSET costs nothing — and for callers that
+// deliberately want sequential behaviour (e.g. an upstream rate limit).
 // =====================================================================
 export async function fetchAllPaged(buildQuery, { pageSize = 1000, maxPages = 200 } = {}) {
   const rows = []
@@ -281,112 +282,120 @@ export async function fetchAllPaged(buildQuery, { pageSize = 1000, maxPages = 20
 }
 
 // =====================================================================
-// fetchAllPagedParallel — parallel variant of fetchAllPaged.
+// fetchAllKeyset — read every row of a filtered set, by PRIMARY KEY.
 //
-// Fires all page requests concurrently after a single HEAD count to
-// learn the row total. Same interface as fetchAllPaged (call site
-// migration is a one-word change) but ~7× faster for 6,800-row
-// tables — wall time becomes max(page_latency) instead of
-// sum(page_latency).
+// WHY THIS EXISTS. fetchAllPaged and fetchAllPagedParallel above both page
+// with OFFSET (`.range(from, to)`). OFFSET cannot skip rows without first
+// producing them, so page 17 of the Properties list made Postgres sort all
+// 16,665 live properties and then throw away the first 16,000 — and every
+// other page did the same. Seventeen pages, seventeen full sorts, each
+// spilling ~3 MB of temp file, fired eight at a time. Measured on production
+// (2026-09-05): one page 612 ms in isolation, 4,096 ms mean under real
+// concurrency, 13 GB of temp files written since Aug 29. Past the 8-second
+// statement_timeout the `authenticated` role carries, the page comes back
+// 57014 and the list renders "Could not load records" — 256 failed loads on
+// Sep 2 alone, all of them this.
 //
-// Two extra args beyond the builder:
+// Keyset paging asks for `WHERE id > <last id seen> ORDER BY id LIMIT n`
+// instead. That is an index range scan the LIMIT stops early, so each page
+// touches only the rows it returns. The same page measured 16 ms: 38× faster,
+// no sort, no temp file, and the work is O(rows) across the whole read
+// instead of O(rows²).
 //
-//   countQuery   — required. A function that returns a HEAD/count
-//                  request for the same filtered row set the page
-//                  builder targets. Without this we'd have to fall
-//                  back to "fire pages until a short one comes
-//                  back" which can't parallelize.
+// It also removes the HEAD `count: 'exact'` request fetchAllPagedParallel
+// needs to plan its pages — which is itself a full scan, and is exactly the
+// request that threw the 500 on 2026-09-05T16:17Z.
 //
-//                  Example:
-//                    countQuery: () => supabase
-//                      .from('properties')
-//                      .select('id', { count: 'exact', head: true })
-//                      .eq('property_is_deleted', false)
+// SEQUENTIAL, AND STILL FASTER. Page N+1 needs page N's last key, so these
+// cannot be fired concurrently. That is not the regression it looks like: 17
+// keyset pages cost ~270 ms of database time in total, against ~70 seconds of
+// database work for the parallel-OFFSET read. Wall time is dominated by
+// network round trips either way, and the database is no longer the thing
+// that falls over — which is the whole point.
 //
-//   concurrency  — max parallel page requests. Default 8. PostgREST
-//                  can comfortably handle this many; pushing higher
-//                  risks the platform's per-IP connection cap.
+// ORDER. Rows come back ordered by the key column, NOT by whatever a person
+// reads the list sorted by. A caller that used to pass `.order('name')` must
+// restore that order itself with sortRowsByTextKey from src/lib/listOrder.js
+// — ListView renders the fetch order verbatim when a view carries no sort, so
+// skipping that step silently reorders the list. Sorting 16k rows once in the
+// client is free; making Postgres do it 17 times is what broke.
 //
-// Caller filters/joins MUST be identical between countQuery and the
-// page buildQuery, or the parallel page fetches will miss or
-// duplicate rows. The signature deliberately makes both explicit
-// to force the caller to think about it.
+// CONTRACT. `buildQuery()` returns the filtered query with NO order, NO range
+// and NO limit — this function owns all three, so a caller cannot get the
+// keyset mechanics subtly wrong. The key column must be in the SELECT (it is
+// how the cursor advances); if it is missing this throws by name rather than
+// looping on the same page forever.
 //
-// Fallback: if the HEAD count call fails (some views don't support
-// HEAD/count requests), we automatically fall through to the
-// sequential fetchAllPaged so the data still loads — just at the
-// old speed. No silent data loss.
+//   const rows = await fetchAllKeyset(() =>
+//     supabase.from('properties')
+//       .select('id, property_name')
+//       .eq('property_is_deleted', false))
+//
+// The key must be unique and non-null. Primary keys are both, which is why it
+// defaults to 'id' and why nothing else should be passed without checking.
 // =====================================================================
-export async function fetchAllPagedParallel(buildQuery, countQuery, {
-  pageSize    = 1000,
-  maxPages    = 200,
-  concurrency = 8,
+export async function fetchAllKeyset(buildQuery, {
+  keyColumn = 'id',
+  pageSize  = 1000,
+  maxPages  = 200,
 } = {}) {
-  if (typeof countQuery !== 'function') {
-    throw new Error('fetchAllPagedParallel requires a countQuery function — pass a builder that returns a HEAD/count request.')
+  if (typeof buildQuery !== 'function') {
+    throw new Error('fetchAllKeyset requires a buildQuery function returning an unordered, unpaged query.')
   }
 
-  // HEAD count first. PostgREST returns the matched row count in the
-  // Content-Range header; the JS client surfaces it as `count`.
-  const { count, error: countErr } = await countQuery()
+  const rows = []
+  const seen = new Set()
+  let cursor = null
 
-  // If the count query errored, fall back to the sequential paginator
-  // rather than failing the whole load. The most common cause is a
-  // view that doesn't expose HEAD/count semantics — we still want
-  // the user to see their data.
-  if (countErr || count == null) {
-    if (countErr) {
-      console.warn('fetchAllPagedParallel: count query failed, falling back to sequential.', countErr)
+  for (let page = 0; page < maxPages; page++) {
+    let q = buildQuery()
+    if (cursor !== null) q = q.gt(keyColumn, cursor)
+    const { data, error } = await q
+      .order(keyColumn, { ascending: true })
+      .limit(pageSize)
+    if (error) throw error
+
+    const batch = data || []
+
+    // The key must be UNIQUE, and this is where that stops being a promise in
+    // a comment. Two rows sharing a key at a page boundary would advance the
+    // cursor past the second one and drop it silently — the worst thing a list
+    // read can do. A primary key cannot collide, but a VIEW can fan out: give
+    // a property a second property_source_data row and outreach_properties_v
+    // starts emitting that property twice. Say so by name rather than hand
+    // back a list quietly missing records.
+    for (const row of batch) {
+      const key = row?.[keyColumn]
+      if (key === undefined || key === null) continue
+      if (seen.has(key)) {
+        throw new Error(
+          `fetchAllKeyset: '${keyColumn}' is not unique in this result — saw ${JSON.stringify(key)} twice. ` +
+          `Keyset paging would skip rows. Page by a unique key, or de-duplicate the query.`
+        )
+      }
+      seen.add(key)
     }
-    return fetchAllPaged(buildQuery, { pageSize, maxPages })
-  }
 
-  // Empty result set — skip the page fetches entirely.
-  if (count === 0) return []
+    rows.push(...batch)
 
-  const totalPages = Math.ceil(count / pageSize)
-  if (totalPages > maxPages) {
-    throw new Error(
-      `fetchAllPagedParallel: ${count} rows would need ${totalPages} pages, exceeds maxPages=${maxPages}. ` +
-      `Raise maxPages at the call site or filter the query.`
-    )
-  }
+    // A short page is the last page. This is the only termination condition,
+    // which is why the key must be unique: a duplicate key would make the
+    // cursor skip every row sharing it.
+    if (batch.length < pageSize) return rows
 
-  // Page index pool consumed by a fixed number of workers. Caps the
-  // concurrent in-flight request count without holding the entire
-  // result array twice in memory.
-  const pageIndexes = Array.from({ length: totalPages }, (_, i) => i)
-  const results    = new Array(totalPages)
-  let cursor       = 0
-
-  const runWorker = async () => {
-    while (cursor < pageIndexes.length) {
-      const myIndex = cursor++
-      if (myIndex >= pageIndexes.length) return
-      const page = pageIndexes[myIndex]
-      const from = page * pageSize
-      const to   = from + pageSize - 1
-      const { data, error } = await buildQuery(from, to)
-      if (error) throw error
-      results[page] = data || []
+    const last = batch[batch.length - 1]
+    const next = last ? last[keyColumn] : undefined
+    if (next === undefined || next === null) {
+      throw new Error(
+        `fetchAllKeyset: the last row of a full page carries no '${keyColumn}'. ` +
+        `The key column must be selected and non-null, or paging cannot advance.`
+      )
     }
+    cursor = next
   }
 
-  // Launch up to `concurrency` workers; each pulls from the shared
-  // cursor until pages are exhausted. Pages above the count we
-  // already know about would return empty results, so we never
-  // overshoot.
-  const workers = []
-  const workerCount = Math.min(concurrency, totalPages)
-  for (let i = 0; i < workerCount; i++) workers.push(runWorker())
-  await Promise.all(workers)
-
-  // Flatten in page order — workers may complete out of order. Each
-  // page already has its rows in the stable .order() the caller
-  // requested, so concatenating by page index preserves overall sort.
-  const out = []
-  for (const page of results) {
-    if (page) out.push(...page)
-  }
-  return out
+  throw new Error(
+    `fetchAllKeyset exceeded ${maxPages} pages × ${pageSize} = ${maxPages * pageSize} rows. ` +
+    `If the table is genuinely this large, raise maxPages at the call site or add a server-side filter.`
+  )
 }
