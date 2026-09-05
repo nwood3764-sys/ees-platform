@@ -132,7 +132,8 @@ import { toDatetimeLocal, fromDatetimeLocal } from '../lib/datetimeField'
 import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
-import { numberChoiceOptions, parseNumberChoice, formatChoiceNumber } from '../lib/numberChoiceRange'
+import { numberChoiceOptions, parseNumberChoice, formatChoiceNumber, NUMBER_CHOICE_FIELD_TYPE }
+  from '../lib/numberChoiceRange'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
 import { CONVERSATION_ANCHORS } from '../lib/conversationAnchors'
@@ -290,7 +291,7 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     }
     // A number chosen from a declared range (see src/lib/numberChoiceRange.js).
     // Never thousand-separated: 1987 is a year, and `number` renders it "1,987".
-    case 'number_select': return formatChoiceNumber(raw)
+    case NUMBER_CHOICE_FIELD_TYPE: return formatChoiceNumber(raw)
     case 'phone':      return formatUsPhoneDisplay(raw)
     // Formula / rollup / inherited fields are computed at read; format by the
     // field's declared return type (falls back to a sensible numeric/text guess).
@@ -2635,7 +2636,7 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
     // Building, Year Built (Nicholas, 2026-09-05: "should the number of stories
     // be a pick list?"). The column stays numeric and this stores a NUMBER, not
     // the option's string, which is why it is not the `select` editor above.
-    case 'number_select': {
+    case NUMBER_CHOICE_FIELD_TYPE: {
       const opts = numberChoiceOptions(field.choice_range, value) || []
       if (opts.length === 0) {
         // A range that could not be resolved must not become an empty dropdown

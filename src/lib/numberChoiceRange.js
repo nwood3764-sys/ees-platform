@@ -33,6 +33,12 @@
 // numberChoiceOptions() takes the stored value and folds it in when the range
 // does not reach it.
 
+// The field type a range-declared column renders as. ONE definition: the layout
+// pass that sets it, the record page's editor, its formatter and the
+// related-field overlay all read this, so the four cannot drift onto three
+// spellings of one string.
+export const NUMBER_CHOICE_FIELD_TYPE = 'number_select'
+
 // A range that would produce more options than a person can face is a
 // configuration mistake, not a dropdown. Cap it and say so rather than
 // rendering 20,000 <option> elements.
@@ -122,4 +128,27 @@ export function parseNumberChoice(raw) {
   if (raw === '' || raw === null || raw === undefined) return null
   const n = Number(raw)
   return Number.isFinite(n) ? n : null
+}
+
+/**
+ * What a CROSS-OBJECT (related) field pulled from a range-declared column
+ * should render as.
+ *
+ * A related field is display-only — it shows the parent record's value and is
+ * edited on the parent — so what matters here is the FORMATTING, not the
+ * editor. A related field freezes its parent column's type at the moment it is
+ * placed on the layout, and an integer froze as `number`, which renders through
+ * toLocaleString: the enrollment layouts carrying the building's Year Built
+ * have been printing "1,987".
+ *
+ * Only ever upgrades a NUMBER-shaped placement, and only when the parent column
+ * actually carries a range. A picklist, lookup or date related field keeps its
+ * placement type, which carries wiring a range says nothing about.
+ */
+const NUMBER_SHAPED = new Set([null, undefined, '', 'number', 'integer'])
+
+export function relatedColumnTypeForChoiceRange(currentType, range) {
+  if (!isNumberChoiceRange(range)) return currentType
+  if (!NUMBER_SHAPED.has(currentType)) return currentType
+  return NUMBER_CHOICE_FIELD_TYPE
 }

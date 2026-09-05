@@ -1,4 +1,5 @@
-import { isNumberChoiceRange } from '../lib/numberChoiceRange'
+import { isNumberChoiceRange, relatedColumnTypeForChoiceRange, NUMBER_CHOICE_FIELD_TYPE }
+  from '../lib/numberChoiceRange'
 import { supabase } from '../lib/supabase'
 import { applyRecordInsertDefaults } from '../lib/recordInsertDefaults'
 import { parentsFromColumns } from '../lib/parentRelationships'
@@ -1094,7 +1095,7 @@ async function applyNumberChoiceRanges(objectName, sectionList) {
         const range = byCol.get(f.name)
         if (!range) return f
         touched = true
-        return { ...f, type: 'number_select', choice_range: range }
+        return { ...f, type: NUMBER_CHOICE_FIELD_TYPE, choice_range: range }
       })
       if (touched) w.widget_config = { ...w.widget_config, fields }
     }
@@ -1765,17 +1766,47 @@ const RELATED_UPGRADABLE_FROM = new Set([null, undefined, '', 'text', 'textarea'
 export async function overlayRelatedFieldDisplayTypes(sections) {
   if (!Array.isArray(sections) || sections.length === 0) return
   const fieldsByTable = new Map()   // parent table → related field defs
+  // Every related field, whatever it froze as — the number-choice pass below
+  // upgrades NUMBER placements, which the display-type pass deliberately
+  // leaves alone.
+  const allByTable = new Map()
   for (const sec of sections) {
     for (const w of (sec.widgets || [])) {
       if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
       for (const f of w.widget_config.fields) {
         if (f.type !== 'related_field' || !f.related?.table || !f.related?.column) continue
+        if (!allByTable.has(f.related.table)) allByTable.set(f.related.table, [])
+        allByTable.get(f.related.table).push(f)
         if (!RELATED_UPGRADABLE_FROM.has(f.related.column_type)) continue
         if (!fieldsByTable.has(f.related.table)) fieldsByTable.set(f.related.table, [])
         fieldsByTable.get(f.related.table).push(f)
       }
     }
   }
+
+  // A related field pulled from a range-declared column formats as digits, not
+  // as a quantity — the enrollment layouts carrying the building's Year Built
+  // printed "1,987" because an integer froze as `number`. Read the range off
+  // the PARENT object's field_metadata, the same row the parent's own page
+  // reads, so the two can never disagree.
+  await Promise.all([...allByTable.entries()].map(async ([table, fields]) => {
+    try {
+      const { data, error } = await supabase
+        .from('field_metadata')
+        .select('fm_column, fm_choice_range')
+        .eq('fm_object', table)
+        .eq('fm_is_deleted', false)
+        .not('fm_choice_range', 'is', null)
+      if (error) return
+      if (!data || data.length === 0) return
+      const byCol = new Map(data.map(r => [r.fm_column, r.fm_choice_range]))
+      for (const f of fields) {
+        f.related.column_type =
+          relatedColumnTypeForChoiceRange(f.related.column_type, byCol.get(f.related.column))
+      }
+    } catch { /* best-effort — the field still renders, just as a plain number */ }
+  }))
+
   if (fieldsByTable.size === 0) return
   // describe_object_columns already carries each column's field_metadata
   // display type, and getEditableFieldsForTable caches it per page session —
