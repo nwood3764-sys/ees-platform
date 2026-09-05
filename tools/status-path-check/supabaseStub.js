@@ -74,4 +74,4 @@ export default supabase
 // into the harness's graph still links. Nothing here is exercised.
 export const hasSupabaseConfig = true
 export async function fetchAllPaged() { return [] }
-export async function fetchAllPagedParallel() { return [] }
+export async function fetchAllKeyset() { return [] }

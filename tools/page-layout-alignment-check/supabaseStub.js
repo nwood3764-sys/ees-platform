@@ -38,4 +38,4 @@ export const currentAppUserId = async () => null
 // exist even though this check never reads a row.
 export const hasSupabaseConfig = false
 export async function fetchAllPaged() { return [] }
-export async function fetchAllPagedParallel() { return [] }
+export async function fetchAllKeyset() { return [] }

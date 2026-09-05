@@ -1,4 +1,5 @@
-import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
+import { supabase, fetchAllPaged, fetchAllKeyset } from '../lib/supabase'
+import { sortRowsByTextKey } from '../lib/listOrder'
 
 // ---------------------------------------------------------------------------
 // Picklist cache
@@ -125,41 +126,38 @@ export async function fetchProperties() {
   // opportunities and projects — not the object lists. Default list views can
   // still be filtered via the view selector.
   //
-  // Parallel paginated: properties is at 6,781 rows in production.
-  // Sequential pagination took ~40s; parallel cuts that to ~3s.
-  const data = await fetchAllPagedParallel(
-    (from, to) =>
-      supabase
-        .from('properties')
-        .select(`
-          id,
-          property_record_number,
-          property_name,
-          property_street,
-          property_city,
-          property_state,
-          property_zip,
-          property_total_units,
-          property_total_buildings,
-          property_status,
-          property_subsidy_type,
-          property_hud_property_id,
-          property_hud_contracts,
-          property_account_id,
-          accounts:property_account_id ( account_name )
-        `)
-        .eq('property_is_deleted', false)
-        .order('property_name', { ascending: true })
-        .order('id',            { ascending: true })  // tie-breaker
-        .range(from, to),
-    () =>
-      supabase
-        .from('properties')
-        .select('id', { count: 'exact', head: true })
-        .eq('property_is_deleted', false),
-  )
+  // Keyset paged by primary key, NOT by name with an OFFSET. Ordering this
+  // read in the database made Postgres sort all 16,665 live properties once
+  // per page — 17 sorts, ~3 MB of temp file each, eight in flight at a time —
+  // which is what pushed the list past the 8s statement timeout and rendered
+  // "Could not load records". See fetchAllKeyset in src/lib/supabase.js.
+  // The display order is restored below, once, in the client.
+  const data = await fetchAllKeyset(() =>
+    supabase
+      .from('properties')
+      .select(`
+        id,
+        property_record_number,
+        property_name,
+        property_street,
+        property_city,
+        property_state,
+        property_zip,
+        property_total_units,
+        property_total_buildings,
+        property_status,
+        property_subsidy_type,
+        property_hud_property_id,
+        property_hud_contracts,
+        property_account_id,
+        accounts:property_account_id ( account_name )
+      `)
+      .eq('property_is_deleted', false))
 
-  return data.map(r => {
+  // By name, exactly as the database used to return it and exactly as
+  // ListView itself sorts — a list view with no saved sort renders the order
+  // it is handed, so this is what keeps the page looking unchanged.
+  return sortRowsByTextKey(data.map(r => {
     const hud = r.property_hud_contracts || {}
     return {
       id: r.property_record_number || r.id,
@@ -179,7 +177,7 @@ export async function fetchProperties() {
       hudTracs: hud.primary_tracs_status || '',
       hud202811: hud.is_202_811 === true ? 'Yes' : hud.is_202_811 === false ? 'No' : '',
     }
-  })
+  }), 'name')
 }
 
 export async function fetchBuildings() {
@@ -461,36 +459,29 @@ export async function fetchEnrollments() {
 export async function fetchAccounts() {
   // Object lists show all records, like a Salesforce list view. Every app sees
   // all accounts; the app's home/dashboard does the filtering, not this list.
-  const data = await fetchAllPagedParallel(
-    (from, to) =>
-      supabase
-        .from('accounts')
-        .select(`
-          id,
-          account_record_number,
-          account_name,
-          account_organization_name,
-          account_phone,
-          account_email,
-          account_website,
-          billing_city,
-          billing_state,
-          billing_zip,
-          record_type:account_record_type ( picklist_label ),
-          status_pl:account_status        ( picklist_label )
-        `)
-        .eq('account_is_deleted', false)
-        .order('account_name', { ascending: true })
-        .order('id',           { ascending: true })
-        .range(from, to),
-    () =>
-      supabase
-        .from('accounts')
-        .select('id', { count: 'exact', head: true })
-        .eq('account_is_deleted', false),
-  )
+  // Keyset by primary key, display order restored below — same reasoning as
+  // fetchProperties above. 7,537 live accounts is 8 OFFSET pages, i.e. 8 full
+  // sorts of the table, and it grows with every import.
+  const data = await fetchAllKeyset(() =>
+    supabase
+      .from('accounts')
+      .select(`
+        id,
+        account_record_number,
+        account_name,
+        account_organization_name,
+        account_phone,
+        account_email,
+        account_website,
+        billing_city,
+        billing_state,
+        billing_zip,
+        record_type:account_record_type ( picklist_label ),
+        status_pl:account_status        ( picklist_label )
+      `)
+      .eq('account_is_deleted', false))
 
-  return data.map(r => ({
+  return sortRowsByTextKey(data.map(r => ({
     id: r.account_record_number || r.id.slice(0, 8).toUpperCase(),
     _id: r.id,
     name: r.account_name || '—',
@@ -502,5 +493,5 @@ export async function fetchAccounts() {
     website: r.account_website || '—',
     city: r.billing_city || '—',
     state: r.billing_state || '—',
-  }))
+  })), 'name')
 }

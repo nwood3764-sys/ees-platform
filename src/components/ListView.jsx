@@ -5,6 +5,7 @@ import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { usePullToRefresh } from '../lib/usePullToRefresh';
 import { blockNegativeKeys, composeKeyDown, clampNonNegative } from '../lib/numberInput';
+import { compareTextValues } from '../lib/listOrder';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
 import HelpIcon from './help/HelpIcon';
 import FieldValueLink from './FieldValueLink';
@@ -2660,10 +2661,14 @@ export function ListView({
       d = d.filter(r => evaluate((entry, i) => matchFilter(r[entryKeys[i]], entry, entryTypes[i], now)));
     }
     if (sortField) {
+      // compareTextValues is the SAME comparator the list loaders use to
+      // restore display order after keyset paging (src/lib/listOrder.js).
+      // Two definitions of "sorted by name" is how a list ends up ordered one
+      // way on load and another way after a click.
       const sk = rowKeyFor(sortField);
       d.sort((a, b) => {
-        const av = String(a[sk] || ''), bv = String(b[sk] || '');
-        return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+        const cmp = compareTextValues(a[sk], b[sk]);
+        return sortDir === 'asc' ? cmp : -cmp;
       });
     }
     return d;
