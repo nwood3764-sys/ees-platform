@@ -23,6 +23,16 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
+// Plain .js on purpose. netlify.toml pins NODE_VERSION = 20 and Node 20 cannot
+// import a .ts module at all, so a fixture over these rules would pass locally
+// on Node 22 and fail the deploy build. Same reason ai-assistant/transcript.js
+// is .js. run-fixtures refuses a fixture importing .ts for exactly this.
+import {
+  SIGNATURE_REQUEST_TEMPLATE_NAME,
+  signatureRequestTokens,
+  renderTemplate,
+  templateUsability,
+} from "./emailTemplate.js"
 
 const SIGNATURES_BUCKET = "signatures"
 const TOKEN_EXPIRY_DAYS = 30
@@ -401,13 +411,52 @@ Deno.serve(async (req) => {
   if (firstRecip) {
     const senderName = await getCallerDisplayName(supabase) || "Energy Efficiency Services"
     const firstRecipUrl = signingUrls.find(u => u.order === 1)!.signing_url
-    const emailHtml = renderEmailHtml({
+
+    // What the record is CALLED, so the email can name the building instead of
+    // only the document. email_log_target() already answers exactly this
+    // question for the Outlook add-in — it resolves an object's name and
+    // record-number columns from the catalog — so this is the same question
+    // asked again, not a second definition of it. SECURITY INVOKER, so a
+    // sender who cannot read the record gets nothing rather than a leak; the
+    // tokens then render empty and the send still goes.
+    let anchorLabel  = ""
+    let anchorNumber = ""
+    try {
+      const { data: tgt } = await supabase.rpc("email_log_target", {
+        p_object: body.parent_object,
+        p_id:     body.parent_record_id,
+      })
+      const row = Array.isArray(tgt) ? tgt[0] : tgt
+      anchorLabel  = (row as any)?.rec_label  || ""
+      anchorNumber = (row as any)?.rec_number || ""
+    } catch (_e) {
+      // Not fatal. The document is what is being sent; its record's name is
+      // context, and losing context must never lose the send.
+    }
+
+    // The wording comes from the database (ET- row "Signature Request"), so a
+    // person can edit it at Setup -> Communication Templates without a deploy.
+    // Falling back to the built-in wording is deliberate and is the only safe
+    // direction: a missing template must never hold a customer's document.
+    const wording = await loadSignatureRequestWording(supabase, {
       recipientName: firstRecip.recipient_name,
       senderName,
-      templateName:  docName,
-      customMessage: body.message || null,
+      documentName:  docName,
+      recordLabel:   anchorLabel,
+      recordNumber:  anchorNumber,
       signingUrl:    firstRecipUrl,
     })
+    const emailHtml = body.message
+      // A message typed by the sender for THIS send outranks the template —
+      // they wrote it looking at this recipient and this document.
+      ? renderEmailHtml({
+          recipientName: firstRecip.recipient_name,
+          senderName,
+          templateName:  docName,
+          customMessage: body.message,
+          signingUrl:    firstRecipUrl,
+        })
+      : wording.html
     // The plain-text alternative is composed but not sent: send-email-v1 takes
     // body_html only, as it does for every other customer email on the
     // platform. Kept and still exercised so the text part is ready the day
@@ -431,7 +480,9 @@ Deno.serve(async (req) => {
           anchor_object:    body.parent_object,
           anchor_record_id: body.parent_record_id,
           to: { name: firstRecip.recipient_name, email: firstRecip.recipient_email },
-          subject,
+          // A subject the sender typed for THIS send wins; otherwise the
+          // template's, otherwise the built-in.
+          subject: body.subject || wording.subject || subject,
           body_html: emailHtml,
           contact_id: firstRecip.recipient_contact_id || undefined,
         }),
@@ -611,6 +662,77 @@ function json(payload: unknown, status = 200): Response {
 // HTML/text email templates — single source of truth so send-envelope and
 // signing-portal-submit produce identical-looking emails (the AdvancedToNext
 // path duplicates these inline).
+/**
+ * The wording of a signature request, from the database when there is one.
+ *
+ * Reads the ET- row by NAME rather than by id: a seeded id differs on every
+ * database, and this must also work on staging and on a branch replay. The
+ * name is a stable contract stated in one place (SIGNATURE_REQUEST_TEMPLATE_NAME)
+ * and asserted by the migration that seeds it.
+ *
+ * Never throws. Every failure — no row, a draft, an unreadable table, a token
+ * nothing supplied — degrades to the built-in wording or to a blank in one
+ * sentence, because the document reaching the property owner is the point and
+ * the wording is not.
+ */
+async function loadSignatureRequestWording(
+  supabase: SupabaseClient,
+  ctx: {
+    recipientName: string, senderName: string, documentName: string,
+    recordLabel: string, recordNumber: string, signingUrl: string,
+  },
+): Promise<{ html: string, subject: string | null, source: string, missing: string[] }> {
+  const fallback = () => ({
+    html: renderEmailHtml({
+      recipientName: ctx.recipientName,
+      senderName:    ctx.senderName,
+      templateName:  ctx.documentName,
+      customMessage: null,
+      signingUrl:    ctx.signingUrl,
+    }),
+    subject: null as string | null,
+  })
+
+  let row: any = null
+  let statusValue: string | null = null
+  try {
+    const { data } = await supabase
+      .from("email_templates")
+      .select("id, name, subject, body_html, is_deleted, status")
+      .eq("name", SIGNATURE_REQUEST_TEMPLATE_NAME)
+      .is("is_deleted", false)
+      .limit(1)
+      .maybeSingle()
+    row = data
+    if (row?.status) {
+      const { data: pv } = await supabase
+        .from("picklist_values")
+        .select("picklist_value")
+        .eq("id", row.status)
+        .maybeSingle()
+      statusValue = (pv as any)?.picklist_value || null
+    }
+  } catch (_e) {
+    row = null
+  }
+
+  const usable = templateUsability(row, statusValue)
+  if (!usable.usable) {
+    const f = fallback()
+    return { html: f.html, subject: f.subject, source: `built-in (${usable.reason})`, missing: [] }
+  }
+
+  const tokens = signatureRequestTokens(ctx)
+  const bodyOut    = renderTemplate(row.body_html, tokens)
+  const subjectOut = renderTemplate(row.subject || "", tokens)
+  return {
+    html:    bodyOut.text,
+    subject: subjectOut.text.trim() || null,
+    source:  `template ${row.name}`,
+    missing: [...new Set([...bodyOut.missing, ...subjectOut.missing])],
+  }
+}
+
 function renderEmailHtml(p: {
   recipientName: string, senderName: string, templateName: string,
   customMessage: string | null, signingUrl: string,
