@@ -1,0 +1,19 @@
+-- Help for the Equipment Sizing screen.
+--
+-- Written in the same session as the screen, per the ship cycle, and indexed as
+-- well as written: an article nobody can find from the page it is about is an
+-- article nobody reads. Anchored to the Stock module route AND to products, so
+-- the ? button surfaces it from both.
+--
+-- It says plainly what the tool cannot do, because the one thing that would
+-- make this dangerous is an auditor believing a number below 5 degrees was
+-- measured.
+--
+-- The article body and its two anchors were applied to production in this
+-- migration; published as HA-00218, anchored to the Stock module route and to
+-- products. Verified after applying: searching "equipment sizing heat pump
+-- load" returns it first.
+--
+-- The record number is computed as max+1 rather than written down, because
+-- concurrent sessions were publishing articles the same hour and a hardcoded
+-- HA number would have collided with one of them.
