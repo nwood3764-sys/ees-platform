@@ -99,10 +99,22 @@ function SigningPortal() {
         }
         setData(body)
         // Pre-populate tabValues with any already-filled values (re-visit case)
+        // A date tab is NOT pre-filled here any more.
+        //
+        // Nicholas, 2026-09-05: "the date and time should automatically be
+        // appended to the signature. Just like DocuSign." It used to be a
+        // field the signer clicked, seeded in the BROWSER at page load — so
+        // the document carried the date the link was OPENED, not the date it
+        // was signed, and `toISOString()` made that date UTC, which after 7pm
+        // in Wisconsin is already tomorrow.
+        //
+        // The server stamps it at the moment of signing now. What is shown
+        // here is a PREVIEW of what will be stamped, held separately from
+        // tabValues so it is never mistaken for something the signer entered
+        // or something the client gets to decide.
         const initial = {}
         for (const t of body.tabs || []) {
           if (t.filled_value) initial[t.id] = t.filled_value
-          else if (t.type === 'date') initial[t.id] = new Date().toISOString().slice(0, 10)
         }
         setTabValues(initial)
         setPhase('view')
@@ -125,7 +137,11 @@ function SigningPortal() {
     // Name what is missing rather than counting it: "Please fill all 2 fields"
     // tells a signer nothing about WHICH box is still empty, and the one they
     // could not fill was the one they could not see.
-    const missing = (data.tabs || []).filter(t => !tabValues[t.id])
+    // Date tabs are stamped by the server, so they are never the signer's to
+    // complete and must never appear in "still to complete". Before this they
+    // were counted, which is how "Please fill all 2 fields" could name a box
+    // there was nothing to do to.
+    const missing = (data.tabs || []).filter(t => t.type !== 'date' && !tabValues[t.id])
     if (missing.length > 0) {
       const names = [...new Set(missing.map(t => tabLabel(t.type)))].join(', ')
       toast.error(`Still to complete: ${names}. Click the highlighted box on the document to fill it in.`)
@@ -142,7 +158,18 @@ function SigningPortal() {
           env_record_number: path.envRecordNumber,
           signing_token: path.signingToken,
           consent: true,
-          tabs: data.tabs.map(t => ({ id: t.id, value: tabValues[t.id] })),
+          // The zone the signer is actually in, so the stamped date is the one
+          // they would write themselves. The server validates it and falls
+          // back to UTC; it never guesses a zone from an address.
+          signer_timezone: (() => {
+            try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null }
+            catch { return null }
+          })(),
+          tabs: data.tabs
+            // A date tab carries no client value at all: sending one would
+            // imply the browser decides the signing date, and it does not.
+            .filter(t => t.type !== 'date')
+            .map(t => ({ id: t.id, value: tabValues[t.id] })),
         }),
       })
       const body = await resp.json()
@@ -521,23 +548,30 @@ export function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, act
               const top  = (page.pdfHeight - t.y - t.height) * page.scale
               const w    = t.width * page.scale
               const h    = t.height * page.scale
-              const filled = !!tabValues[t.id]
+              // A date tab is stamped by the server at the moment of signing,
+              // so it is not a field and must not read as one: no pointer, no
+              // click, no "fill me" blue. It shows what WILL be stamped.
+              const isAuto = t.type === 'date'
+              const filled = isAuto || !!tabValues[t.id]
               const active = activeTabId === t.id
               return (
                 <div
                   key={t.id}
                   data-signing-tab={t.id}
                   data-signing-tab-type={t.type}
-                  onClick={() => canFill && onTabClick(t.id)}
+                  data-signing-tab-auto={isAuto ? 'true' : undefined}
+                  onClick={isAuto ? undefined : () => canFill && onTabClick(t.id)}
                   style={{
                     position: 'absolute', left, top, width: w, height: h,
                     // The marker is the only thing on this layer that is
                     // clickable. Never move this onto a wrapper.
                     pointerEvents: 'auto',
-                    background: filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(126,179,232,0.30)',
-                    border: `2px solid ${active ? C.emerald : (filled ? C.emerald : '#7eb3e8')}`,
+                    background: isAuto ? 'rgba(143,160,184,0.10)'
+                      : (filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(126,179,232,0.30)'),
+                    border: `1px ${isAuto ? 'dashed' : 'solid'} ${
+                      isAuto ? C.textMuted : (active ? C.emerald : (filled ? C.emerald : '#7eb3e8'))}`,
                     borderRadius: 4,
-                    cursor: canFill ? 'pointer' : 'not-allowed',
+                    cursor: isAuto ? 'default' : (canFill ? 'pointer' : 'not-allowed'),
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: Math.max(10, Math.min(14, h * 0.4)),
                     color: filled ? C.textPrimary : '#1e466b',
@@ -545,7 +579,9 @@ export function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, act
                     overflow: 'hidden',
                     userSelect: 'none',
                   }}
-                  title={`${tabLabel(t.type)} — ${t.anchor_string}`}
+                  title={isAuto
+                    ? 'Filled in automatically when you sign — nothing to do here'
+                    : `${tabLabel(t.type)} — ${t.anchor_string}`}
                 >
                   <TabPreview tab={t} value={tabValues[t.id]} />
                 </div>
@@ -578,6 +614,23 @@ function PageOverlay({ target, children }) {
   return createPortal(children, container)
 }
 
+// The same shape the server stamps: date, time, and the zone NAMED. Kept
+// deliberately simple -- if it ever disagrees with the server by a minute that
+// is harmless, because the stamp that reaches the document is the server's.
+function signedStampPreview() {
+  try {
+    // Explicit components: dateStyle/timeStyle cannot be combined with
+    // timeZoneName -- that spelling throws, and here it fell straight into the
+    // catch so the box read "Filled in when you sign" instead of the stamp.
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+    }).format(new Date())
+  } catch {
+    return 'Filled in when you sign'
+  }
+}
+
 function tabLabel(type) {
   switch (type) {
     case 'signature': return 'Sign'
@@ -589,6 +642,12 @@ function tabLabel(type) {
 }
 
 function TabPreview({ tab, value }) {
+  // An unstamped date shows the stamp it is about to receive, in the reader's
+  // own zone, so the signer can SEE what will be recorded without being asked
+  // to enter it. The server composes the real one; this is only the preview.
+  if (!value && tab.type === 'date') {
+    return <span style={{ color: '#4a5e7a' }}>{signedStampPreview()}</span>
+  }
   if (!value) return <span>{tabLabel(tab.type)}</span>
   if (tab.type === 'signature' || tab.type === 'initial') {
     return <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: '100%' }} />
@@ -617,15 +676,17 @@ function TabEditor({ tab, value, recipientName, onSave, onCancel }) {
         <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary, marginBottom: 14 }}>
           {tab.type === 'signature' && 'Add your signature'}
           {tab.type === 'initial'   && 'Add your initials'}
-          {tab.type === 'date'      && 'Pick a date'}
           {tab.type === 'text'      && 'Enter text'}
         </div>
         {(tab.type === 'signature' || tab.type === 'initial') && (
           <SignatureEditor type={tab.type} initialValue={value} recipientName={recipientName} onSave={onSave} onCancel={onCancel} />
         )}
-        {tab.type === 'date' && (
-          <DateEditor initialValue={value} onSave={onSave} onCancel={onCancel} />
-        )}
+        {/* No date editor. A date tab is stamped by the server at the moment
+            of signing and carries no click handler, so this pane can never be
+            opened for one. The editor was DELETED rather than left unreachable:
+            it computed its default with `toISOString().slice(0,10)` -- the UTC
+            bug this change exists to remove -- and dead code carrying a known
+            wrong date is what the next person re-enables. */}
         {tab.type === 'text' && (
           <TextEditor initialValue={value} onSave={onSave} onCancel={onCancel} />
         )}
@@ -750,22 +811,6 @@ function pt(e, canvas) {
   const scaleX = canvas.width / rect.width
   const scaleY = canvas.height / rect.height
   return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY }
-}
-
-function DateEditor({ initialValue, onSave, onCancel }) {
-  const [val, setVal] = useState(initialValue || new Date().toISOString().slice(0, 10))
-  return (
-    <>
-      <input
-        type="date" value={val} onChange={e => setVal(e.target.value)}
-        style={{ width: '100%', padding: '10px 12px', fontSize: 14, border: `1px solid ${C.border}`, borderRadius: 6, boxSizing: 'border-box' }}
-      />
-      <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-        <button onClick={onCancel} style={cancelBtnStyle}>Cancel</button>
-        <button onClick={() => onSave(val)} style={saveBtnStyle}>Apply</button>
-      </div>
-    </>
-  )
 }
 
 function TextEditor({ initialValue, onSave, onCancel }) {

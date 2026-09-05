@@ -187,6 +187,12 @@ Deno.serve(async (req) => {
   if (!body.consent) return json({ error: "ESIGN consent required to sign" }, 400)
   if (!Array.isArray(body.tabs)) return json({ error: "tabs[] required" }, 400)
 
+  // The signing instant, decided ONCE here and used for every date stamp on
+  // this submission, so a signature and its date can never disagree by a
+  // second across a slow request.
+  const signedAt = new Date()
+  const signerZone = resolveTimeZone((body as any).signer_timezone)
+
   for (const t of body.tabs) {
     if (!t.id) continue
     await supabase.from("envelope_tabs").update({
@@ -205,6 +211,41 @@ Deno.serve(async (req) => {
         event_user_agent: ua,
       })
     }
+  }
+
+  // ── The date is stamped, never typed ───────────────────────────────────
+  //
+  // Nicholas, 2026-09-05: "the date and time should automatically be appended
+  // to the signature. Just like DocuSign."
+  //
+  // It used to be a field the signer clicked, pre-filled in the BROWSER at
+  // page load. Three things were wrong with that, and only the first is the
+  // one he saw:
+  //
+  //   1. It asked the signer to do the system's job.
+  //   2. The value was set when the PAGE OPENED, not when they signed. Open
+  //      the link Friday and sign Monday and the document said Friday.
+  //   3. It was `new Date().toISOString().slice(0,10)` — UTC. After 7pm in
+  //      Wisconsin that is already TOMORROW, so a signed document could carry
+  //      a date the signer never saw and had not reached.
+  //
+  // So the SERVER stamps it, from its own clock, for every date tab belonging
+  // to this recipient — regardless of what the client sent, which is also
+  // what stops a crafted request back-dating a signature. Rendered in the
+  // signer's own zone with the zone named, so the stamp is unambiguous
+  // wherever it is read.
+  const { data: dateTabs } = await supabase
+    .from("envelope_tabs")
+    .select("id, type:tab_type ( picklist_value )")
+    .eq("envelope_id", env.id)
+    .eq("recipient_id", recipient.id)
+    .eq("is_deleted", false)
+  for (const dt of (dateTabs || [])) {
+    if ((dt as any).type?.picklist_value !== "date") continue
+    await supabase.from("envelope_tabs").update({
+      tab_filled_value: signedStampText(signedAt, signerZone),
+      tab_filled_at:    signedAt.toISOString(),
+    }).eq("id", (dt as any).id).eq("recipient_id", recipient.id)
   }
 
   await supabase.from("envelope_recipients").update({
@@ -833,13 +874,24 @@ async function rebuildOverlayPdf(
   const { data: tabs } = await supabase
     .from("envelope_tabs")
     .select(`
-      id, tab_anchor_string, tab_page, tab_x, tab_y, tab_width, tab_height,
+      id, recipient_id, tab_anchor_string, tab_page, tab_x, tab_y, tab_width, tab_height,
       tab_filled_value, tab_filled_at,
       type:tab_type ( picklist_value )
     `)
     .eq("envelope_id", env.id)
     .eq("is_deleted", false)
     .not("tab_filled_value", "is", null)
+
+  // Which signers already have a date stamped somewhere. A signature belonging
+  // to one of them needs nothing drawn under it -- the template placed a date
+  // tab and that is where the date belongs. A signature belonging to a signer
+  // with NO date tab anywhere would otherwise go out UNDATED, which is the
+  // thing DocuSign never lets happen, so the stamp is drawn beneath it.
+  const signersWithADate = new Set(
+    (tabs || [])
+      .filter(t => (t as any).type?.picklist_value === "date" && t.tab_filled_value)
+      .map(t => (t as any).recipient_id),
+  )
 
   for (const t of (tabs || [])) {
     const pageIdx = Math.max(0, Math.min((t.tab_page || 1) - 1, pages.length - 1))
@@ -866,10 +918,30 @@ async function rebuildOverlayPdf(
           width:  drawW,
           height: drawH,
         })
+        // Deliberately small and gray, and only when nothing else carries the
+        // date: it is a system stamp, not part of the document's own text, and
+        // it must not be mistaken for a term somebody agreed to.
+        if (tabType === "signature" && !signersWithADate.has((t as any).recipient_id)) {
+          const stamp = t.tab_filled_at
+            ? signedStampText(new Date(t.tab_filled_at), "UTC")
+            : null
+          if (stamp) {
+            page.drawText(`Signed ${stamp}`, {
+              x, y: Math.max(2, y - 8), size: 6.5,
+              font: fontHelv, color: rgb(0.35, 0.4, 0.48),
+            })
+          }
+        }
       } catch { /* skip bad image */ }
     } else if (tabType === "date") {
-      page.drawText(formatDate(t.tab_filled_value), {
-        x: x + 4, y: y + h * 0.3, size: 11,
+      // Sized to fit: a full "Sep 5, 2026, 3:47 PM CDT" is wider than the
+      // 11pt a bare date used. Shrinking beats overflowing off the tab and
+      // across whatever the template put next to it.
+      const dateText = renderDateTabValue(t.tab_filled_value)
+      let dateSize = 11
+      while (dateSize > 6 && fontHelv.widthOfTextAtSize(dateText, dateSize) > w - 8) dateSize -= 0.5
+      page.drawText(dateText, {
+        x: x + 4, y: y + h * 0.3, size: dateSize,
         font: fontHelv, color: rgb(0, 0, 0),
       })
     } else {
@@ -1013,6 +1085,45 @@ async function picklistId(
     .eq("picklist_is_active", true)
     .maybeSingle()
   return data?.id || null
+}
+
+// The signer's own time zone, or UTC. Never guess a zone from an address: a
+// wrong zone on a signed document is a wrong date, and UTC at least says so.
+function resolveTimeZone(tz: unknown): string {
+  const name = typeof tz === "string" ? tz.trim() : ""
+  if (!name) return "UTC"
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: name }).format(new Date())
+    return name
+  } catch { return "UTC" }
+}
+
+// What gets printed beside a signature: date, time, and the zone NAMED, so
+// "3:47 PM" cannot be read three different ways by three different readers.
+function signedStampText(at: Date, timeZone: string): string {
+  try {
+    // Explicit components, NOT dateStyle/timeStyle. Combining a style shortcut
+    // with timeZoneName is invalid and THROWS ("Invalid option : option"), so
+    // that spelling would have silently fallen through to the raw ISO catch
+    // below and stamped "2026-09-05 20:54 UTC" on every signed document. The
+    // browser check caught it; reading it, it looks entirely reasonable.
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    }).format(at)
+  } catch {
+    return at.toISOString().replace("T", " ").slice(0, 16) + " UTC"
+  }
+}
+
+// A stamp composed by signedStampText is already display text and is drawn
+// verbatim. A bare ISO date is a value from BEFORE this change — every
+// envelope signed until 2026-09-05 stored one — and is still formatted the way
+// it always was, so a document reprinted today looks like the one that was
+// signed.
+function renderDateTabValue(v: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v).trim()) ? formatDate(v) : String(v)
 }
 
 function formatDate(v: string): string {

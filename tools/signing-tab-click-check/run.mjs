@@ -127,12 +127,43 @@ for (const type of ['signature', 'date']) {
 
 await page.evaluate(() => { window.__realClicks = [] })
 await clickCentre('[data-test="real-panel"] [data-signing-tab-type="signature"]')
-await clickCentre('[data-test="real-panel"] [data-signing-tab-type="date"]')
 const realClicks = await page.evaluate(() => window.__realClicks)
 check('clicking the Sign box fires the real onTabClick', realClicks.includes('ETAB-00006'),
   `clicks seen: ${JSON.stringify(realClicks)}`)
-check('clicking the Date box fires it too', realClicks.includes('ETAB-00007'))
-check('BOTH boxes are reachable, not just the last one', realClicks.length === 2)
+
+// ── The date is automatic: not a target, not a chore ───────────────────────
+//
+// Nicholas: "the date and time need to be automatic. The user shouldn't have
+// to click that. It should just be like DocuSign."
+const dateAuto = await page.evaluate(() => {
+  const el = document.querySelector('[data-test="real-panel"] [data-signing-tab-type="date"]')
+  return {
+    marked: el.getAttribute('data-signing-tab-auto') === 'true',
+    cursor: getComputedStyle(el).cursor,
+    text:   (el.textContent || '').trim(),
+    title:  el.getAttribute('title') || '',
+  }
+})
+check('the date tab is marked automatic', dateAuto.marked === true)
+check('the date tab does not offer a pointer', dateAuto.cursor === 'default',
+  `cursor is ${dateAuto.cursor}`)
+check('the date tab says nothing is required of the signer',
+  /automatically/i.test(dateAuto.title), dateAuto.title)
+check('the date tab previews the stamp rather than saying "Date"',
+  dateAuto.text !== 'Date' && /\d{4}/.test(dateAuto.text), `shows "${dateAuto.text}"`)
+
+await page.evaluate(() => { window.__realClicks = [] })
+await clickCentre('[data-test="real-panel"] [data-signing-tab-type="date"]')
+const afterDateClick = await page.evaluate(() => window.__realClicks)
+check('clicking the date box opens nothing — there is nothing to fill',
+  afterDateClick.length === 0, `clicks seen: ${JSON.stringify(afterDateClick)}`)
+
+// And the signature must STILL be clickable beside an inert date box: making
+// the date inert must not have made its neighbour inert too.
+await clickCentre('[data-test="real-panel"] [data-signing-tab-type="signature"]')
+const sigStillWorks = await page.evaluate(() => window.__realClicks)
+check('the Sign box is still clickable beside an inert date box',
+  sigStillWorks.includes('ETAB-00006'))
 
 // The layer must never take pointer events — that is the whole rule.
 const layerInert = await page.evaluate(() => {
