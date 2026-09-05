@@ -1,0 +1,72 @@
+name: Deploy Edge Function
+
+# Deploys one Supabase Edge Function from this repository.
+#
+# Why this exists: the agent sandbox has no Supabase CLI and no management
+# token, and the MCP deploy tool takes the function's source INLINE — so
+# deploying a large function from a session means re-emitting the whole file
+# verbatim through the model, which is a real corruption risk on a live
+# service that Supabase cannot roll back. Recorded as a standing constraint on
+# 2026-08-31 when the ai-assistant deploy (84 KB) was declined for that reason.
+#
+# Run it from the GitHub "Actions" tab -> "Deploy Edge Function" -> "Run
+# workflow", and give it the function's directory name under
+# supabase/functions (e.g. send-email-v1).
+#
+# Requires one repository secret (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_ACCESS_TOKEN - a Supabase personal access token with access to the
+#                           LEAP project. Create it at
+#                           https://supabase.com/dashboard/account/tokens
+#
+# Creating that token, recorded because two of the answers are counter-intuitive:
+#   - The project is named "EES AI - LEAP" (ref flyjigrijjjtcsvpgzvk). The token
+#     form picks by NAME, not by ref.
+#   - It sits in the LEGACY-NAMED organization, NOT the one called "EES". The
+#     obvious pick is the wrong one, and a token scoped to the wrong org
+#     authenticates fine and then fails the deploy with "project not found".
+#   - Permissions default to None: it needs Application services -> Edge
+#     Functions = Write, and Project = Read. Nothing else.
+#   - The token in use EXPIRES 2027-09-01. On that date this workflow starts
+#     failing with an auth error; regenerate the token and replace the secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      function_name:
+        description: 'Function directory under supabase/functions (e.g. send-email-v1)'
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-edge-function-${{ inputs.function_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Refuse a function this repository does not carry
+        run: |
+          set -euo pipefail
+          DIR="supabase/functions/${{ inputs.function_name }}"
+          if [ ! -f "$DIR/index.ts" ]; then
+            echo "No such function: $DIR/index.ts" >&2
+            exit 1
+          fi
+          echo "Deploying $DIR ($(wc -c < "$DIR/index.ts") bytes)"
+
+      - name: Install the Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          supabase functions deploy "${{ inputs.function_name }}" \
+            --project-ref flyjigrijjjtcsvpgzvk

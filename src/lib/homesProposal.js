@@ -81,7 +81,23 @@ export async function generateHomesProposalBlob(input){
   }
   const kind = input && input.kind ? input.kind : 'proposal';
   const sealed = /sealed/i.test((input && input.contractor) || '');
-  return sealed ? buildSealedPdfBlob(kind) : buildEesPdfBlob(kind);
+  const tabs = Array.isArray(input && input.signatureTabs) ? input.signatureTabs : null;
+  return sealed ? buildSealedPdfBlob(kind, tabs) : buildEesPdfBlob(kind, tabs);
+}
+
+/**
+ * Render a HOMES document AND return its signature/date tab positions:
+ * { blob, tabs }.
+ *
+ * Same renderer, same call, one out-parameter — never a second PDF path. Only
+ * the INVOICE kinds carry an acknowledgment block (proposals deliberately do
+ * not, per Nicholas), so a proposal comes back with an empty tab list and the
+ * caller refuses to send it rather than placing a signature nowhere.
+ */
+export async function generateHomesProposalBlobWithSignatureTabs(input){
+  const signatureTabs = [];
+  const blob = await generateHomesProposalBlob({ ...input, signatureTabs });
+  return { blob, tabs: signatureTabs };
 }
 
 // ===========================================================================
@@ -503,6 +519,20 @@ function invoiceModel(){
     if(foe)foe.amt=Math.round(roofSqFt*foe.rate*100)/100;
   }
   const foeAmt=foe?foe.amt:0;
+  // TOTAL DUE $0.00 IS THE POINT OF THIS DOCUMENT — DO NOT "FIX" IT.
+  // (Nicholas, 2026-09-03: "There is no cost. Customers don't pay us anything.
+  // The program pays us. This invoice is just fake so the customer can see that
+  // there's no out-of-pocket cost. We get paid through a different mechanism.")
+  // Total Project Cost is therefore DEFINED as the rebate, and the rebate is
+  // then applied as an instant discount against it, so the two cancel exactly
+  // and the customer's balance is zero on every one of these. That is the
+  // message the document exists to deliver, not an accident of the arithmetic.
+  // The measure rows below are a breakout of this same total, which is why they
+  // are fractions rather than prices.
+  // The opportunity line items are the only real dollar figures in LEAP, and
+  // they are deliberately NOT read here: pricing this invoice from them would
+  // produce a non-zero balance and tell a property owner they owe money they
+  // do not owe. EES is paid by the programme, outside this document.
   const total=Math.round((homesAmt+foeAmt)*100)/100;
   // Measure lines: breakout fractions × total, largest row absorbs the drift.
   const rows=[];
@@ -544,7 +574,7 @@ function invoiceModel(){
    caps and $14,000 per dwelling unit (same schedule NC & WI). */
 
 // --- ported: buildEesPdfBlob (index.html 3806,4043) ---
-function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 'invoice'
+function buildEesPdfBlob(kind, signatureTabs = null){                       // 'audit' | 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
   const isAudit=kind==='audit', isInv=kind==='invoice';
   const P=_pdfNew(34); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
@@ -777,6 +807,18 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
     t(W-M-150,st.y+10,'Date');
+    // Record where the signature and date go, for the e-signature route.
+    // Taken from the SAME values that just drew the rules, so a tab can never
+    // describe a layout the signer did not see. jsPDF y is top-origin; the
+    // signing pipeline stores tab y bottom-origin, hence H - st.y. Both boxes
+    // sit ABOVE their rule, bottom edge on the line.
+    if(Array.isArray(signatureTabs)){
+      const page=d.getNumberOfPages(), boxH=26;
+      signatureTabs.push(
+        {recipient_order:1,tab_type:'sig', page,x:M,        y:H-st.y,width:280,height:boxH},
+        {recipient_order:1,tab_type:'date',page,x:W-M-150,y:H-st.y,width:150,height:boxH},
+      );
+    }
   }
   _stampEesFooters(P,m.state,pv(F.pjInvDate));
   return d.output('blob');
@@ -785,7 +827,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
    proposal pages can be identified. Runs after all content is laid out. */
 
 // --- ported: buildSealedPdfBlob (index.html 4225,4342) ---
-function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
+function buildSealedPdfBlob(kind, signatureTabs = null){                    // 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
   const isInv=kind==='invoice';
   const P=_pdfNew(20); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
@@ -906,6 +948,18 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
     st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
     d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
     tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative'); t(W-M-150,st.y+10,'Date');
+    // Record where the signature and date go, for the e-signature route.
+    // Taken from the SAME values that just drew the rules, so a tab can never
+    // describe a layout the signer did not see. jsPDF y is top-origin; the
+    // signing pipeline stores tab y bottom-origin, hence H - st.y. Both boxes
+    // sit ABOVE their rule, bottom edge on the line.
+    if(Array.isArray(signatureTabs)){
+      const page=d.getNumberOfPages(), boxH=26;
+      signatureTabs.push(
+        {recipient_order:1,tab_type:'sig', page,x:M,        y:H-st.y,width:280,height:boxH},
+        {recipient_order:1,tab_type:'date',page,x:W-M-150,y:H-st.y,width:150,height:boxH},
+      );
+    }
   }
   _stampSealedFooters(P,docLabel,docNo,F.pjInvDate);
   return d.output('blob');

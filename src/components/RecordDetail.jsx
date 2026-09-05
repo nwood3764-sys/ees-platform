@@ -62,6 +62,7 @@ import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
 import ConversationListWidget from './ConversationListWidget'
 import OpportunityProductsWidget from './OpportunityProductsWidget'
+const SignatureSendModal = lazy(() => import('./SignatureSendModal'))
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
 import PropertyMapWidget from './PropertyMapWidget'
@@ -129,6 +130,9 @@ import { recordStateValue } from '../lib/picklistStateScope'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
+import { CONVERSATION_ANCHORS } from '../lib/conversationAnchors'
+import { objectLabelPlural } from '../lib/objectNav'
+import { resolveFieldGroupColumns, packFieldGroupRows, fieldsForRenderedColumns, rowHasContent } from '../lib/fieldGroupLayout'
 
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
@@ -392,7 +396,7 @@ const TABLE_META = {
   // building — work_orders.project_id is NOT NULL and the assessment knows its
   // project (derive_assessment_project, migration 20260817163750).
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id', 'opportunity_id', 'project_id'], parentTables: ['properties', 'buildings', 'opportunities', 'projects'] },
-  incentive_applications:    { module: 'Qualification',  label: 'Incentive Applications', nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
+  incentive_applications:    { module: 'Qualification',  label: objectLabelPlural('incentive_applications'), nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
   efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
   payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
@@ -438,7 +442,7 @@ const TABLE_META = {
   // parent record (contact / account / project / SA); these registry entries
   // exist so direct-URL navigation (or a future global search hit) still
   // renders a reasonable breadcrumb and header.
-  conversations:                                     { module: 'Field', label: 'Conversations',                      nameColumn: 'conv_subject', recordNumberColumn: 'conv_record_number',  statusColumn: 'conv_status', parents: ['contact_id', 'account_id', 'project_id', 'service_appointment_id', 'work_order_id', 'incentive_application_id', 'opportunity_id', 'assessment_id', 'building_id', 'property_id'], parentTables: ['contacts', 'accounts', 'projects', 'service_appointments', 'work_orders', 'incentive_applications', 'opportunities', 'assessments', 'buildings', 'properties'] },
+  conversations:                                     { module: 'Field', label: 'Conversations',                      nameColumn: 'conv_subject', recordNumberColumn: 'conv_record_number',  statusColumn: 'conv_status', parents: CONVERSATION_ANCHORS.map(a => a.fk), parentTables: CONVERSATION_ANCHORS.map(a => a.object) },
   messages:                                          { module: 'Field', label: 'Messages',                            nameColumn: null,           recordNumberColumn: 'msg_record_number',   statusColumn: 'msg_status', parents: ['conversation_id'],                       parentTables: ['conversations'] },
   user_account_scopes:                               { module: 'Admin', label: 'User Account Scopes',                nameColumn: null,          recordNumberColumn: null,                   statusColumn: null,        parents: ['uas_user_id', 'uas_account_id', 'uas_property_id'], parentTables: ['users', 'accounts', 'properties'] },
   user_program_scopes:                               { module: 'Admin', label: 'User Program Scopes',                nameColumn: null,          recordNumberColumn: null,                   statusColumn: null,        parents: ['ups_user_id', 'ups_program_id'],           parentTables: ['users', 'programs'] },
@@ -2506,6 +2510,12 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       const opp = dependencyValues.opportunity_id
       return opp ? { opportunity_id: opp } : null
     }
+    if (dep.kind === 'qualifying_equipment_for_measure') {
+      // Inline-create from this picker would be creating a PRODUCT, which is
+      // catalogue administration rather than something done mid-line-item, so
+      // there is no seed to carry.
+      return null
+    }
     if (dep.kind === 'buildings_for_opportunity') {
       const opp = dependencyValues.opportunity_id
       return opp ? { opportunity_id: opp } : null
@@ -3994,7 +4004,34 @@ const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'mi
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields, tableName, createRelatedValues }) {
+// Width of an element, kept current as it resizes. Returns null until the
+// element has been measured — callers must treat that as "not known yet" and
+// fall back to the declared column count rather than assuming one column,
+// which would flash a stacked section and reflow on the next frame.
+function useElementWidth(el) {
+  const [width, setWidth] = useState(null)
+  useLayoutEffect(() => {
+    if (!el) { setWidth(null); return undefined }
+    const measure = () => setWidth(el.getBoundingClientRect().width)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [el])
+  return width
+}
+
+// Exported for tools/page-layout-alignment-check, which mounts the REAL widget
+// in a real browser and measures the rows. Nothing in the app imports it by
+// name — Section renders it directly.
+export function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields, tableName, createRelatedValues, sectionColumns }) {
+  // Measured before the early return: the section's declared column count is a
+  // ceiling, and how many of those columns actually fit is a property of the
+  // BOX the group is rendered in, not of the viewport. The same section renders
+  // in the main flow, in the 480px right rail and inside the create pop-up.
+  const [containerEl, setContainerEl] = useState(null)
+  const containerWidth = useElementWidth(containerEl)
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
 
@@ -4023,7 +4060,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         if (f.type === 'spacer') {
           return (
             <div key={fieldRenderKey(f, fieldIndex)} aria-hidden="true"
-              style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', visibility: 'hidden' }}>&nbsp;</span>
               <span style={{ fontSize: 13, visibility: 'hidden' }}>&nbsp;</span>
             </div>
@@ -4054,7 +4091,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           }
           return (
             <div key={fieldRenderKey(f, fieldIndex)} style={{
-              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              padding: '12px 16px',
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
               <span
@@ -4088,7 +4125,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             : 'Read-only — inherited from a parent record. Edit it on the base record.'
           return (
             <div key={fieldRenderKey(f, fieldIndex)} style={{
-              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              padding: '12px 16px',
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
               <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
@@ -4188,7 +4225,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           const fieldDisabled = fieldDisabledReasons?.[f.name] || null
           return (
             <div key={fieldRenderKey(f, fieldIndex)} style={{
-              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              padding: '12px 16px',
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
               <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
@@ -4207,7 +4244,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
 
         return (
           <div key={fieldRenderKey(f, fieldIndex)} style={{
-            padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+            padding: '12px 16px',
             display: 'flex', flexDirection: 'column', gap: 4,
             background: isEditable ? '#fafffe' : 'transparent',
           }}>
@@ -4267,60 +4304,64 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         )
   }
 
-  // Row-major layout with full-width spanning. Opt-in via widget_config.layout
-  // === 'rows' or any field carrying `full_width`. Fields render in reading
-  // (array) order across a 2-column grid: `column: 2` pins a field to the right
-  // slot, everything else fills the left; `full_width: true` spans the whole
-  // width (address blocks stacked Street/City/State/Zip, radio groups, checkbox
-  // lists — matching a source form 1:1). This replaces the older column-fill
-  // approach (two independent left/right stacks + blank spacers) which
-  // mis-aligned whenever one column held more fields than the other. Layouts
-  // that opt in neither way are untouched (legacy paths below).
-  // Any section whose fields carry an explicit `column` renders row-major.
-  // Nicholas, 2026-09-02: "Align all rows. We should never have a stair step
-  // like this." The stair step IS the legacy column-fill path below, and the
-  // comment above it has always said so -- it "mis-aligned whenever one column
-  // held more fields than the other". Assigning a field to column 2 is a
-  // statement about which SLOT IN A ROW it occupies, so honouring it any other
-  // way is what produced the offset. Two columns only: the row-major grid is a
-  // 2-up grid, so a 3-column layout stays on the column path it was built for.
-  const maxColumn = Math.max(0, ...fields.map(f => f.column || 0))
-  const useRowMajor = widget.widget_config?.layout === 'rows'
-    || fields.some(f => f.full_width)
-    || (maxColumn > 0 && maxColumn <= 2)
-  if (useRowMajor) {
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoFlow: 'row', alignItems: 'start' }}>
-        {fields.map((f, i) => {
-          const el = renderField(f, i)
-          if (el == null) return null
-          const cellStyle = f.full_width
-            ? { gridColumn: '1 / -1' }
-            : { gridColumnStart: f.column === 2 ? 2 : 1 }
-          return <div key={fieldRenderKey(f, i)} style={cellStyle}>{el}</div>
-        })}
-      </div>
-    )
-  }
+  // ── One layout rule for every field group ────────────────────────────────
+  // Fields fill rows in READING ORDER — their order in the array is the only
+  // statement of where they go. The three placements this replaced (a
+  // row-major grid keyed off a stored `column`, a column-fill grid of
+  // independent stacks, and a viewport-width auto-fit that ignored the
+  // section's declared column count altogether) each drew the same config
+  // differently, and the first of them left an empty slot whenever a field
+  // pinned to column 2 sat ahead of one pinned to column 1. That empty slot is
+  // the stagger Nicholas reported. See src/lib/fieldGroupLayout.js.
+  //
+  // Only fields that actually RENDER are packed: renderField returns null for
+  // a system field on the create form and for a related field whose parent
+  // isn't chosen yet, and packing one of those would put the hole straight
+  // back.
+  const rendered = []
+  fields.forEach((f, i) => {
+    const el = renderField(f, i)
+    if (el != null) rendered.push({ field: f, el })
+  })
+  if (rendered.length === 0) return null
 
-  // Column-aware layout: when fields carry an explicit `column` (set in the new
-  // page-layout builder) render fixed columns (Left / Center / Right) and stack
-  // each column's fields in order. Layouts without `column` keep the responsive
-  // auto-fit flow — unchanged.
-  const useCols = fields.some(f => f.column)
-  const nCols = useCols ? Math.max(1, ...fields.map(f => f.column || 1)) : 1
-  if (useCols) {
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${nCols}, minmax(0, 1fr))`, alignItems: 'start' }}>
-        {Array.from({ length: nCols }, (_, i) => i + 1).map(c => (
-          <div key={c}>{fields.filter(f => (f.column || 1) === c).map((f, i) => renderField(f, i))}</div>
-        ))}
-      </div>
-    )
-  }
+  const columns = resolveFieldGroupColumns({ declared: sectionColumns, containerWidth })
+  // A section that reflowed to fewer columns than it was designed for drops its
+  // spacers — they hold slots in a shape that no longer exists, and two landing
+  // together paint an empty band. `rowHasContent` is the second guard: a row
+  // left holding nothing at all (every field in it hidden by the caller's field
+  // permissions) is not drawn.
+  const kept = fieldsForRenderedColumns(rendered, {
+    columns, declaredColumns: sectionColumns, fieldOf: (r) => r.field,
+  })
+  const rows = packFieldGroupRows(kept.map(r => r.field), columns).filter(rowHasContent)
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0' }}>
-      {fields.map((f, i) => renderField(f, i))}
+    <div ref={setContainerEl}>
+      {rows.map((row, rowIndex) => (
+        // The ROW carries the separator, not the cells. A cell's own border
+        // sat at the bottom of that cell's content, so a value wrapping to two
+        // lines dropped its rule below its neighbour's and the section read as
+        // a broken ladder. One rule per row cannot do that.
+        <div key={`fgrow-${rowIndex}`} style={{
+          display: 'flex', alignItems: 'stretch',
+          borderBottom: `1px solid ${C.border}`,
+        }}>
+          {row.cells.map((cell, cellIndex) => (
+            // display:grid so the field fills the cell in BOTH axes without
+            // the field renderers needing to know they sit in one — that is
+            // what makes a short field's background and its neighbour's run to
+            // the same depth ("the other ones just need to adjust").
+            <div
+              key={cell.blank ? `fgblank-${rowIndex}-${cellIndex}` : fieldRenderKey(cell.field, cell.index)}
+              aria-hidden={cell.blank ? 'true' : undefined}
+              style={{ flex: `${cell.span} 1 0%`, minWidth: 0, display: 'grid' }}
+            >
+              {cell.blank ? null : kept[cell.index].el}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -6813,17 +6854,27 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   const meaningfulSectionWidgets = sectionWidgets.filter(w =>
     w.widget_type === 'field_group' ? ((w.widget_config?.fields || []).length > 0) : true)
   if (meaningfulSectionWidgets.length === 0 && cardCount > 0) return null
-  // A section with no title typed in — blank, or the "Untitled Section"
-  // placeholder the save path stores for an unnamed section — must not render
-  // an empty titled box on the record page (Nicholas, 2026-07-29: "if I don't
-  // have anything typed in the section name, it just needs to disappear").
+  // A section with no title typed in — blank, or one of the two placeholders a
+  // section carries until somebody names it — must not render an empty titled
+  // box on the record page (Nicholas, 2026-07-29: "if I don't have anything
+  // typed in the section name, it just needs to disappear").
   // If such an untitled section also has no content to show, it disappears
   // entirely — no header, no wasted vertical space. If it DOES carry fields,
   // the fields still render, just with no header bar above them. Named empty
   // sections keep their header + muted empty state (they still match the
   // layout editor 1:1); this carve-out is only for the untitled case.
+  //
+  // "New Section" is the second placeholder: it is the label the canvas
+  // editor's Add Section button writes, and the audit of every layout on
+  // 2026-09-03 found **35 sections across 10 objects** still carrying it —
+  // each of them painting a header that literally reads "New Section" on a
+  // live record page. It is the same fact as "Untitled Section" (nobody typed
+  // a name), so it gets the same treatment. Naming them is a business
+  // decision, not one to guess at; until somebody does, they render their
+  // fields without a placeholder heading above them.
   const rawLabel = (section.section_label || '').trim()
-  const hasTitle = !!rawLabel && rawLabel.toLowerCase() !== 'untitled section'
+  const SECTION_NAME_PLACEHOLDERS = new Set(['untitled section', 'new section'])
+  const hasTitle = !!rawLabel && !SECTION_NAME_PLACEHOLDERS.has(rawLabel.toLowerCase())
   const hasContent = meaningfulSectionWidgets.length > 0
   if (!hasTitle && !hasContent) return null
   const showHeader = hasTitle
@@ -6847,7 +6898,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
             editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts}
             onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons}
             onNavigateToRecord={onNavigateToRecord} requiredFields={requiredFields} tableName={tableName}
-            createRelatedValues={createRelatedValues} />
+            createRelatedValues={createRelatedValues} sectionColumns={section.section_columns} />
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
@@ -7269,6 +7320,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // signing URLs for the user to distribute. Re-checked when tableName changes
   // so navigating between record types updates the icon visibility.
   const [showSendSignatureModal, setShowSendSignatureModal] = useState(false)
+  // Which generated document is being sent for signature, or null. One modal,
+  // configured per document — the two paths differ only in which service loads
+  // and sends, and every guard a person passes through is identical.
+  const [signatureSend, setSignatureSend] = useState(null)
   const [hasActiveTemplate, setHasActiveTemplate] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
   // Re-fetch the open record when a background action (today: the LEAP
@@ -8669,6 +8724,56 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // and re-sends the original signing-request email through the envelope
   // owner's Outlook. We pass window.location.origin as signing_base_url so
   // the magic link resolves to whatever host the user is on (dev/prod).
+  // ── The Quality Installation Supplemental Data Sheet ────────────────────
+  //
+  // Produced automatically when a HEAR Project Reservation enrollment is
+  // created (see the effect below) and rebuilt on demand here. Both routes go
+  // through the same service call, so a regenerated sheet is byte-for-byte the
+  // sheet a fresh create would have produced — nothing is only reachable from
+  // one of the two paths.
+  // A ref, not state: nothing renders from it, and a ref is read synchronously
+  // so two fast presses cannot both pass the guard before a re-render lands.
+  const supplementalBusyRef = useRef(false)
+  // Takes the enrollment id rather than closing over recordId, because the
+  // create path calls it for a record that has just come into existence and
+  // which this component is not yet mounted on.
+  const generateSupplementalSheetFor = useCallback(async (enrollmentId, { silent }) => {
+    if (!enrollmentId) return
+    // A second press while the first run is still uploading would file two
+    // sheets on one enrollment.
+    if (supplementalBusyRef.current) return
+    supplementalBusyRef.current = true
+    try {
+      const { generateVentilationSupplementalDataSheet } =
+        await import('../data/ventilationSupplementalDataSheetService')
+      const res = await generateVentilationSupplementalDataSheet(enrollmentId)
+      if (res.skipped) return
+      const unitWord = res.rows.length === 1 ? 'unit' : 'units'
+      // Warnings are the point, not decoration: an empty Model Number column or
+      // a building with no unit records still produces a valid-looking workbook,
+      // and the person filing it needs to know before it reaches the programme
+      // administrator. They are shown even on the silent create path.
+      if (res.warnings.length > 0) {
+        toast.error(`Supplemental Data Sheet generated with ${res.rows.length} ${unitWord}, but: ${res.warnings.join(' ')}`)
+      } else if (!silent) {
+        toast.success(`Supplemental Data Sheet generated — ${res.rows.length} ${unitWord}.`)
+      }
+      setReloadTick(t => t + 1)
+    } catch (err) {
+      // A failure on the automatic create path is reported, never swallowed —
+      // the enrollment itself saved fine, and the person needs to know the
+      // sheet did not come with it.
+      toast.error(`Supplemental Data Sheet: ${err.message}`)
+    } finally {
+      supplementalBusyRef.current = false
+    }
+  }, [])
+
+  const handleRegenerateSupplementalSheet = useCallback(
+    () => generateSupplementalSheetFor(recordId, { silent: false }),
+    [generateSupplementalSheetFor, recordId])
+
+
   const handleResendEnvelope = useCallback(async () => {
     if (envelopeBusy) return
     if (tableName !== 'envelopes') return
@@ -9077,6 +9182,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
         const created = await insertRecord(tableName, fields)
         toast.success(cloneSource ? 'Clone created' : 'Record created')
+
+        // The Quality Installation Supplemental Data Sheet is produced the
+        // moment a HEAR Project Reservation enrollment exists — Nicholas: "this
+        // needs to auto-generate when the enrollment record is created based
+        // off the opportunity."
+        //
+        // Awaited BEFORE navigating so the record page opens with the sheet
+        // already on it, rather than appearing a few seconds later on a screen
+        // the person is already reading. Its own failures are reported inside
+        // runSupplementalSheet and never rethrown: the enrollment saved, and a
+        // create that reports "Create failed" because a spreadsheet did not
+        // build would be a lie about what happened.
+        if (tableName === 'enrollments') {
+          // The service decides whether this record type files a sheet — it
+          // resolves the saved record's record type itself. Calling it for
+          // every new enrollment and letting it no-op keeps that rule in one
+          // place instead of duplicating it against a draft whose record type
+          // is still a raw uuid here.
+          await generateSupplementalSheetFor(created.id, { silent: true })
+        }
 
         if (onRecordCreated) {
           onRecordCreated({ table: tableName, id: created.id })
@@ -9643,6 +9768,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_SUBMITTED_ENROLLMENT]:        () => setShowSubmittedEnrollmentModal(true),
+    [ACTION_KEYS.REGENERATE_SUPPLEMENTAL_DATA_SHEET]:   handleRegenerateSupplementalSheet,
+    [ACTION_KEYS.SEND_HEAR_PROPOSAL_FOR_SIGNATURE]:     () => setSignatureSend('hear_proposal'),
+    [ACTION_KEYS.SEND_PAYMENT_REQUEST_FOR_SIGNATURE]:   () => setSignatureSend('payment_request'),
     [ACTION_KEYS.GENERATE_HOMES_PROPOSAL]:             () => setDocumentModalKind('proposal'),
     [ACTION_KEYS.GENERATE_HEAR_PROPOSAL]:              () => setDocumentModalKind('hear_proposal'),
     [ACTION_KEYS.GENERATE_HOMES_PAYMENT_INVOICE]:      () => setDocumentModalKind('invoice'),
@@ -10716,6 +10844,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             send-envelope, displays signing URLs. After successful send the
             envelope row exists; the parent's Documents related-list will
             show the signed PDF after the last recipient signs. */}
+        {signatureSend && (
+          <Suspense fallback={null}>
+            <SignatureSendModal
+              kind={signatureSend}
+              recordId={recordId}
+              onClose={() => setSignatureSend(null)}
+              onSent={() => setReloadTick(t => t + 1)}
+            />
+          </Suspense>
+        )}
+
         {showSendSignatureModal && hasActiveTemplate && (
           <SendForSignatureModal
             open

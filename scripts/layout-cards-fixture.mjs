@@ -101,8 +101,19 @@ check('Photos is refused on an enrollment, and says why',
   enrollmentCards.find(c => c.id === 'photos').disabled, true)
 check('the Photos refusal names Documents as the card to use instead',
   /Documents card/.test(enrollmentCards.find(c => c.id === 'photos').disabledReason), true)
-check('Communications is refused on an enrollment — conversations has no enrollment_id',
-  enrollmentCards.find(c => c.id === 'conversation_panel').disabled, true)
+// Nicholas, 2026-09-03: "we need to have a communication on all enrollment
+// objects and all incentive record objects." conversations gained an
+// enrollment_id anchor that day; before it, this card was correctly refused
+// here, which is why the check reads the other way now.
+check('Communications can be placed on an enrollment',
+  enrollmentCards.find(c => c.id === 'conversation_panel').disabled, false)
+// CONTROL — an object with no anchor column on conversations is still refused,
+// and says why. A card that cannot hold a thread must not be offered.
+const workStepCards = availableCards('work_steps', [])
+check('Communications is refused on a work step',
+  workStepCards.find(c => c.id === 'conversation_panel').disabled, true)
+check('the refusal explains that no thread can be anchored there',
+  /foreign key/.test(workStepCards.find(c => c.id === 'conversation_panel').disabledReason), true)
 check('Work Plan is refused off a work order',
   enrollmentCards.find(c => c.id === 'work_plan').disabled, true)
 check('Publish History is refused off a project report template',
@@ -114,11 +125,34 @@ check('Work Plan can be placed on a work order', workOrderCards.find(c => c.id =
 check('Communications can be placed on a work order',
   workOrderCards.find(c => c.id === 'conversation_panel').disabled, false)
 
+// No card is refused because it is already on the layout (Nicholas,
+// 2026-09-05: "I should be able to set this up anywhere. This shouldn't be
+// limited just to one area … it should go for any objects"). The palette had
+// a "one per layout" gate on Communications, Work Plan and Publish History
+// while Copy to… never did — two surfaces, two answers. The canvas is passed
+// in and must not change the answer.
 const withPlan = availableCards('work_orders', [
   { key: 's', tab: 'Details', widgets: [{ key: 'w', type: 'work_plan', config: {} }] },
 ])
-check('a second Work Plan is refused — a record shows one',
-  withPlan.find(c => c.id === 'work_plan').disabled, true)
+check('a second Work Plan is NOT refused — the canvas never disables a card',
+  withPlan.find(c => c.id === 'work_plan').disabled, false)
+const withComms = availableCards('enrollments', [
+  { key: 'a', tab: 'Related', widgets: [{ key: 'w1', type: 'conversation_panel', config: { fk: 'enrollment_id' } }] },
+  { key: 'b', tab: 'Details', placement: 'right', widgets: [{ key: 'w2', type: 'conversation_panel', config: { fk: 'enrollment_id' } }] },
+])
+check('a THIRD Communications card on an enrollment is still offered',
+  withComms.find(c => c.id === 'conversation_panel').disabled, false)
+check('…and the palette can say where the existing ones are',
+  cardPlacements(withComms.length ? [
+    { key: 'a', tab: 'Related', widgets: [{ key: 'w1', type: 'conversation_panel', config: {} }] },
+    { key: 'b', tab: 'Details', placement: 'right', widgets: [{ key: 'w2', type: 'conversation_panel', config: {} }] },
+  ] : [], 'conversation_panel').map(p => p.tab), ['Related', 'Right sidebar'])
+check('the canvas does not change a card OBJECT rule either — Work Plan on an enrollment stays refused',
+  availableCards('enrollments', [
+    { key: 's', tab: 'Details', widgets: [{ key: 'w', type: 'work_plan', config: {} }] },
+  ]).find(c => c.id === 'work_plan').disabled, true)
+check('no catalog entry carries a one-per-layout flag',
+  CARD_CATALOG.some(c => 'onePerLayout' in c), false)
 check('a second Documents gallery is NOT refused — slots are many per layout',
   availableCards('enrollments', [
     { key: 's', tab: 'Details', widgets: [{ key: 'w', type: 'file_gallery', config: { target: 'documents' } }] },

@@ -2490,6 +2490,30 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.opportunity_name || r.id.slice(0, 8),
       }))
     }
+    case 'qualifying_equipment_for_measure': {
+      // The equipment picker on an opportunity line item offers only the models
+      // approved for THAT line's incentive measure. With no measure chosen yet
+      // it offers nothing rather than the whole product catalogue — an
+      // unscoped fallback is how a water heater gets recorded as the fan
+      // installed in a bathroom, and the line-item trigger would refuse the
+      // save anyway, after the person had already picked.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_qualifying_equipment_for_measure', {
+        p_measure_product_ids: dependencyValues,
+        p_include_product_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        // Named the way the supplemental data sheet will report it, so what a
+        // person picks here is literally what the programme administrator
+        // reads in the Model Number column.
+        label: [r.product_manufacturer, r.product_model_number].filter(Boolean).join(' ')
+          || r.product_name || r.id.slice(0, 8),
+      }))
+    }
     case 'buildings_for_opportunity': {
       // An enrollment is tied to a building THROUGH its opportunity, so the
       // Building picker offers the opportunity's own building plus the other

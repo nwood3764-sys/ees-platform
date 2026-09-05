@@ -18,8 +18,14 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
+import { requireOutboundApproval } from '../lib/outboundSendGuard'
 import { storageSafeFileName } from '../lib/storageKey'
+import { CONVERSATION_ANCHORS, resolveAnchorFromConversation } from '../lib/conversationAnchors'
 
+// The thread's own columns, plus every anchor column there is. The anchors are
+// taken from CONVERSATION_ANCHORS rather than listed again: a thread fetched
+// without its anchor column reads as unanchored, and a reply on it would be
+// refused for a parent it actually has.
 const CONV_COLUMNS = [
   'id',
   'conv_record_number',
@@ -32,17 +38,7 @@ const CONV_COLUMNS = [
   'conv_last_message_direction',
   'conv_last_message_preview',
   'conv_inbound_unread_count',
-  'contact_id',
-  'account_id',
-  'project_id',
-  'service_appointment_id',
-  'work_order_id',
-  'incentive_application_id',
-  'opportunity_id',
-  'assessment_id',
-  'building_id',
-  'property_id',
-  'unit_id',
+  ...CONVERSATION_ANCHORS.map(a => a.fk),
 ].join(', ')
 
 const MSG_COLUMNS = [
@@ -68,20 +64,10 @@ const MSG_COLUMNS = [
 ].join(', ')
 
 // FK columns we know how to filter by. Defensive guard so an admin pointing
-// the widget at an arbitrary FK doesn't silently fall through.
-const SUPPORTED_FK = new Set([
-  'contact_id',
-  'account_id',
-  'project_id',
-  'service_appointment_id',
-  'work_order_id',
-  'incentive_application_id',
-  'opportunity_id',
-  'assessment_id',
-  'building_id',
-  'property_id',
-  'unit_id',
-])
+// the widget at an arbitrary FK doesn't silently fall through — derived from
+// the one anchor definition, so an anchor is never supported in the palette
+// and unsupported here.
+const SUPPORTED_FK = new Set(CONVERSATION_ANCHORS.map(a => a.fk))
 
 /**
  * Threads for the parent record, newest activity first.
@@ -181,6 +167,10 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       project_id: conversation.project_id || undefined,
       service_appointment_id: conversation.service_appointment_id || undefined,
     }
+    requireOutboundApproval({
+      channel: 'sms', to: customerPhone,
+      context: `Reply on the text thread with ${opts.recipientName || customerPhone}`,
+    })
     const { data, error } = await supabase.functions.invoke('send-notification-sms', {
       body: payload,
     })
@@ -201,52 +191,23 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
     if (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
       throw new Error('Customer email on this thread is not a valid email address.')
     }
-    // Anchor — the caller must supply this for email; conversations carry the
-    // four canonical FKs plus six extended anchors and send-email-v1 enforces
-    // one anchor. Resolve from the conversation's own FKs in priority order
-    // (most-specific leaf → most-canonical root): service_appointment >
-    // work_order > assessment > incentive_application > project > opportunity
-    // > unit > building > property > account > contact.
+    // Anchor — the caller must supply this for email; send-email-v1 enforces
+    // one. Otherwise it is resolved from the conversation's own FKs by
+    // conversationAnchors.js, which holds the priority order (most specific
+    // leaf first, most canonical root last) in one place rather than as an
+    // if/else chain that has to be edited whenever an anchor is added.
     let anchorObject = null
     let anchorRecordId = null
     if (opts.anchorObject && opts.anchorRecordId) {
       anchorObject = opts.anchorObject
       anchorRecordId = opts.anchorRecordId
-    } else if (conversation.service_appointment_id) {
-      anchorObject = 'service_appointments'
-      anchorRecordId = conversation.service_appointment_id
-    } else if (conversation.work_order_id) {
-      anchorObject = 'work_orders'
-      anchorRecordId = conversation.work_order_id
-    } else if (conversation.assessment_id) {
-      anchorObject = 'assessments'
-      anchorRecordId = conversation.assessment_id
-    } else if (conversation.incentive_application_id) {
-      anchorObject = 'incentive_applications'
-      anchorRecordId = conversation.incentive_application_id
-    } else if (conversation.project_id) {
-      anchorObject = 'projects'
-      anchorRecordId = conversation.project_id
-    } else if (conversation.opportunity_id) {
-      anchorObject = 'opportunities'
-      anchorRecordId = conversation.opportunity_id
-    } else if (conversation.unit_id) {
-      anchorObject = 'units'
-      anchorRecordId = conversation.unit_id
-    } else if (conversation.building_id) {
-      anchorObject = 'buildings'
-      anchorRecordId = conversation.building_id
-    } else if (conversation.property_id) {
-      anchorObject = 'properties'
-      anchorRecordId = conversation.property_id
-    } else if (conversation.account_id) {
-      anchorObject = 'accounts'
-      anchorRecordId = conversation.account_id
-    } else if (conversation.contact_id) {
-      anchorObject = 'contacts'
-      anchorRecordId = conversation.contact_id
     } else {
-      throw new Error('Email reply requires an anchor record but the thread has no resolvable parent.')
+      const resolved = resolveAnchorFromConversation(conversation)
+      if (!resolved) {
+        throw new Error('This thread is not related to any record, so a reply has nowhere to send from.')
+      }
+      anchorObject = resolved.anchorObject
+      anchorRecordId = resolved.anchorRecordId
     }
 
     // Reply subject default: "Re: <original subject>" if not already prefixed.
@@ -280,6 +241,10 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       // fresh conversation for every send (the new-email behavior).
       conversation_id: conversation.id,
     }
+    requireOutboundApproval({
+      channel: 'email', to: customerEmail, subject,
+      context: 'Reply on this email thread',
+    })
     const { data, error } = await supabase.functions.invoke('send-email-v1', {
       body: payload,
     })
@@ -329,6 +294,7 @@ export async function sendNewSms({
   const trimmed = (bodyText || '').trim()
   if (!trimmed) throw new Error('Message body is empty')
   if (trimmed.length > 1600) throw new Error('Message exceeds the 1600-character SMS limit. Shorten and try again.')
+  requireOutboundApproval({ channel: 'sms', to: phone, context: 'New text message' })
   const { data, error } = await supabase.functions.invoke('send-notification-sms', {
     body: {
       trigger_event: triggerEvent,
@@ -387,7 +353,7 @@ export async function sendNewEmail({
   outboundMailboxId,
   contactId,
 }) {
-  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!anchorObject || !anchorRecordId) throw new Error('a record to relate the message to is required')
   if (!to?.email) throw new Error('Recipient email required')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email)) throw new Error('Recipient email is not a valid address')
   const trimmedSubject = (subject || '').trim()
@@ -405,6 +371,9 @@ export async function sendNewEmail({
     outbound_mailbox_id: outboundMailboxId,
     contact_id: contactId || undefined,
   }
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: trimmedSubject, context: 'New email',
+  })
   const { data, error } = await supabase.functions.invoke('send-email-v1', {
     body: payload,
   })
@@ -1181,7 +1150,7 @@ export async function sendTemplateEmail({
   subjectOverride,     // optional — user-edited subject line
   attachments,         // optional — pre-uploaded metas from uploadAttachmentToStorage
 }) {
-  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!anchorObject || !anchorRecordId) throw new Error('a record to relate the message to is required')
   if (!emailTemplateId)                  throw new Error('emailTemplateId required')
   if (!to?.email)                        throw new Error('Recipient email required')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email))
@@ -1198,6 +1167,13 @@ export async function sendTemplateEmail({
     contact_id:          contactId || undefined,
     attachments:         toAttachmentPayload(attachments),
   }
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: subjectOverride || undefined,
+    context: 'Email from a template',
+  })
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: trimmedSubject, context: 'New email',
+  })
   const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
   if (error) throw new Error(error.message || 'Send failed at the network layer')
   if (data?.status === 'failed') {
@@ -1224,7 +1200,7 @@ export async function sendNewEmailHtml({
   contactId,
   attachments,         // optional — pre-uploaded metas from uploadAttachmentToStorage
 }) {
-  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!anchorObject || !anchorRecordId) throw new Error('a record to relate the message to is required')
   if (!to?.email) throw new Error('Recipient email required')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email))
     throw new Error('Recipient email is not a valid address')
@@ -1245,6 +1221,9 @@ export async function sendNewEmailHtml({
     contact_id:          contactId || undefined,
     attachments:         toAttachmentPayload(attachments),
   }
+  requireOutboundApproval({
+    channel: 'email', to: to.email, subject: trimmedSubject, context: 'New email',
+  })
   const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
   if (error) throw new Error(error.message || 'Send failed at the network layer')
   if (data?.status === 'failed') {

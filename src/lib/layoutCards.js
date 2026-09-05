@@ -29,9 +29,19 @@
 // so a copy is deterministic and testable. Pinned by
 // scripts/layout-cards-fixture.mjs.
 
+import { OBJECT_CONVERSATION_FK } from './conversationAnchors.js'
+
+// What the omni-channel card is CALLED, in one place: the palette that places
+// it, the card the record page draws, and the migration that seeded it all say
+// the same word. It answered to "Conversations" on 47 seeded layouts and
+// "Communications" in the palette until 2026-09-03, so the same card had two
+// names depending on which screen you were on.
+export const CONVERSATION_CARD_TITLE = 'Communications'
+
 // ─── What the record page draws as a card ────────────────────────────────────
 // Kept in sync with RecordDetail's renderRecordCard: every type here is drawn
 // by that one function, in the main flow and in the right rail alike.
+
 export const CARD_WIDGET_TYPES = new Set([
   'related_list', 'file_gallery', 'conversation_panel', 'conversation_messages',
   'conversation_list', 'report', 'prtsn_history', 'work_plan',
@@ -49,16 +59,13 @@ export function isCardWidget(widgetOrType) {
 
 // Objects whose records can host a Communications (two-way email) panel, and
 // the FK column on `conversations` that anchors a thread to them. A
-// conversation_panel stores its anchor as widget_config.fk. Mirror of the
-// client FK_TO_ANCHOR_OBJECT / server ANCHOR_FK_PARAM maps — keep in sync when
-// a new anchor object is enabled.
-export const OBJECT_CONVERSATION_FK = {
-  contacts: 'contact_id', accounts: 'account_id', projects: 'project_id',
-  service_appointments: 'service_appointment_id', work_orders: 'work_order_id',
-  incentive_applications: 'incentive_application_id', opportunities: 'opportunity_id',
-  assessments: 'assessment_id', buildings: 'building_id', properties: 'property_id',
-  units: 'unit_id',
-}
+// conversation_panel stores its anchor as widget_config.fk.
+//
+// This used to be one of eight hand-kept copies of that fact. There is now one
+// client definition — conversationAnchors.js — and the database derives its
+// own from the conversations table's foreign keys. Re-exported here because
+// the layout palette has always been imported for it.
+export { OBJECT_CONVERSATION_FK }
 
 // Objects a PHOTOS gallery may be placed on. Mirror of PHOTO_ALLOWED_OBJECTS in
 // storageService — photos route to an evidence bucket by object, and a gallery
@@ -75,8 +82,18 @@ export const PHOTO_GALLERY_OBJECTS = new Set([
 //   widgetType    what gets written to page_layout_widgets.widget_type
 //   configure     'related_list' opens the related-list builder; 'gallery' and
 //                 'report' open the card config modal; null needs no setup
-//   onePerLayout  the record page shows one of these per record, so a second
-//                 is offered as disabled rather than silently allowed
+//
+// There is deliberately NO "one per layout" rule for any card. Three cards
+// (Communications, Work Plan, Publish History) carried one until 2026-09-05,
+// on the theory that "a record shows one" — and it was the palette alone that
+// said so: the record page draws every widget row it is handed, in the main
+// flow and the rail alike, and Copy to… never had the gate. Nicholas, from an
+// enrollment layout: "Why can't I have my communication on the right sidebar
+// of a page layout and in the related list? … I should be able to set this up
+// anywhere. This shouldn't be limited just to one area … it should go for any
+// objects." A card that is already on the layout is offered with an
+// "already on <tab>" badge (cardPlacements), so a second placement is a
+// choice made with the facts on screen, never a refusal.
 //
 // `availableOn` returns null when the card may be placed, or the reason it may
 // not — the reason is shown in the palette, because "the option isn't there" is
@@ -117,11 +134,10 @@ export const CARD_CATALOG = [
   {
     id: 'conversation_panel',
     widgetType: 'conversation_panel',
-    label: 'Communications',
+    label: CONVERSATION_CARD_TITLE,
     description: 'Two-way email threads anchored to this record.',
-    defaultTitle: 'Communications',
+    defaultTitle: CONVERSATION_CARD_TITLE,
     configure: null,
-    onePerLayout: true,
     availableOn: (object) => OBJECT_CONVERSATION_FK[object]
       ? null
       : 'Conversations carry no foreign key to this object, so a thread cannot be anchored to one of its records.',
@@ -146,7 +162,6 @@ export const CARD_CATALOG = [
     description: 'The work order’s plan, its steps and their evidence.',
     defaultTitle: 'Work Plan',
     configure: null,
-    onePerLayout: true,
     availableOn: (object) => object === 'work_orders'
       ? null
       : 'A work plan belongs to a work order.',
@@ -159,7 +174,6 @@ export const CARD_CATALOG = [
     description: 'Published generations of this template.',
     defaultTitle: 'Publish History',
     configure: null,
-    onePerLayout: true,
     availableOn: (object) => object === 'project_report_templates'
       ? null
       : 'Publish history is recorded for project report templates.',
@@ -178,29 +192,18 @@ export function cardDefinition(cardId) {
  * The palette for one object: every card, each carrying whether it can be
  * placed here and — when it can't — why.
  *
- * `sections` is the editor's current canvas state; it decides the
- * one-per-layout cards. Nothing is hidden: a card an admin cannot place is
- * shown disabled with its reason, because a silently absent option is the
- * defect this replaces.
+ * Availability is decided by the OBJECT alone — what is already on the canvas
+ * never disables a card (see the catalog note: a card may sit in as many
+ * places as an admin wants). `sections` is accepted so the palette can be
+ * called with the canvas it shows, and so a future object-independent rule
+ * has the canvas to read; today it is not consulted. Nothing is hidden: a
+ * card an admin cannot place is shown disabled with its reason, because a
+ * silently absent option is the defect this replaces.
  */
-export function availableCards(object, sections) {
-  const placed = new Set()
-  for (const s of sections || []) {
-    for (const w of (s?.widgets || [])) {
-      const t = w?.type || w?.widget_type
-      if (t) placed.add(t)
-    }
-  }
+export function availableCards(object, sections) { // eslint-disable-line no-unused-vars
   return CARD_CATALOG.map(card => {
     const objectReason = card.availableOn(object)
     if (objectReason) return { ...card, disabled: true, disabledReason: objectReason }
-    if (card.onePerLayout && placed.has(card.widgetType)) {
-      return {
-        ...card,
-        disabled: true,
-        disabledReason: `This layout already has a ${card.label} card. A record shows one.`,
-      }
-    }
     return { ...card, disabled: false, disabledReason: null }
   })
 }
@@ -351,8 +354,8 @@ function cloneConfig(config) {
 
 /**
  * Where a card of this type already sits on the layout, so the palette and the
- * copy menu can say "Documents is already on the Related tab" instead of
- * letting an admin add a third one by accident. Returns [{title, tab}].
+ * copy menu can say "Documents is already on the Related tab" — information,
+ * never a refusal. Returns [{title, tab, section}].
  */
 export function cardPlacements(sections, widgetType) {
   const out = []

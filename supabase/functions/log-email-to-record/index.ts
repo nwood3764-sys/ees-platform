@@ -41,27 +41,17 @@ const ATTACHMENT_BUCKET = "communications-attachments"
 // past this are skipped (reported back), never silently dropped.
 const ATTACHMENT_TOTAL_BUDGET_BYTES = 20_000_000
 
-// Anchor object → the conversations FK param on find_or_create_conversation.
-// Mirrors send-email-v1's ANCHOR_FK_PARAM and the search RPC's whitelist.
-const ANCHOR_FK_PARAM: Record<string, string> = {
-  opportunities:          "p_opportunity_id",
-  properties:             "p_property_id",
-  accounts:               "p_account_id",
-  projects:               "p_project_id",
-  work_orders:            "p_work_order_id",
-  // contacts have no dedicated conversations FK — they anchor via p_contact_id
-  // (handled explicitly below).
-}
-// Primary-key-bearing tables we accept as a log target, and the column used to
-// confirm the row exists / isn't soft-deleted.
-const TARGET_DELETED_COL: Record<string, string> = {
-  opportunities: "opportunity_is_deleted",
-  properties:    "property_is_deleted",
-  accounts:      "account_is_deleted",
-  contacts:      "contact_is_deleted",
-  projects:      "project_is_deleted",
-  work_orders:   "work_order_is_deleted",
-}
+// WHICH RECORDS AN EMAIL CAN BE FILED ON is not a list here any more.
+//
+// Nicholas, 2026-09-03: "It needs to have all the objects. Why would you limit
+// it to five?" It was limited because this function carried an anchor map of
+// five objects plus a contacts special case, and a second map of soft-delete
+// columns, both written when the add-in shipped and never widened. The answer
+// is the database's own registry: email_log_target validates the object
+// against conversation_anchor_columns() — the objects a thread can be anchored
+// to, derived from the conversations table's foreign keys — checks the row
+// exists and is not deleted, and hands back its name. An object that gains a
+// Communications card is fileable the same day, with no change here.
 
 interface Recipient { name?: string; email: string }
 
@@ -113,14 +103,16 @@ Deno.serve(async (req) => {
   if (!callerUserId) return json({ error: "Caller is not a registered LEAP user" }, 401)
 
   // ── 1. Verify the target record exists and isn't soft-deleted ────────────
-  const deletedCol = TARGET_DELETED_COL[body.target_object]
-  const { data: targetRow, error: targetErr } = await admin
-    .from(body.target_object)
-    .select(`id, ${deletedCol}`)
-    .eq("id", body.target_record_id)
-    .maybeSingle()
-  if (targetErr) return json({ error: `Target lookup failed: ${targetErr.message}` }, 500)
-  if (!targetRow || targetRow[deletedCol] === true) {
+  // The registry decides both whether this object can hold a thread at all and
+  // which column says the row is deleted, so an unfileable object is refused
+  // by name rather than by a missing map entry.
+  const { data: targetRows, error: targetErr } = await admin.rpc("email_log_target", {
+    p_object: body.target_object,
+    p_id:     body.target_record_id,
+  })
+  if (targetErr) return json({ error: `Target lookup failed: ${targetErr.message}` }, 400)
+  const target = Array.isArray(targetRows) && targetRows.length > 0 ? targetRows[0] : null
+  if (!target) {
     return json({ error: `Target ${body.target_object} ${body.target_record_id} not found` }, 404)
   }
 
@@ -159,8 +151,11 @@ Deno.serve(async (req) => {
     p_subject:          subject,
     p_force_new:        true,
   }
-  const anchorParam = ANCHOR_FK_PARAM[body.target_object]
-  if (anchorParam) convParams[anchorParam] = body.target_record_id
+  // One generic anchor: find_or_create_conversation resolves the column from
+  // the same registry, and RAISES for an object that has none rather than
+  // filing the thread nowhere.
+  convParams.p_anchor_object = body.target_object
+  convParams.p_anchor_id     = body.target_record_id
   if (body.target_object === "contacts" && !body.contact_id) {
     convParams.p_contact_id = body.target_record_id
   }
@@ -263,6 +258,7 @@ Deno.serve(async (req) => {
     direction,
     target_object:      body.target_object,
     target_record_id:   body.target_record_id,
+    target_label:       target.rec_label,
     attachments_logged: attachmentsLogged,
     attachments_skipped: attachmentsSkipped,
   }, 200)
@@ -272,8 +268,10 @@ Deno.serve(async (req) => {
 
 function validateRequest(b: ReqBody): string | null {
   if (!b || typeof b !== "object") return "Body must be a JSON object"
-  if (!b.target_object || !(b.target_object in TARGET_DELETED_COL)) {
-    return `target_object must be one of: ${Object.keys(TARGET_DELETED_COL).join(", ")}`
+  // Which objects are allowed is the database's answer, not a copy of it kept
+  // here: email_log_target names the allowed set in its own error.
+  if (!b.target_object || typeof b.target_object !== "string" || !/^[a-z][a-z0-9_]*$/.test(b.target_object)) {
+    return "target_object must be an object name"
   }
   if (!b.target_record_id || !UUID_RE.test(b.target_record_id)) return "target_record_id must be a UUID"
   if (!b.email || typeof b.email !== "object") return "email object required"

@@ -73,7 +73,18 @@ export function buildCreateModalGroups(sections, { requiredFields, showAll = fal
         if (skip.has(f.name)) continue
         if (f._editable === false) continue
         const isRequired = f.required === true || required.has(f.name)
-        if (!showAll && !isRequired) continue
+        // `show_in_create` is for a field that is CONDITIONALLY required — one
+        // the database demands only for some values of another field on the
+        // same record. The equipment on an opportunity line item is the case
+        // this exists for: mandatory when the line's product installs a
+        // model-numbered device, forbidden when it does not. Marking it
+        // `required` would block every line item that must leave it empty;
+        // leaving it out of the create form entirely would mean the one field
+        // the save is about to demand is the one field nobody was offered.
+        // So it is always ASKED and never CLIENT-VALIDATED — the trigger
+        // decides, and says which measure needs a model.
+        const alwaysAsk = f.show_in_create === true
+        if (!showAll && !isRequired && !alwaysAsk) continue
         // The pop-up is one narrow column of its own — drop the record page's
         // column pinning so fields flow in layout order instead of leaving
         // holes where the second column would have been.

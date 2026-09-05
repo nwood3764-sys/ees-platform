@@ -12,6 +12,8 @@ import { useToast } from './Toast'
 import {
   listOpportunityProducts,
   listAddableProducts,
+  listQualifyingEquipment,
+  createQualifyingEquipment,
   addOpportunityProduct,
   updateOpportunityProductField,
   removeOpportunityProduct,
@@ -23,6 +25,17 @@ import {
 } from '../data/opportunityProductsService'
 
 const CARD_SECONDARY = '#f7f9fc'
+
+/**
+ * Postgres reports a RAISE EXCEPTION from a trigger under `message`, and its
+ * supporting text under `details` / `hint`. The equipment rule's whole value is
+ * in that text — it names the measure and lists the approved models — so it is
+ * shown rather than replaced with a generic failure.
+ */
+function describeAddError(e) {
+  const parts = [e?.message, e?.details, e?.hint].filter(Boolean)
+  return parts.length ? parts.join(' ') : 'Could not add product'
+}
 
 const fmtCurrency = (v) =>
   v === null || v === undefined || v === ''
@@ -48,6 +61,17 @@ export default function OpportunityProductsWidget({
   const [reordering, setReordering] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [addOptions, setAddOptions] = useState(null) // null = not loaded
+  // The equipment step. A HEAR measure installs a specific, model-numbered
+  // device and the database will not accept the line without it, so choosing
+  // the measure opens this rather than failing the save afterwards
+  // (Nicholas: "it prompts the user to select the actual equipment product
+  // that's going to be used for that product line item").
+  const [equipStep, setEquipStep] = useState(null)   // { product, options|null }
+  // The create-it-here form inside the equipment step. Equipment is REQUIRED on
+  // a HEAR measure with no exception, so "no approved models yet" has to be
+  // something a person can resolve without leaving the opportunity.
+  const [newEquip, setNewEquip] = useState(null)     // { manufacturer, modelNumber } | null
+  const [savingEquip, setSavingEquip] = useState(false)
   const [addSearch, setAddSearch] = useState('')
   const [adding, setAdding] = useState(false)
   // Price book — lives on the opportunity.
@@ -224,18 +248,61 @@ export default function OpportunityProductsWidget({
       setSettingBook(false)
     }
   }
-  const addProduct = async (productId) => {
+  const insertProduct = async (productId, equipmentProductId = null) => {
     setAdding(true)
     try {
       const maxOrder = rows.reduce((m, r) => Math.max(m, Number(r.oli_sort_order) || 0), 0)
-      const row = await addOpportunityProduct(opportunityId, productId, maxOrder + 1)
+      const row = await addOpportunityProduct(opportunityId, productId, maxOrder + 1, equipmentProductId)
       setRows(prev => [...prev, row])
       setAddOpen(false)
+      setEquipStep(null)
     } catch (e) {
       console.error('Add product failed', e)
-      toast.error('Could not add product')
+      // The database's message NAMES what is wrong and what to do — which
+      // measure needs a model, and which models are approved for it. The old
+      // generic "Could not add product" threw all of that away and left the
+      // person with nothing to act on.
+      toast.error(describeAddError(e))
     } finally {
       setAdding(false)
+    }
+  }
+
+  const saveNewEquipment = async () => {
+    if (!equipStep || savingEquip) return
+    const model = (newEquip?.modelNumber || '').trim()
+    if (!model) {
+      toast.error('A model number is required — it is what the supplemental data sheet reports for every unit.')
+      return
+    }
+    setSavingEquip(true)
+    try {
+      const equipmentId = await createQualifyingEquipment(
+        equipStep.product.value, newEquip?.manufacturer, model)
+      // Straight through to the line item: the person came here to add a
+      // product, not to administer a catalogue.
+      await insertProduct(equipStep.product.value, equipmentId)
+      setNewEquip(null)
+    } catch (e) {
+      console.error('Create equipment failed', e)
+      toast.error(describeAddError(e))
+    } finally {
+      setSavingEquip(false)
+    }
+  }
+
+  // Picking a product either adds the line straight away, or — when the measure
+  // installs a model-numbered device — opens the equipment step first.
+  const chooseProduct = async (option) => {
+    if (!option.requiresEquipment) return insertProduct(option.value)
+    setNewEquip(null)
+    setEquipStep({ product: option, options: null })
+    try {
+      const models = await listQualifyingEquipment(option.value)
+      setEquipStep(cur => (cur && cur.product.value === option.value ? { ...cur, options: models } : cur))
+    } catch (e) {
+      console.error('Load qualifying equipment failed', e)
+      setEquipStep(cur => (cur && cur.product.value === option.value ? { ...cur, options: [] } : cur))
     }
   }
 
@@ -426,7 +493,7 @@ export default function OpportunityProductsWidget({
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>Select a price book for this opportunity</span>
-                    <button onClick={() => setAddOpen(false)} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
+                    <button onClick={() => { setAddOpen(false); setEquipStep(null); setNewEquip(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
                   </div>
                   <div style={{ maxHeight: 240, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff' }}>
                     {bookOptions == null ? (
@@ -470,8 +537,114 @@ export default function OpportunityProductsWidget({
                       onChange={e => setAddSearch(e.target.value)}
                       style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
                     />
-                    <button onClick={() => setAddOpen(false)} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
+                    <button onClick={() => { setAddOpen(false); setEquipStep(null); setNewEquip(null) }} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
                   </div>
+                  {equipStep ? (
+                    /* The equipment step. The measure is chosen; now say which
+                       model is going in. The line cannot be saved without it,
+                       so this is asked here rather than refused on save. */
+                    <div style={{ border: `1px solid ${C.borderDark}`, borderRadius: 6, background: '#fff', overflow: 'hidden' }}>
+                      <div style={{ padding: '10px 12px', background: CARD_SECONDARY, borderBottom: `1px solid ${C.border}` }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
+                          Which equipment is being installed?
+                        </div>
+                        <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
+                          {equipStep.product.label} — the model you pick is what the
+                          Quality Installation Supplemental Data Sheet reports for every unit.
+                        </div>
+                      </div>
+                      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                        {equipStep.options == null ? (
+                          <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>Loading models…</div>
+                        ) : (
+                          <>
+                            {equipStep.options.map(m => (
+                              <button
+                                key={m.value}
+                                disabled={adding || savingEquip}
+                                onClick={() => insertProduct(equipStep.product.value, m.value)}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: (adding || savingEquip) ? 'wait' : 'pointer', color: C.textPrimary }}
+                              >
+                                {m.label}
+                              </button>
+                            ))}
+
+                            {/* The measure REQUIRES equipment, so "none set up
+                                yet" must be a form, not a wall. Also offered
+                                when models do exist — the first install of a
+                                new model happens on an opportunity, not in the
+                                catalogue. */}
+                            {newEquip ? (
+                              <div style={{ padding: 12, borderTop: equipStep.options.length ? `1px solid ${C.border}` : 'none', background: C.cardSecondary }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, marginBottom: 8 }}>
+                                  New equipment for {equipStep.product.label}
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  <input
+                                    autoFocus
+                                    placeholder="Manufacturer (e.g. Panasonic)"
+                                    value={newEquip.manufacturer || ''}
+                                    onChange={e => setNewEquip(v => ({ ...v, manufacturer: e.target.value }))}
+                                    style={{ flex: '1 1 160px', minWidth: 0, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
+                                  />
+                                  <input
+                                    placeholder="Model number (required)"
+                                    value={newEquip.modelNumber || ''}
+                                    onChange={e => setNewEquip(v => ({ ...v, modelNumber: e.target.value }))}
+                                    onKeyDown={e => { if (e.key === 'Enter') saveNewEquipment() }}
+                                    style={{ flex: '1 1 160px', minWidth: 0, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
+                                  />
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                  <button
+                                    disabled={savingEquip || adding}
+                                    onClick={saveNewEquipment}
+                                    style={{ background: C.emerald, border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, color: '#fff', cursor: savingEquip ? 'wait' : 'pointer' }}
+                                  >
+                                    {savingEquip ? 'Adding…' : 'Add and use it'}
+                                  </button>
+                                  <button
+                                    disabled={savingEquip}
+                                    onClick={() => setNewEquip(null)}
+                                    style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                                <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 6 }}>
+                                  Saved to the product catalogue and approved for this measure, so it is
+                                  on the list next time.
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ padding: 12, borderTop: equipStep.options.length ? `1px solid ${C.border}` : 'none' }}>
+                                {equipStep.options.length === 0 && (
+                                  <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>
+                                    No approved models are set up for this measure yet — add the one
+                                    you are installing.
+                                  </div>
+                                )}
+                                <button
+                                  onClick={() => setNewEquip({ manufacturer: '', modelNumber: '' })}
+                                  style={{ background: '#fff', border: `1px solid ${C.borderDark}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textPrimary, fontWeight: 600 }}
+                                >
+                                  + New equipment model
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div style={{ padding: '8px 12px', borderTop: `1px solid ${C.border}` }}>
+                        <button
+                          onClick={() => { setEquipStep(null); setNewEquip(null) }}
+                          style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}
+                        >
+                          ← Back to products
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
                   <div style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff' }}>
                     {addOptions == null ? (
                       <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>Loading…</div>
@@ -484,14 +657,20 @@ export default function OpportunityProductsWidget({
                         <button
                           key={o.value}
                           disabled={adding}
-                          onClick={() => addProduct(o.value)}
-                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: adding ? 'wait' : 'pointer', color: C.textPrimary }}
+                          onClick={() => chooseProduct(o)}
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: adding ? 'wait' : 'pointer', color: C.textPrimary }}
                         >
-                          {o.label}
+                          <span>{o.label}</span>
+                          {o.requiresEquipment && (
+                            <span style={{ fontSize: 11, color: C.textMuted, whiteSpace: 'nowrap' }}>
+                              picks a model →
+                            </span>
+                          )}
                         </button>
                       ))
                     )}
                   </div>
+                  )}
                 </>
               )}
             </div>
@@ -511,6 +690,7 @@ export default function OpportunityProductsWidget({
                   <tr>
                     <th style={{ ...th, width: 62 }}></th>
                     <th style={th}>Product</th>
+                    <th style={th}>Equipment</th>
                     <th style={th}>Line Description</th>
                     <th style={th}>Notes</th>
                     <th style={{ ...thRight, width: 80 }}>Qty</th>
@@ -542,6 +722,20 @@ export default function OpportunityProductsWidget({
                             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{row.unit_name}</div>
                           )}
                         </td>
+                        {/* Equipment. A line that installs nothing model-numbered
+                            shows a dash, not an empty cell that reads as unanswered;
+                            a HEAR line still missing its model says so plainly, which
+                            is how the seven rows created before this column existed
+                            announce themselves. */}
+                        <td style={{ ...td, minWidth: 170 }}>
+                          {!row.oli_is_equipment_line ? (
+                            <span style={{ color: C.textMuted }}>—</span>
+                          ) : row.equipment_name ? (
+                            row.equipment_name
+                          ) : (
+                            <span style={{ color: C.amber, fontWeight: 600 }}>Not selected</span>
+                          )}
+                        </td>
                         <td style={{ ...td, minWidth: 200 }}>{renderEditable(row, 'oli_line_description', row.oli_line_description || '—', 'left')}</td>
                         <td style={{ ...td, minWidth: 160 }}>{renderEditable(row, 'oli_notes', row.oli_notes || '—', 'left')}</td>
                         <td style={tdRight}>{renderEditable(row, 'oli_quantity', fmtNumber(row.oli_quantity), 'right')}</td>
@@ -562,7 +756,7 @@ export default function OpportunityProductsWidget({
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={7} style={{ ...tdRight, borderBottom: 'none', paddingTop: 10, color: C.textSecondary, fontWeight: 600 }}>Grand Total</td>
+                    <td colSpan={8} style={{ ...tdRight, borderBottom: 'none', paddingTop: 10, color: C.textSecondary, fontWeight: 600 }}>Grand Total</td>
                     <td style={{ ...tdRight, borderBottom: 'none', paddingTop: 10, fontWeight: 700 }}>{fmtCurrency(grandTotal)}</td>
                     <td style={{ borderBottom: 'none' }}></td>
                   </tr>

@@ -20,10 +20,12 @@
 
 import { supabase } from '../lib/supabase'
 import { listDocuments, signedUrl, uploadDocument } from './storageService'
+import { requireOutboundApproval } from '../lib/outboundSendGuard'
 import { proxiedStorageUrl } from '../lib/reportFileLinks'
 import { extractPdfText } from './paperworkService'
 import { computeHomesModel, generateHomesProposalBlob } from '../lib/homesProposal'
 import { loadEnrollmentProposalContext, toInt, fmtDate } from './enrollmentProposalContext'
+import { resolveOwnerAddress } from '../lib/ownerAddress'
 
 // The enrollment record type this proposal is built for.
 export const HOMES_PROPOSAL_RECORD_TYPE = 'WI-IRA-MF-HOMES-Project-Reservation'
@@ -98,7 +100,7 @@ function pickAssetScoreDocs(docs) {
  * (array of strings) when the record isn't ready. Returns
  * { blob, fileName, model, ctx, documentType }.
  */
-async function renderFromContext(ctx, kind) {
+async function renderFromContext(ctx, kind, { collectTabs = false } = {}) {
   const spec = DOCUMENT_SPECS[kind] || DOCUMENT_SPECS.proposal
   const missing = homesProposalMissing(ctx, kind)
   if (missing.length) { const e = new Error('This record is missing inputs the document needs.'); e.missing = missing; throw e }
@@ -125,14 +127,21 @@ async function renderFromContext(ctx, kind) {
     if (parseMissing.length) { const e = new Error('The Asset Score reports are attached but incomplete.'); e.missing = parseMissing; throw e }
   }
 
+  // The signature tabs, when asked for, are captured from THIS render — not a
+  // second one. A re-render would have to be handed the Asset Score text again,
+  // and handing it anything different produces a document whose tab positions
+  // describe a layout nobody validated.
+  const signatureTabs = collectTabs ? [] : null
   const blob = await generateHomesProposalBlob({
     fields: ctx.fields, assetScoreBaseText: baseText, assetScoreImpText: impText,
     units: ctx.units, contractor: ctx.contractor, kind,
+    ...(signatureTabs ? { signatureTabs } : {}),
   })
   const state = model.state || 'WI'
   const fileName = `${ctx.fields.pjPropName || 'Project'} - ${state} ${spec.fileSuffix}.pdf`
     .replace(/[\\/]/g, '-')
-  return { blob, fileName, model, ctx, documentType: spec.documentType }
+  return { blob, fileName, model, ctx, documentType: spec.documentType,
+    ...(signatureTabs ? { tabs: signatureTabs } : {}) }
 }
 
 // The incentive-application record type the Payment Request invoice belongs to.
@@ -163,11 +172,25 @@ export async function loadPaymentRequestContext(incentiveAppId) {
     ia.building_id ? supabase.from('buildings').select('building_total_units, building_number_of_units').eq('id', ia.building_id).maybeSingle() : Promise.resolve({ data: null }),
   ])
 
-  const acctIds = [ia.ia_owner, ia.ia_contractor_account_id, ia.ia_support_contractor_account_id]
+  // `ia_owner` is the RECORD's owner -- the LEAP user -- not the property
+  // owner, exactly as enrollment_owner is (it holds Nicholas Wood on every live
+  // incentive application). Looking it up in `accounts` finds nothing; the
+  // customer company is the PROPERTY's account, one account per real-world
+  // company. Here the misread was masked because ia_property_owner_name is
+  // tried first, so the invoice printed a customer anyway.
+  const ownerAccountId = UUID.test(String(prop?.property_account_id || ''))
+    ? prop.property_account_id : null
+  const acctIds = [ia.ia_contractor_account_id, ia.ia_support_contractor_account_id, ownerAccountId]
     .filter(v => v && UUID.test(String(v)))
   const { data: accts } = acctIds.length
-    ? await supabase.from('accounts').select('id, account_name').in('id', acctIds) : { data: [] }
-  const acctName = id => (accts || []).find(a => a.id === id)?.account_name || null
+    ? await supabase.from('accounts')
+        .select('id, account_name, billing_street, billing_city, billing_state, billing_zip, ' +
+                'mailing_street, mailing_city, mailing_state, mailing_zip')
+        .in('id', acctIds)
+    : { data: [] }
+  const acct = id => (accts || []).find(a => a.id === id) || null
+  const acctName = id => acct(id)?.account_name || null
+  const ownerAccount = ownerAccountId ? acct(ownerAccountId) : null
 
   const contractor = acctName(ia.ia_contractor_account_id) || ia.ia_primary_contractor_business_name || ''
   const secondaryContractor = ia.ia_has_support_contractor
@@ -192,10 +215,18 @@ export async function loadPaymentRequestContext(incentiveAppId) {
   const csz = [prop?.property_city,
     [prop?.property_state, prop?.property_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
   const ownerName = ia.ia_property_owner_name || ia.ia_building_owner_name
-    || (UUID.test(String(ia.ia_owner || '')) ? (acctName(ia.ia_owner) || '') : (ia.ia_owner || '')) || ''
+    || ownerAccount?.account_name || prop?.property_hud_owner_org || ''
+  // The customer's mailing address, from the owner account's structured
+  // columns. The payment-request invoice printed no owner address at all
+  // before this -- the invoice's own party block had nowhere to read one from.
+  const ownerAddr = resolveOwnerAddress({
+    account: ownerAccount, freeText: ia.ia_mailing_address_for_rebates,
+  })
 
   const fields = {
     pjOwner:       ownerName,
+    pjOwnerAddr:   ownerAddr.addr,
+    pjOwnerCsz:    ownerAddr.csz,
     pjContact:     contactName,
     pjContactTitle:contactTitle,
     pjEmail:       ia.ia_applicant_building_owner_email || '',
@@ -271,4 +302,102 @@ export async function saveHomesDocument({ object, id }, blob, fileName, document
 /** Back-compat wrapper. */
 export async function saveHomesProposalToRecord(enrollmentId, blob, fileName, documentType = 'homes_proposal') {
   return saveHomesDocument({ object: 'enrollments', id: enrollmentId }, blob, fileName, documentType)
+}
+
+
+// ---------------------------------------------------------------------------
+// Send for signature — the WI HOMES Project Payment Request invoice
+//
+// Nicholas: "you can do the signature stuff for the homes project payment
+// request as well ... but again those are on incentive objects, right?" — yes.
+// It lives on incentive_applications, record type
+// WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST, not on the enrollment the HEAR
+// proposal hangs off.
+//
+// Wisconsin only, deliberately. NC and MI carry the same record type seeded
+// with zero live records; enabling a send on a programme nobody has filed under
+// is untested surface, and Nicholas was explicit: "We're only talking about
+// Wisconsin."
+//
+// Only the INVOICE kinds carry an acknowledgment block — proposals deliberately
+// do not — so the tab list is what decides whether this document is signable at
+// all, rather than a record-type test that could drift from the renderer.
+// ---------------------------------------------------------------------------
+
+/** The payment request's context — the readiness gate and the recipient prefill. */
+export async function loadPaymentRequestSignatureContext(incentiveApplicationId) {
+  return loadHomesDocumentContext({ object: 'incentive_applications', id: incentiveApplicationId })
+}
+
+/** What the record still needs before the invoice can be produced. */
+export function paymentRequestSignatureMissing(ctx) {
+  return homesProposalMissing(ctx, 'invoice')
+}
+
+/**
+ * Generate the payment request invoice, file it on the incentive application,
+ * and send it to the property owner for signature.
+ *
+ * Mirrors sendHearProposalForSignature, including the order of operations: the
+ * recipient is confirmed BEFORE the upload, so a declined send leaves no orphan
+ * document on the record implying something went out.
+ */
+export async function sendPaymentRequestForSignature(incentiveApplicationId, { name, email, subject } = {}) {
+  const to = String(email || '').trim()
+  if (!to) throw new Error('Enter the property owner\u2019s email address.')
+
+  const ctx = await loadPaymentRequestSignatureContext(incentiveApplicationId)
+  // renderFromContext runs the same readiness and parse-level gates the Generate
+  // action does, so a record that cannot produce an invoice says so here rather
+  // than failing at the send — and it captures the tabs from that same render.
+  const rendered = await renderFromContext(ctx, 'invoice', { collectTabs: true })
+  const { blob, tabs } = rendered
+  if (!tabs.length) {
+    throw new Error('The invoice rendered without an acknowledgment block, so there is nowhere to place a signature.')
+  }
+
+  const subj = String(subject || '').trim() || `Please sign: ${rendered.fileName.replace(/\.pdf$/, '')}`
+
+  requireOutboundApproval({
+    channel: 'email',
+    to,
+    subject: subj,
+    context: 'This sends the HOMES Project Payment Request invoice to the property owner for signature.',
+  })
+
+  const file = new File([blob], rendered.fileName, { type: 'application/pdf' })
+  const document = await uploadDocument({
+    file, relatedObject: 'incentive_applications', relatedId: incentiveApplicationId,
+    documentType: rendered.documentType, name: rendered.fileName,
+  })
+
+  const { data: sess } = await supabase.auth.getSession()
+  const token = sess?.session?.access_token
+  if (!token) throw new Error('Not signed in — refresh and sign in again.')
+
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-envelope`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      source_document_id: document.id,
+      parent_object: 'incentive_applications',
+      parent_record_id: incentiveApplicationId,
+      recipients: [{
+        name: String(name || '').trim() || ctx.fields?.pjContact || 'Property Owner',
+        email: to, role: 'Property Owner', order: 1,
+      }],
+      subject: subj,
+      signing_base_url: window.location.origin,
+      tabs,
+    }),
+  })
+  const j = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(j.error || j.failure_reason || `send-envelope returned ${resp.status}`)
+
+  return {
+    document,
+    envelope: j.envelope_id || null,
+    signingUrl: j.signing_urls?.find(u => u.order === 1)?.signing_url || null,
+    emailed: j.email_send_results?.[0]?.status === 'sent',
+  }
 }

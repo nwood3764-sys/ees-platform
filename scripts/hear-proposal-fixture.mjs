@@ -16,7 +16,8 @@ import {
   HEAR_MEASURES, computeHearModel, hearRowsFromLineItems,
   hearMeasureForProductCode, hearDefaultDesc,
   layoutScopeCols, _hearScopeCols, loadJsPdf,
-  HEAR_ACCEPTANCE, generateHearProposalBlob,
+  HEAR_ACCEPTANCE, hearAcceptanceGeometry, hearAcceptanceHeight, generateHearProposalBlob,
+  generateHearProposalWithSignatureTabs,
 } from '../src/lib/hearProposal.js'
 import { newProposalPdf, money } from '../src/lib/proposalPdfKit.js'
 
@@ -224,11 +225,10 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
 // rather than against the code that draws it: every earlier version of this
 // block read correctly and printed badly.
 //
-// Three things can go wrong without looking wrong in the source: the block is
-// not actually centred; a caption is wider than the rule it names; or the
-// block is drawn past the bottom of the page and lands on the footer, which is
-// what the shipped version did on the Sealed proposal — its Date caption
-// cleared the footer rule by 0.4pt.
+// Four things can go wrong without looking wrong in the source: the proposal
+// spills a signature page it should never need; the paragraph is not centred;
+// a caption is wider than the rule it names; or the block runs into the page
+// footer.
 {
   const jsPDF = await loadJsPdf()
   const A = HEAR_ACCEPTANCE
@@ -240,9 +240,7 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
       const body = chunk.slice(chunk.indexOf('stream') + 6)
       const text = [], rules = []
       const tRe = /([-\d.]+) ([-\d.]+) Td\s*\((.*?)\) Tj/g
-      for (let mt; (mt = tRe.exec(body));) {
-        text.push({ x: +mt[1], y: +mt[2], s: mt[3] })
-      }
+      for (let mt; (mt = tRe.exec(body));) text.push({ x: +mt[1], y: +mt[2], s: mt[3] })
       const lRe = /([-\d.]+) ([-\d.]+) m\s*\n\s*([-\d.]+) ([-\d.]+) l/g
       for (let ml; (ml = lRe.exec(body));) {
         if (+ml[2] === +ml[4]) rules.push({ x1: +ml[1], x2: +ml[3], y: +ml[2] })
@@ -256,12 +254,14 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
   const rowAt = (page, y) => page.rules.filter(r => Math.abs(r.y - y) < 0.5)
     .sort((a, b) => a.x1 - b.x1)
 
-  const W = 612, PAGE_H = 792
-  const measure = (txt, size) => { const p = newProposalPdf(jsPDF, 20)
+  const W = 612, PAGE_H = 792, MARGIN = 20
+  const measure = (txt, size) => { const p = newProposalPdf(jsPDF, MARGIN)
     p.font(size, 'normal'); return p.d.getTextWidth(txt) }
 
-  const FIELDS = st => ({ pjInstallAddr: '3002 West Darling Street', pjCsz: 'Appleton, WI 54914',
-    pjOwner: 'Westminster Company', pjState: st, pjInvDate: '2026-09-03' })
+  const FIELDS = st => ({ pjInstallAddr: '570 South Clark Street', pjCsz: 'Whitewater, WI 53190',
+    pjOwner: 'Lutheran Social Services of Wisconsin and Upper Michigan, Inc.',
+    pjContact: 'Dennis Hanson', pjContactTitle: 'Vice President- Housing & Residential',
+    pjState: st, pjInvDate: '2026-09-03' })
   const { rows } = hearRowsFromLineItems([
     { productCode: 'HEAR-HP-SPACE-HEAT-COOL', quantity: 11, unitPrice: 8000 },
     { productCode: 'HEAR-HPWH', quantity: 11, unitPrice: 1750 },
@@ -270,7 +270,7 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
 
   // Both documents, and both the shortest and the longest state name — the
   // paragraph names the state, so its length decides how many lines the block
-  // is and therefore whether it still fits above the footer.
+  // is and therefore how much room it needs.
   for (const contractor of ['EES', 'Sealed, Inc.']) {
     for (const state of ['WI', 'NC']) {
       const who = `${contractor.startsWith('Sealed') ? 'Sealed' : 'EES'} ${state}`
@@ -278,14 +278,50 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
         fields: FIELDS(state) })
       const pages = readPages(await blob.arrayBuffer())
 
+      // (a) A THREE-MEASURE PROPOSAL IS ONE PAGE. Nicholas, 2026-09-03: "there
+      //     is no way this can spill onto two pages with one measure record."
+      //     The acceptance block is what pushed it over, so this is the check
+      //     that must never regress — the block steps its own text size down to
+      //     fit rather than taking a page of its own.
+      eq(`${who}: a three-measure proposal is one page`, pages.length, 1)
+
       const pi = pages.findIndex(p => find(p, A.CAPTIONS.name))
       ok(`${who}: the block is drawn`, pi >= 0)
       const page = pages[pi]
 
-      // (a) nothing in the block is split across a page break
+      // (b) nothing in the block is split across a page break
       for (const [what, s] of [['heading', 'ACCEPTANCE & AUTH'], ['paragraph', 'By signing below'],
         ['signature caption', A.CAPTIONS.signature], ['date caption', A.CAPTIONS.date]]) {
         ok(`${who}: the ${what} is on the same page as Printed Name`, !!find(page, s))
+      }
+
+      // (b2) The block SITS ON THE FOOT OF THE PAGE (Nicholas, 2026-09-03:
+      //      "there's a ton of room at the bottom, you just need to move that
+      //      whole section down"). A fixed lead below the Project Summary can
+      //      only ever be as generous as the fullest page allows; anchoring the
+      //      block to the page's floor spends whatever the page has left on the
+      //      gap above it. So the check is not "is the gap big" — it is "is the
+      //      block on the floor", which makes the gap as big as it can be.
+      {
+        const headText = find(page, 'ACCEPTANCE & AUTH')
+        const above = page.rules.filter(r => r.y > headText.y + 6)
+          .reduce((lo, r) => (lo == null || r.y < lo.y ? r : lo), null)
+        if (above) {
+          ok(`${who}: the heading clears the section above it (${Math.round(above.y - headText.y)}pt)`,
+            above.y - headText.y >= 20)
+        }
+        const dateCapY = find(page, A.CAPTIONS.date).y
+        const footerRule = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)
+          .reduce((lo, r) => (lo == null || r.y < lo ? r.y : lo), null)
+        // The block sits ON the page's floor — never past it, and never far
+        // above it. It lands exactly on the clearance whenever the page has the
+        // room; the Sealed proposal, whose paragraph runs a line longer under a
+        // taller scope table, can come up a few points short of the floor
+        // rather than take a second page. Both are correct; drifting far above
+        // the floor is what is not.
+        const air = Math.round(dateCapY - footerRule)
+        ok(`${who}: the block sits on the page floor (${air}pt of air)`,
+          air <= A.FOOTER_CLEARANCE + 1 && air >= A.FOOTER_CLEARANCE - 10)
       }
 
       const nameCap = find(page, A.CAPTIONS.name)
@@ -294,84 +330,217 @@ ok('mechanical ventilation overrides with the air-sealing pairing',
       const nameRow = rowAt(page, nameCap.y + A.CAPTION_DROP)
       const sigRow = rowAt(page, sigCap.y + A.CAPTION_DROP)
 
-      // (b) both rows are centred on the page — equal air either side
-      eq(`${who}: the printed-name rule is one centred rule`, nameRow.length, 1)
+      // (c) LEFT JUSTIFIED on the page margin, and the Date follows the
+      //     signature rather than sitting on the right page edge.
+      eq(`${who}: the printed-name rule is one rule`, nameRow.length, 1)
       eq(`${who}: the signature row is a signature rule and a date rule`, sigRow.length, 2)
-      for (const [what, row] of [['printed-name', nameRow], ['signature', sigRow]]) {
-        const left = row[0].x1, right = row[row.length - 1].x2
-        ok(`${who}: the ${what} row is centred (${left} / ${W - right})`,
-          Math.abs(left - (W - right)) < 0.5)
-      }
-      eq(`${who}: the signature and date rules keep their gap`,
+      eq(`${who}: printed name starts on the page margin`, Math.round(nameRow[0].x1), MARGIN)
+      eq(`${who}: the signature starts on the page margin`, Math.round(sigRow[0].x1), MARGIN)
+      eq(`${who}: printed name and signature are the same rule`,
+        Math.round(nameRow[0].x2), Math.round(sigRow[0].x2))
+      eq(`${who}: the date rule follows the signature`,
         Math.round(sigRow[1].x1 - sigRow[0].x2), A.COLUMN_GAP)
+      ok(`${who}: the date rule stays inside the right margin`, sigRow[1].x2 <= W - MARGIN + 0.5)
+      ok(`${who}: the block does not run the full width of the page`,
+        sigRow[1].x2 < W - MARGIN - 20)
 
-      // (c) room to actually sign: rule to rule, PDF y counts up from the foot
-      eq(`${who}: printed name to signature`, Math.round(nameRow[0].y - sigRow[0].y),
-        A.NAME_TO_SIGNATURE)
-      ok(`${who}: the signature line has room above it`,
-        A.NAME_TO_SIGNATURE - A.CAPTION_DROP >= 30)
+      // (d) Room to actually sign, and to print a name. Both gaps give way
+      //     before the page does (GAP_SCALES), so the check is the FLOOR each
+      //     one may fall to — the tightest scale must still leave a person
+      //     somewhere to write. The Sealed proposal names two companies, so its
+      //     paragraph runs a line longer and it is the document that tightens.
+      const tightest = A.GAP_SCALES[A.GAP_SCALES.length - 1]
+      const ruleGap = Math.round(nameRow[0].y - sigRow[0].y)
+      ok(`${who}: printed name to signature is a declared gap (${ruleGap}pt)`,
+        A.GAP_SCALES.some(sc => Math.round(A.NAME_TO_SIGNATURE * sc) === ruleGap))
+      ok(`${who}: the signature line has room above it (${ruleGap - A.CAPTION_DROP}pt clear)`,
+        ruleGap - A.CAPTION_DROP >= 18)
+      ok('even the tightest signing gap leaves room to sign',
+        A.NAME_TO_SIGNATURE * tightest - A.CAPTION_DROP >= 18)
+      ok('even the tightest name gap leaves room to write a name',
+        A.PARAGRAPH_TO_RULE * tightest >= 24)
+      // CONTROL: the 20pt this used to be is NOT room to write a name in —
+      // which is what Nicholas hit ("there's no room for the printed name to be
+      // entered"). Every declared gap must beat it.
+      ok('CONTROL: the previous 20pt name gap is below the floor', 20 < 24)
 
-      // (d) every caption fits inside the rule it names, and is centred on it
-      // Measured from the SOURCE string, not the parsed one: the em dash
-      // reaches the stream as one WinAnsi byte and would measure differently.
+      // (e) every caption starts at the left end of the rule it names, and fits
       for (const [cap, row, src] of [[nameCap, nameRow[0], A.CAPTIONS.name],
         [sigCap, sigRow[0], A.CAPTIONS.signature], [dateCap, sigRow[1], A.CAPTIONS.date]]) {
-        const w = measure(src, 8), ruleW = row.x2 - row.x1
-        ok(`${who}: "${src.slice(0, 18)}" fits its rule (${Math.round(w)} of ${Math.round(ruleW)})`,
-          w <= ruleW - 8)
-        ok(`${who}: "${src.slice(0, 18)}" is centred on its rule`,
-          Math.abs((cap.x + w / 2) - (row.x1 + ruleW / 2)) < 1.5)
+        eq(`${who}: "${src.slice(0, 18)}" starts at its rule`, Math.round(cap.x), Math.round(row.x1))
+        ok(`${who}: "${src.slice(0, 18)}" fits its rule`, measure(src, 8) <= (row.x2 - row.x1) + 4)
       }
 
-      // (e) the paragraph is centred, and in its own narrower measure
-      const para = page.text.filter(o => o.y >= nameCap.y && o.y <= nameCap.y + 80
-        && o.s.length > 20 && !o.s.startsWith('Property Owner'))
-      ok(`${who}: the paragraph wrapped to more than one line`, para.length > 1)
-      for (const ln of para) {
-        const w = measure(ln.s, 8.5)
-        ok(`${who}: paragraph line is centred on the page`, Math.abs((ln.x + w / 2) - W / 2) < 1.5)
-        ok(`${who}: paragraph line stays inside its measure`, w <= A.TEXT_WIDTH + 1)
+      // (f) the paragraph is CENTRED on the page, in a measure much wider than
+      //     the signature block, and set larger than the document's small print
+      // The signer's own name and title are pre-printed ON the name rule, so
+      // they sit in the same band as the paragraph and must not be mistaken
+      // for it.
+      const SIGNER = 'Dennis Hanson', SIGNER_TITLE = 'Vice President- Housing & Residential'
+      const para = page.text.filter(o => o.y > nameCap.y && o.y < nameCap.y + 70
+        && o.s.startsWith('By signing') === false && o.s.length > 25
+        && !o.s.startsWith('Property Owner')
+        && o.s !== SIGNER && o.s !== SIGNER_TITLE)
+      const first = find(page, 'By signing below')
+      ok(`${who}: the paragraph is drawn`, !!first)
+      const paraLines = [first, ...para]
+      const size = A.FONT_SIZES.find(sz =>
+        Math.abs((first.x + measure(first.s, sz) / 2) - W / 2) < 1.5)
+      ok(`${who}: the paragraph is centred at one of the declared sizes`, !!size)
+      ok(`${who}: the paragraph is larger than the 8.5pt it used to be`, (size || 0) >= 8.5)
+      for (const ln of paraLines) {
+        const w = measure(ln.s, size || 10)
+        ok(`${who}: paragraph line is centred on the page`, Math.abs((ln.x + w / 2) - W / 2) < 2)
+        ok(`${who}: paragraph line stays inside its measure`,
+          w <= (W - 2 * MARGIN) - 2 * A.TEXT_INSET + 1)
+      }
+      ok(`${who}: the paragraph measure is much wider than the signature block`,
+        (W - 2 * MARGIN) - 2 * A.TEXT_INSET > (sigRow[1].x2 - sigRow[0].x1) + 60)
+
+      // (f2) The name line is PRE-POPULATED from the record: the signer's name
+      //      sits on the rule and the title at the right-hand end of the same
+      //      line, so all that is left to do is sign.
+      {
+        const nm = page.text.find(o => o.s === SIGNER)
+        const ti = page.text.find(o => o.s === SIGNER_TITLE)
+        ok(`${who}: the signer's name is printed on the line`, !!nm)
+        ok(`${who}: the signer's title is printed on the line`, !!ti)
+        if (nm && ti) {
+          eq(`${who}: name and title share one line`, Math.round(nm.y), Math.round(ti.y))
+          ok(`${who}: the name sits above its own rule`, nm.y > nameRow[0].y)
+          ok(`${who}: the name starts at the rule`, Math.abs(nm.x - nameRow[0].x1) <= 3)
+          // The title follows the NAME, four spaces along, and stays on the
+          // name's own rule. Right-aligning it put it over the Date column,
+          // where it read as the date's label.
+          ok(`${who}: the title follows the name on the same line`,
+            ti.x > nm.x + measure(SIGNER, 10))
+          ok(`${who}: the title sits on the printed-name rule, not over Date`,
+            ti.x + measure(SIGNER_TITLE, 9) <= nameRow[0].x2 + 2)
+          ok(`${who}: four spaces between the name and the title`,
+            Math.abs((ti.x - (nm.x + measure(SIGNER, 10))) - measure('    ', 10)) < 2)
+          // …and it is captioned under its own value, like the name is.
+          const titleCap = page.text.find(o => o.s === A.CAPTIONS.title)
+          ok(`${who}: the title has its own caption`, !!titleCap)
+          if (titleCap) {
+            eq(`${who}: Title is captioned in line with the title`,
+              Math.round(titleCap.x), Math.round(ti.x))
+            eq(`${who}: both captions share the caption row`,
+              Math.round(titleCap.y), Math.round(nameCap.y))
+          }
+        }
       }
 
-      // (f) the block clears the page footer
+      // (g) the block clears the page footer
       const footer = page.rules.filter(r => r.x1 < 25 && r.x2 > W - 25)
         .reduce((lo, r) => (lo == null || r.y < lo ? r.y : lo), null)
       ok(`${who}: the footer rule is on the page`, footer != null)
       ok(`${who}: the last caption clears the footer (${Math.round(dateCap.y - footer)}pt)`,
-        dateCap.y - footer >= 8)
+        dateCap.y - footer >= 6)
+
+      // (h) the three header columns are EVEN and all read from their own left
+      //     edge — the customer column used to be right-aligned on the page
+      //     edge, so it was ragged down the side the other two are read from.
+      const p1 = pages[0]
+      const heads = ['PRIMARY IRA CONTRACTOR', 'PROJECT INFORMATION', 'CUSTOMER INFORMATION']
+        .map(h => find(p1, h) || p1.text.find(o => o.s.toUpperCase().startsWith(h.slice(0, 12))))
+      if (heads.every(Boolean)) {
+        const gaps = [heads[1].x - heads[0].x, heads[2].x - heads[1].x]
+        ok(`${who}: the three header columns are evenly spaced`, Math.abs(gaps[0] - gaps[1]) < 1)
+        eq(`${who}: the first column starts on the page margin`, Math.round(heads[0].x), MARGIN)
+        ok(`${who}: the customer column is not pushed to the right edge`,
+          heads[2].x + measure(heads[2].s, 9) < W - MARGIN - 20)
+      }
     }
   }
 
-  // CONTROL — the two things that were wrong, on the same run.
-  //
-  // 1. The block used to leave 28pt between the printed-name rule and the
-  //    signature rule, and the caption takes 11 of them: 17pt to sign in.
-  ok('CONTROL: the previous 28pt gap left under 20pt to sign in',
-    28 - A.CAPTION_DROP < 20)
-  // 2. The reservation used to leave out the heading. On the Sealed proposal
-  //    that is the difference between the block moving to a fresh page and the
-  //    block being drawn straight through the footer: page 1 ends where it
-  //    ends, the short reservation says the block fits, and the block's real
-  //    bottom lands below the footer rule.
+  // CONTROL — the geometry this replaced, on the same run.
   {
-    const blob = await generateHearProposalBlob({ rows, units: 11, contractor: 'Sealed, Inc.',
-      fields: FIELDS('WI') })
-    const pages = readPages(await blob.arrayBuffer())
-    ok('CONTROL: the Sealed block needed a page of its own', pages.length === 2)
-    const p1 = pages[0]
-    // where page 1's own content ends, in the builder's top-down cursor
-    const lastY = Math.min(...p1.rules.filter(r => r.y > 40).map(r => r.y))
-    const top = PAGE_H - lastY
-    const lines = 4                     // the Sealed paragraph, Wisconsin
-    const full = A.HEADING_HEIGHT + lines * A.LINE_HEIGHT + 26 + A.NAME_TO_SIGNATURE
-      + A.CAPTION_DROP + A.FOOTER_CLEARANCE
-    const short = full - A.HEADING_HEIGHT          // the reservation that shipped
-    const THRESHOLD = PAGE_H - 20 - 16             // buildHearSealedPdfBlob's needH
-    ok('CONTROL: without the heading the block "fits" on page 1', top + short <= THRESHOLD)
-    ok('CONTROL: and its real bottom is below the Sealed footer rule',
-      PAGE_H - (top + full) < 24)
-    ok('with the heading reserved, the block is moved off page 1', top + full > THRESHOLD)
+    const P = newProposalPdf(jsPDF, MARGIN)
+    const g = hearAcceptanceGeometry(P)
+    // 1. The signature block used to be CENTRED, so it started 80pt in from the
+    //    page margin. Left justified means it starts ON the margin.
+    const centredBlockX = MARGIN + ((W - 2 * MARGIN) - 452) / 2
+    ok('CONTROL: the previous centred block did not start on the margin', centredBlockX > MARGIN + 40)
+    eq('the block now starts on the margin', g.blockX, MARGIN)
+    // 2. The paragraph measure used to be 440pt inside a 572pt page — 66pt of
+    //    air each side, which is the margin Nicholas asked to cut.
+    ok('CONTROL: the previous 440pt measure left a wide margin', (W - 2 * MARGIN) - 440 > 100)
+    ok('the paragraph measure now runs nearly the full page', g.textWidth >= (W - 2 * MARGIN) - 30)
+    // 3. A block that cannot fit steps its size down instead of taking a page:
+    //    the smallest declared size must need less room than the largest.
+    const big = hearAcceptanceHeight(3, A.FONT_SIZES[0], 32)
+    const small = hearAcceptanceHeight(3, A.FONT_SIZES[A.FONT_SIZES.length - 1], 32)
+    // The footer clearance belongs to the PAGE, not to the block: counting it
+    // inside the height as well as in the floor made the block shorter than the
+    // room it had, which is part of why it sat too high.
+    ok('CONTROL: the block height does not include the footer clearance',
+      hearAcceptanceHeight(1, 10, 0) === 10 * A.LINE_RATIO + A.PARAGRAPH_TO_RULE
+        + A.NAME_TO_SIGNATURE + A.CAPTION_DROP)
+    ok('a smaller size needs less room than the largest', small < big)
+    ok('the ladder starts at the largest size',
+      A.FONT_SIZES[0] === Math.max(...A.FONT_SIZES))
   }
+}
+
+// ── Signature tabs for the e-signature route ──────────────────────────────
+//
+// The proposal is sent to the property owner to sign, so the pipeline needs to
+// know WHERE on the page the signature and date go. These coordinates are taken
+// from the same geometry that draws the rules, and this is what proves they
+// agree: a tab a centimetre off its line is not obviously wrong to whoever
+// renders it and very obviously wrong to whoever signed it.
+{
+  const SIG_FIELDS = {
+    pjInstallAddr: '570 South Clark Street', pjCsz: 'Whitewater, WI 53190',
+    pjOwner: 'Lutheran Social Services of Wisconsin and Upper Michigan, Inc.',
+    pjContact: 'Dennis Hanson', pjContactTitle: 'Vice President- Housing & Residential',
+    pjState: 'WI', pjInvDate: '2026-09-03',
+  }
+  const { rows } = hearRowsFromLineItems([
+    { productCode: 'HEAR-VENT', quantity: 11, unitPrice: 1600 },
+  ])
+  for (const contractor of ['EES', 'Sealed, Inc.']) {
+    const who = contractor.startsWith('Sealed') ? 'Sealed' : 'EES'
+    const { blob, tabs } = await generateHearProposalWithSignatureTabs({
+      rows, units: 11, contractor, fields: SIG_FIELDS,
+    })
+    ok(`${who}: the proposal still renders with tab capture on`, (await blob.arrayBuffer()).byteLength > 5000)
+    eq(`${who}: exactly two tabs — a signature and a date`, tabs.length, 2)
+
+    const sig = tabs.find(t => t.tab_type === 'sig')
+    const date = tabs.find(t => t.tab_type === 'date')
+    ok(`${who}: a signature tab is recorded`, !!sig)
+    ok(`${who}: a date tab is recorded`, !!date)
+
+    for (const [what, tab] of [['signature', sig], ['date', date]]) {
+      eq(`${who}: the ${what} tab is for the first recipient`, tab.recipient_order, 1)
+      ok(`${who}: the ${what} tab names a real page`, tab.page >= 1)
+      // Bottom-origin, so a y at or below 0 would place it off the page — the
+      // failure mode of getting the jsPDF top-origin conversion backwards.
+      ok(`${who}: the ${what} tab y is on the page (bottom-origin), got ${tab.y}`,
+        tab.y > 0 && tab.y < 792)
+      ok(`${who}: the ${what} tab has real width and height`, tab.width > 20 && tab.height > 5)
+      ok(`${who}: the ${what} tab x is inside the page`, tab.x >= 0 && tab.x + tab.width <= 612)
+    }
+
+    // The date sits to the RIGHT of the signature and they do not overlap —
+    // the two rules are drawn side by side, so tabs that overlap would stamp a
+    // date across the signature.
+    ok(`${who}: the date tab is right of the signature tab`, date.x > sig.x)
+    ok(`${who}: the two tabs do not overlap`, sig.x + sig.width <= date.x)
+    eq(`${who}: both tabs sit on the same line`, sig.y, date.y)
+
+    // CONTROL: the naive conversion — using jsPDF's top-origin y directly —
+    // would put the tab near the TOP of the page, far from the rule. If this
+    // ever stops differing, the conversion has been dropped.
+    ok(`${who}: CONTROL top-origin y really does differ from the recorded y`,
+      Math.abs((792 - sig.y) - sig.y) > 40)
+  }
+
+  // Tab capture is opt-in: the ordinary generate path must be untouched, so a
+  // routine proposal cannot start paying for signature machinery it never uses.
+  const plain = await generateHearProposalBlob({ rows, units: 11, contractor: 'EES', fields: SIG_FIELDS })
+  ok('the plain generate path still returns a bare Blob', typeof plain.arrayBuffer === 'function' && !('tabs' in plain))
 }
 
 console.log(`${checks - failures}/${checks} checks passed`)

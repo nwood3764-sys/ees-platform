@@ -154,3 +154,47 @@ export async function scheduleWorkOrder({ workOrderId, technicianId, date, time 
   const { error } = await supabase.from('work_orders').update(patch).eq('id', workOrderId)
   if (error) throw new Error(error.message)
 }
+
+// ─── Outbound message approvals ─────────────────────────────────────────────
+// Nicholas, 2026-09-03: "Any outgoing communications, emails, texts, anything
+// must be approved by a human first. That's a hard rule for now."
+//
+// enqueue_notification holds every customer message instead of sending it, so
+// these three calls are the handle on that valve. Approving SENDS, which is why
+// it goes through an RPC rather than a table update: the fire-notification
+// shared secret lives in the database and must never reach a browser.
+
+export async function fetchMessagesAwaitingApproval() {
+  const { data, error } = await supabase.rpc('outbound_messages_awaiting_approval')
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.oma_id,
+    recordNumber: r.oma_record_number,
+    requestedAt: r.requested_at,
+    event: r.trigger_event,
+    channel: r.channel,
+    recipientName: r.recipient_name,
+    recipientAddress: r.recipient_address,
+    subject: r.subject_line,
+    body: r.body_template,
+    appointment: r.appointment,
+    workOrder: r.work_order,
+    workType: r.work_type,
+    property: r.property_name,
+    scheduledStart: r.scheduled_start,
+  }))
+}
+
+export async function approveOutboundMessage(omaId) {
+  const { data, error } = await supabase.rpc('approve_outbound_message', { p_oma_id: omaId })
+  if (error) throw new Error(error.message)
+  return data
+}
+
+export async function declineOutboundMessage(omaId, reason = null) {
+  const { data, error } = await supabase.rpc('decline_outbound_message', {
+    p_oma_id: omaId, p_reason: reason || null,
+  })
+  if (error) throw new Error(error.message)
+  return data
+}
