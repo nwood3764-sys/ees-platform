@@ -273,11 +273,19 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
     : null
 
   return (
-    <div style={{ minHeight: '100vh', background: C.page, fontFamily: 'Inter, sans-serif', display: 'flex', flexDirection: 'column' }}>
+    // The signing portal owns its own scroll container and does NOT rely on the
+    // window scrolling, because it cannot: src/index.css sets
+    // `html, body { height: 100%; overflow: hidden }` for the main app's
+    // fixed-sidebar shell, and this page is served from the same bundle. With
+    // the window locked, a document taller than the viewport was unreachable —
+    // and since the signature tab sits below the fold, the signer could never
+    // fill it, so the submit refused with "1 of 2 fields" and no way forward.
+    // A customer could not sign at all (reported 2026-09-05).
+    <div style={{ height: '100dvh', background: C.page, fontFamily: 'Inter, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
       <header style={{
         background: '#fff', borderBottom: `1px solid ${C.border}`,
-        padding: '12px 20px', position: 'sticky', top: 0, zIndex: 10,
+        padding: '12px 20px', flexShrink: 0, zIndex: 10,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
       }}>
         <div>
@@ -304,7 +312,7 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
       )}
 
       {/* Document viewer */}
-      <main style={{ flex: 1, padding: 20, display: 'flex', justifyContent: 'center' }}>
+      <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: 20, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
         <PdfViewer
           pdfUrl={data.pdf_signed_url}
           tabs={data.tabs}
@@ -320,7 +328,7 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
       {data.can_sign && (
         <footer style={{
           background: '#fff', borderTop: `1px solid ${C.border}`,
-          padding: '14px 20px', position: 'sticky', bottom: 0, zIndex: 10,
+          padding: '14px 20px', flexShrink: 0, zIndex: 10,
         }}>
           <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: C.textSecondary }}>
