@@ -9,6 +9,7 @@ import {
   revokeStateFromUser,
   previewUserStateAccess,
 } from '../../data/stateScopeService'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 /**
  * UserStateAccessModal — Administration › Users › Record Access.
@@ -93,7 +94,7 @@ export default function UserStateAccessModal({ user, onClose, onChanged }) {
   }
 
   const body = (
-    <div style={backdrop} onClick={onClose}>
+    <div style={backdrop} {...backdropDismissProps(onClose)}>
       <div style={sheet} onClick={e => e.stopPropagation()}>
         <div style={header}>
           <div>

@@ -22,6 +22,7 @@ import { useState, useEffect } from 'react'
 import { C, FONT, MONO } from './styles'
 import { signOut } from './fieldMobileService'
 import { forceRefresh } from './UpdateControls'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const BUILD_SHA = typeof __BUILD_SHA__ !== 'undefined' ? __BUILD_SHA__ : 'dev'
 const BUILD_ID  = typeof __BUILD_ID__  !== 'undefined' ? __BUILD_ID__  : 'dev'
@@ -128,7 +129,7 @@ function Drawer({ open, onClose, navigate }) {
       <style>{'@keyframes ees-spin{to{transform:rotate(360deg)}}'}</style>
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        {...backdropDismissProps(onClose)}
         style={{
           position: 'fixed', inset: 0, zIndex: 60,
           background: 'rgba(7,17,31,0.55)',

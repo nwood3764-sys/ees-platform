@@ -8,6 +8,7 @@ import {
 } from '../../data/adminService'
 import { validateFormula } from '../../lib/formula/engine'
 import { OBJECT_CATALOG } from './objectCatalog'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 const FormulaEditor = lazy(() => import('../../lib/formula/FormulaEditor'))
 
@@ -426,7 +427,7 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
   const inputStyle = { width: '100%', padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' }
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 20px', overflow: 'auto' }}>
+    <div {...backdropDismissProps(onClose)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 20px', overflow: 'auto' }}>
       <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 12, width: 600, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ padding: '16px 22px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>

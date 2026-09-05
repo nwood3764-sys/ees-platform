@@ -29,6 +29,7 @@ import {
   smsApplicationInvitation,
   toE164US,
 } from '../data/serviceProviderService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // Read-only coverage map + ZIP list (Leaflet — lazy so it only loads when a
 // reviewer expands an application's details).
@@ -420,7 +421,7 @@ function NewApplicationModal({ onClose, onCreated }) {
     } catch (e) { setErr(e?.message || 'Could not create the application.'); setBusy(false) }
   }
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div {...backdropDismissProps(onClose)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 12, width: 520, maxWidth: '94vw', boxShadow: '0 20px 50px -12px rgba(0,0,0,0.28)', maxHeight: '92vh', overflow: 'auto' }}>
         <div style={{ padding: '16px 18px', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>Invite a provider to apply</div>

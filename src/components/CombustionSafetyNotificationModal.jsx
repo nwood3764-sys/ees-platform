@@ -24,6 +24,7 @@ import {
 } from '../data/paperworkService'
 import { buildCombustionPdf } from '../data/paperworkModel'
 import { uploadDocument } from '../data/storageService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 const EMERALD = '#3ecf8e'
 
@@ -207,7 +208,7 @@ export default function CombustionSafetyNotificationModal({ buildingId, building
   const bName = building?.building_number_or_name || building?.building_name || ctx?.building?.name || 'Building'
 
   return (
-    <div style={overlay} onClick={busy ? undefined : onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose, { disabled: busy })}>
       <div style={card} onClick={e => e.stopPropagation()}>
         <div style={headerStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

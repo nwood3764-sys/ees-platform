@@ -25,6 +25,7 @@ import {
   summarizeWorkOrderDurations,
   describePlacementError,
 } from '../../data/projectScheduler'
+import { backdropDismissProps } from '../../lib/modalDismiss'
 
 // ── Date helpers ────────────────────────────────────────────────────────────
 
@@ -1114,7 +1115,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   if (loading) {
     return (
-      <div style={overlay} onClick={onClose}>
+      <div style={overlay} {...backdropDismissProps(onClose)}>
         <div style={card} onClick={e => e.stopPropagation()}>
           <div style={bodyStyle}>
             <div style={{ padding: '20px 0', color: C.textMuted, fontSize: 13, textAlign: 'center' }}>
@@ -1127,7 +1128,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   }
   if (error) {
     return (
-      <div style={overlay} onClick={onClose}>
+      <div style={overlay} {...backdropDismissProps(onClose)}>
         <div style={card} onClick={e => e.stopPropagation()}>
           <div style={bodyStyle}>
             <div style={{ padding: '8px 12px', background: '#e8f1fb', border: '1px solid #bcd9f2',
@@ -1144,7 +1145,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   const step2Err = validateStep2()
 
   return (
-    <div style={overlay} onClick={committing ? undefined : onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose, { disabled: committing })}>
       <div style={card} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={headerStyle}>
@@ -1302,7 +1303,7 @@ function PinConfirmModal({ pendingPin, woMetaById, onConfirm, onCancel }) {
       position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1300, padding: 16,
-    }} onClick={onCancel}>
+    }} {...backdropDismissProps(onCancel)}>
       <div onClick={e => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: 480,
@@ -1408,7 +1409,7 @@ function GanttFullscreenView({
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)',
       zIndex: 1200, display: 'flex', flexDirection: 'column', padding: 24,
-    }} onClick={onClose}>
+    }} {...backdropDismissProps(onClose)}>
       <div style={{
         flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
         boxShadow: '0 20px 60px rgba(0,0,0,0.35)',

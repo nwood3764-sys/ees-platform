@@ -2284,7 +2284,7 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport, 
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      {...backdropDismissProps(onClose)}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
       style={{
@@ -2563,7 +2563,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      {...backdropDismissProps(onClose)}
       style={{
         position: 'fixed', inset: 0, zIndex: 9000,
         background: 'rgba(8,12,20,0.78)',
@@ -3205,7 +3205,7 @@ function PhotoTagPickerModal({ photos, prompts, busy, onApply, onCancel }) {
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
+      {...backdropDismissProps(onCancel)}
       style={{
         position: 'fixed', inset: 0, zIndex: 9200,
         background: 'rgba(7,17,31,0.55)',
@@ -3324,7 +3324,7 @@ function ConfirmDeleteModal({ name, target, count = 1, onConfirm, onCancel }) {
   }
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel() }}
+      {...backdropDismissProps(onCancel, { disabled: busy })}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 9100,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
@@ -3377,3 +3377,5 @@ function ConfirmDeleteModal({ name, target, count = 1, onConfirm, onCancel }) {
     </div>
   )
 }
+
+import { backdropDismissProps } from '../lib/modalDismiss'

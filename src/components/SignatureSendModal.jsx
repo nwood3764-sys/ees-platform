@@ -36,6 +36,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
 import { Icon } from './UI'
+import { backdropDismissProps } from '../lib/modalDismiss'
 /**
  * The documents that can be sent for signature, and where each one lives.
  *
@@ -147,7 +148,7 @@ export default function SignatureSendModal({ kind, recordId, onClose, onSent }) 
   }
 
   return (
-    <div style={overlay} onClick={sending ? undefined : onClose}>
+    <div style={overlay} {...backdropDismissProps(onClose, { disabled: sending })}>
       <div style={card} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>

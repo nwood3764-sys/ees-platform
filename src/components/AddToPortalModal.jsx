@@ -24,6 +24,7 @@ import {
   fetchPortalRoles, fetchAccountProperties, fetchPortalUserAccess,
   createPortalInvite, setPortalGrants, revokePortalAccess, sendPortalInvite,
 } from '../data/portalService'
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 export default function AddToPortalModal({ contactId, contact, onClose, onDone }) {
   // The contact record row is passed straight from RecordDetail.
@@ -140,7 +141,7 @@ export default function AddToPortalModal({ contactId, contact, onClose, onDone }
   }
 
   return (
-    <div onClick={onClose} style={overlay}>
+    <div {...backdropDismissProps(onClose)} style={overlay}>
       <div onClick={e => e.stopPropagation()} style={card}>
         <div style={header}>
           <div>

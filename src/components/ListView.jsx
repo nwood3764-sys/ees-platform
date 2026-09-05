@@ -37,6 +37,7 @@ import {
   setDefaultViewForObject,
   getCurrentRoleId,
 } from '../data/listViewsService';
+import { backdropDismissProps } from '../lib/modalDismiss'
 
 // Pluralize an object label for empty-state copy. Handles the common English
 // cases that a naive `+ 's'` gets wrong: consonant+y → -ies (Property →
@@ -599,7 +600,7 @@ function MobileFilterSheet({
     <>
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        {...backdropDismissProps(onClose)}
         style={{
           position: 'fixed', inset: 0, background: 'rgba(7, 17, 31, 0.55)',
           zIndex: 500, animation: 'ees-fade-in 180ms ease',
@@ -1553,7 +1554,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
 
   const panel = (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.18)', zIndex: 3500 }} />
+      <div {...backdropDismissProps(onClose)} style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.18)', zIndex: 3500 }} />
       <div ref={ref} style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, width: 380, maxWidth: '92vw', zIndex: 3600,
         background: C.card, borderLeft: `1px solid ${C.border}`, boxShadow: '-8px 0 28px rgba(7,17,31,0.16)',
@@ -3697,7 +3698,7 @@ function RowActionMenu({ onEdit, onClone, onDelete, disabled }) {
 function ConfirmDeleteModal({ count, label, busy, onCancel, onConfirm }) {
   const noun = count === 1 ? (label ? label.toLowerCase() : 'record') : pluralizeLabel(label ? label.toLowerCase() : 'record');
   return (
-    <div onClick={onCancel}
+    <div {...backdropDismissProps(onCancel)}
       style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.55)', zIndex: 9600,
                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()}
@@ -4014,7 +4015,7 @@ function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onAp
   };
 
   return (
-    <div onClick={onClose}
+    <div {...backdropDismissProps(onClose)}
       style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.55)', zIndex: 9000,
                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()}
